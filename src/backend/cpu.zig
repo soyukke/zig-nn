@@ -56,6 +56,9 @@ else
     struct {};
 
 // CBLAS extern 宣言 (ヘッダファイル不要、リンク時に解決)
+// OpenBLAS が USE64BITINT でビルドされている場合 blasint = i64
+const blasint = i64;
+
 const CblasRowMajor: c_int = 101;
 const CblasNoTrans: c_int = 111;
 const CblasTrans: c_int = 112;
@@ -64,26 +67,26 @@ extern "c" fn cblas_sgemm(
     order: c_int,
     transA: c_int,
     transB: c_int,
-    M: c_int,
-    N: c_int,
-    K: c_int,
+    M: blasint,
+    N: blasint,
+    K: blasint,
     alpha: f32,
     A: [*]const f32,
-    lda: c_int,
+    lda: blasint,
     B: [*]const f32,
-    ldb: c_int,
+    ldb: blasint,
     beta: f32,
     C: [*]f32,
-    ldc: c_int,
+    ldc: blasint,
 ) void;
 
 extern "c" fn cblas_saxpy(
-    N: c_int,
+    N: blasint,
     alpha: f32,
     X: [*]const f32,
-    incX: c_int,
+    incX: blasint,
     Y: [*]f32,
-    incY: c_int,
+    incY: blasint,
 ) void;
 
 /// 行列積: C = A @ B (row-major)
