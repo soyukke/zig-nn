@@ -102,6 +102,38 @@ __global__ void clamp_backward_kernel(float* ga, const float* go, const float* x
     }
 }
 
+// Fused Add+SiLU backward (same-size): ga += dsilu, gb += dsilu
+// dsilu = go * (sig + v * sig * (1 - sig)), where v = a + b
+__global__ void add_silu_backward_same_kernel(float* ga, float* gb,
+    const float* go, const float* sig_cache,
+    const float* a, const float* b,
+    int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        float sig = sig_cache[i];
+        float v = a[i] + b[i];
+        float dsilu = go[i] * (sig + v * sig * (1.0f - sig));
+        ga[i] += dsilu;
+        gb[i] += dsilu;
+    }
+}
+
+// Fused Add+SiLU backward (broadcast b): ga += dsilu, gb += reduce(dsilu)
+// dsilu = go * (sig + v * sig * (1 - sig)), where v = a + b[i % b_total]
+__global__ void add_silu_backward_bcast_kernel(float* ga, float* gb,
+    const float* go, const float* sig_cache,
+    const float* a, const float* b,
+    int a_total, int b_total) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < a_total) {
+        float sig = sig_cache[i];
+        float v = a[i] + b[i % b_total];
+        float dsilu = go[i] * (sig + v * sig * (1.0f - sig));
+        ga[i] += dsilu;
+        atomicAdd(&gb[i % b_total], dsilu);
+    }
+}
+
 // Dropout backward: ga += go * mask
 __global__ void dropout_backward_kernel(float* ga, const float* go, const float* mask, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;

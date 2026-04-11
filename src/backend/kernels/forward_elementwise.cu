@@ -118,6 +118,20 @@ __global__ void negative_kernel(float* out, const float* x, int n) {
     }
 }
 
+// Fused Add + SiLU forward with sigmoid cache
+// out = (a + b_broadcast) * sigmoid(a + b_broadcast)
+// sig_cache stores sigmoid for efficient backward
+__global__ void add_silu_fwd_cache_kernel(float* out, float* sig_cache,
+    const float* a, const float* b, int a_total, int b_total) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < a_total) {
+        float v = a[i] + b[i % b_total];
+        float sig = 1.0f / (1.0f + expf(-v));
+        sig_cache[i] = sig;
+        out[i] = v * sig;
+    }
+}
+
 // Scale: out = x * s
 __global__ void scale_kernel(float* out, const float* x, float s, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;

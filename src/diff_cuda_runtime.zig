@@ -97,6 +97,7 @@ const KernelHandles = struct {
     fn_sub: CUfunction,
     fn_gelu: CUfunction,
     fn_silu_fwd_cache: CUfunction,
+    fn_add_silu_fwd_cache: CUfunction,
     fn_relu: CUfunction,
     fn_sigmoid: CUfunction,
     fn_tanh: CUfunction,
@@ -126,6 +127,8 @@ const KernelHandles = struct {
     fn_abs_bw: CUfunction,
     fn_clamp_bw: CUfunction,
     fn_dropout_bw: CUfunction,
+    fn_add_silu_bw_same: CUfunction,
+    fn_add_silu_bw_bcast: CUfunction,
     // Backward structured
     fn_mul_bw_same: CUfunction,
     fn_mul_bw_bcast_ga: CUfunction,
@@ -165,9 +168,13 @@ pub const DiffCudaRuntime = struct {
     cuda_ctx: *CudaContext,
     module: *const Module,
     param_nodes: []DiffCudaNode, // パラメータノード (永続)
-    param_grad_dptrs: []CUdeviceptr, // パラメータ勾配バッファ (永続)
+    param_grad_dptrs: []CUdeviceptr, // パラメータ勾配バッファ (各パラメータのオフセット)
+    grad_base_dptr: CUdeviceptr, // 連続勾配バッファのベースポインタ
+    total_grad_floats: usize, // 全パラメータ勾配の合計 float 数
     arena: std.heap.ArenaAllocator, // 中間ノード用 CPU arena
     arena_gpu_bufs: std.ArrayList(CUdeviceptr), // 中間 GPU バッファ
+    arena_gpu_sizes: std.ArrayList(usize), // 対応するバッファサイズ (bytes)
+    gpu_pool: cuda.GpuMemPool, // GPU メモリプール
     topo_buf: std.ArrayListUnmanaged(*DiffCudaNode),
     prng: std.Random.DefaultPrng,
     training: bool,
@@ -186,6 +193,7 @@ pub const DiffCudaRuntime = struct {
             .fn_sub = try cuda_ctx.getFunction("sub_broadcast"),
             .fn_gelu = try cuda_ctx.getFunction("gelu_kernel"),
             .fn_silu_fwd_cache = try cuda_ctx.getFunction("silu_fwd_cache_kernel"),
+            .fn_add_silu_fwd_cache = try cuda_ctx.getFunction("add_silu_fwd_cache_kernel"),
             .fn_relu = try cuda_ctx.getFunction("relu_kernel"),
             .fn_sigmoid = try cuda_ctx.getFunction("sigmoid_kernel"),
             .fn_tanh = try cuda_ctx.getFunction("tanh_kernel"),
@@ -215,6 +223,8 @@ pub const DiffCudaRuntime = struct {
             .fn_abs_bw = try cuda_ctx.getFunction("abs_backward_kernel"),
             .fn_clamp_bw = try cuda_ctx.getFunction("clamp_backward_kernel"),
             .fn_dropout_bw = try cuda_ctx.getFunction("dropout_backward_kernel"),
+            .fn_add_silu_bw_same = try cuda_ctx.getFunction("add_silu_backward_same_kernel"),
+            .fn_add_silu_bw_bcast = try cuda_ctx.getFunction("add_silu_backward_bcast_kernel"),
             // Backward structured
             .fn_mul_bw_same = try cuda_ctx.getFunction("mul_backward_same_kernel"),
             .fn_mul_bw_bcast_ga = try cuda_ctx.getFunction("mul_backward_broadcast_b_ga_kernel"),
@@ -252,11 +262,17 @@ pub const DiffCudaRuntime = struct {
         const param_nodes = try allocator.alloc(DiffCudaNode, count);
         const param_grad_dptrs = try allocator.alloc(CUdeviceptr, count);
 
+        // Compute total gradient size and allocate one contiguous buffer
+        var total_grad_floats: usize = 0;
+        for (0..count) |i| total_grad_floats += module.paramSize(.{ .index = i });
+        const grad_base_dptr = try cuda_ctx.allocBuffer(total_grad_floats * @sizeOf(f32));
+        try cuda_ctx.memsetZero(grad_base_dptr, total_grad_floats);
+
+        var grad_offset: usize = 0;
         for (module.params.items, 0..) |meta, i| {
             const size = module.paramSize(.{ .index = i });
             const dptr = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
-            const grad_dptr = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
-            try cuda_ctx.memsetZero(grad_dptr, size);
+            const grad_dptr = grad_base_dptr + grad_offset * @sizeOf(f32);
 
             param_nodes[i] = .{
                 .dptr = dptr,
@@ -272,6 +288,7 @@ pub const DiffCudaRuntime = struct {
                 .param_index = i,
             };
             param_grad_dptrs[i] = grad_dptr;
+            grad_offset += size;
         }
 
         return .{
@@ -280,8 +297,12 @@ pub const DiffCudaRuntime = struct {
             .module = module,
             .param_nodes = param_nodes,
             .param_grad_dptrs = param_grad_dptrs,
+            .grad_base_dptr = grad_base_dptr,
+            .total_grad_floats = total_grad_floats,
             .arena = std.heap.ArenaAllocator.init(allocator),
             .arena_gpu_bufs = .{},
+            .arena_gpu_sizes = .{},
+            .gpu_pool = cuda.GpuMemPool.init(allocator),
             .topo_buf = .empty,
             .prng = std.Random.DefaultPrng.init(42),
             .training = true,
@@ -292,21 +313,24 @@ pub const DiffCudaRuntime = struct {
     pub fn deinit(self: *DiffCudaRuntime) void {
         self.freeArenaGpuBuffers();
         self.arena_gpu_bufs.deinit(self.allocator);
+        self.arena_gpu_sizes.deinit(self.allocator);
+        self.gpu_pool.deinit();
         self.arena.deinit();
-        for (self.param_nodes, 0..) |node, i| {
+        for (self.param_nodes) |node| {
             self.cuda_ctx.freeBuffer(node.dptr);
-            self.cuda_ctx.freeBuffer(self.param_grad_dptrs[i]);
         }
+        self.cuda_ctx.freeBuffer(self.grad_base_dptr);
         self.allocator.free(self.param_nodes);
         self.allocator.free(self.param_grad_dptrs);
         self.topo_buf.deinit(self.allocator);
     }
 
     fn freeArenaGpuBuffers(self: *DiffCudaRuntime) void {
-        for (self.arena_gpu_bufs.items) |dptr| {
-            self.cuda_ctx.freeBuffer(dptr);
+        for (self.arena_gpu_bufs.items, self.arena_gpu_sizes.items) |dptr, size_bytes| {
+            self.gpu_pool.release(dptr, size_bytes);
         }
         self.arena_gpu_bufs.clearRetainingCapacity();
+        self.arena_gpu_sizes.clearRetainingCapacity();
     }
 
     pub fn resetArena(self: *DiffCudaRuntime) void {
@@ -318,9 +342,9 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn zeroGrad(self: *DiffCudaRuntime) void {
+        // Single async memset for the entire contiguous gradient buffer
+        self.cuda_ctx.memsetZeroAsync(self.grad_base_dptr, self.total_grad_floats) catch unreachable;
         for (self.param_nodes, 0..) |*node, i| {
-            const size = self.module.paramSize(.{ .index = i });
-            self.cuda_ctx.memsetZero(self.param_grad_dptrs[i], size) catch unreachable;
             node.grad_dptr = self.param_grad_dptrs[i];
         }
     }
@@ -329,10 +353,13 @@ pub const DiffCudaRuntime = struct {
         return self.arena.allocator();
     }
 
-    /// GPU メモリ確保 (arena tracked)
+    /// GPU メモリ確保 (arena tracked, pool 優先)
     fn allocGpuBuf(self: *DiffCudaRuntime, num_floats: usize) CUdeviceptr {
-        const dptr = self.cuda_ctx.allocBuffer(num_floats * @sizeOf(f32)) catch unreachable;
+        const size_bytes = num_floats * @sizeOf(f32);
+        const dptr = self.gpu_pool.acquire(size_bytes) orelse
+            (self.cuda_ctx.allocBuffer(cuda.GpuMemPool.bucketSize(cuda.GpuMemPool.bucketIndex(size_bytes))) catch unreachable);
         self.arena_gpu_bufs.append(self.allocator, dptr) catch unreachable;
+        self.arena_gpu_sizes.append(self.allocator, size_bytes) catch unreachable;
         return dptr;
     }
 
@@ -542,6 +569,61 @@ pub const DiffCudaRuntime = struct {
         if (pa.grad_dptr) |ga| {
             ops.dispatchSiluBackward(rt.cuda_ctx, rt.kernels.fn_silu_bw, ga, self_node.grad_dptr.?, pa.dptr, ctx.sig_cache_dptr, self_node.totalElements());
         }
+    }
+
+    // ── Fused Add + SiLU ──
+
+    pub fn addSilu(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
+        const a_total = a.totalElements();
+        const b_total = b.totalElements();
+        const rg = a.requires_grad or b.requires_grad;
+        const out_dptr = self.allocGpuBuf(a_total);
+        const sig_cache = self.allocGpuBuf(a_total);
+        ops.dispatchAddSiluFwdCache(self.cuda_ctx, self.kernels.fn_add_silu_fwd_cache, out_dptr, sig_cache, a.dptr, b.dptr, a_total, b_total);
+        const node = self.makeNode(out_dptr, a.shape[0..a.ndim], rg);
+        if (rg) {
+            node.parents[0] = a;
+            node.parents[1] = b;
+            const ctx = self.allocContext(AddSiluContext);
+            ctx.* = .{ .rt = self, .sig_cache_dptr = sig_cache };
+            node.context = @ptrCast(ctx);
+            if (a_total == b_total) {
+                node.backward_fn = &backwardAddSiluSame;
+            } else {
+                node.backward_fn = &backwardAddSiluBcast;
+            }
+        }
+        return node;
+    }
+
+    const AddSiluContext = struct {
+        rt: *DiffCudaRuntime,
+        sig_cache_dptr: CUdeviceptr,
+    };
+
+    fn backwardAddSiluSame(self_node: *DiffCudaNode) void {
+        const ctx: *AddSiluContext = @ptrCast(@alignCast(self_node.context.?));
+        const rt = ctx.rt;
+        const pa = self_node.parents[0].?;
+        const pb = self_node.parents[1].?;
+        const go = self_node.grad_dptr.?;
+        const n = self_node.totalElements();
+        const ga = pa.grad_dptr orelse rt.allocGpuBufZeroed(n);
+        const gb = pb.grad_dptr orelse rt.allocGpuBufZeroed(n);
+        ops.dispatchAddSiluBackwardSame(rt.cuda_ctx, rt.kernels.fn_add_silu_bw_same, ga, gb, go, ctx.sig_cache_dptr, pa.dptr, pb.dptr, n);
+    }
+
+    fn backwardAddSiluBcast(self_node: *DiffCudaNode) void {
+        const ctx: *AddSiluContext = @ptrCast(@alignCast(self_node.context.?));
+        const rt = ctx.rt;
+        const pa = self_node.parents[0].?;
+        const pb = self_node.parents[1].?;
+        const go = self_node.grad_dptr.?;
+        const a_total = pa.totalElements();
+        const b_total = pb.totalElements();
+        const ga = pa.grad_dptr orelse rt.allocGpuBufZeroed(a_total);
+        const gb = pb.grad_dptr orelse rt.allocGpuBufZeroed(b_total);
+        ops.dispatchAddSiluBackwardBcast(rt.cuda_ctx, rt.kernels.fn_add_silu_bw_bcast, ga, gb, go, ctx.sig_cache_dptr, pa.dptr, pb.dptr, a_total, b_total);
     }
 
     pub fn relu(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
@@ -1184,13 +1266,24 @@ pub const DiffCudaRuntime = struct {
         const M = pa.shape[1];
         const K = pa.shape[2];
         const N = pb.shape[2];
-        for (0..B) |batch| {
-            const a_off = batch * M * K;
-            const b_off = batch * K * N;
-            const o_off = batch * M * N;
-            if (pa.grad_dptr) |ga| rt.cuda_ctx.sgemmAccum(CUBLAS_OP_T, CUBLAS_OP_N, @intCast(K), @intCast(M), @intCast(N), 1.0, pb.dptr + b_off * @sizeOf(f32), @intCast(N), go + o_off * @sizeOf(f32), @intCast(N), ga + a_off * @sizeOf(f32), @intCast(K)) catch unreachable;
-            if (pb.grad_dptr) |gb| rt.cuda_ctx.sgemmAccum(CUBLAS_OP_N, CUBLAS_OP_T, @intCast(N), @intCast(K), @intCast(M), 1.0, go + o_off * @sizeOf(f32), @intCast(N), pa.dptr + a_off * @sizeOf(f32), @intCast(K), gb + b_off * @sizeOf(f32), @intCast(N)) catch unreachable;
-        }
+        // dA += go @ B^T: batched sgemm
+        if (pa.grad_dptr) |ga| rt.cuda_ctx.sgemmStridedBatched(
+            CUBLAS_OP_T, CUBLAS_OP_N,
+            @intCast(K), @intCast(M), @intCast(N), 1.0,
+            pb.dptr, @intCast(N), @intCast(K * N),
+            go, @intCast(N), @intCast(M * N),
+            1.0, ga, @intCast(K), @intCast(M * K),
+            @intCast(B),
+        ) catch unreachable;
+        // dB += A^T @ go: batched sgemm
+        if (pb.grad_dptr) |gb| rt.cuda_ctx.sgemmStridedBatched(
+            CUBLAS_OP_N, CUBLAS_OP_T,
+            @intCast(N), @intCast(K), @intCast(M), 1.0,
+            go, @intCast(N), @intCast(M * N),
+            pa.dptr, @intCast(K), @intCast(M * K),
+            1.0, gb, @intCast(N), @intCast(K * N),
+            @intCast(B),
+        ) catch unreachable;
     }
 
     fn backwardMatmul2D3D(self_node: *DiffCudaNode) void {
@@ -1203,12 +1296,32 @@ pub const DiffCudaRuntime = struct {
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[2];
-        for (0..B) |batch| {
-            const b_off = batch * K * N;
-            const o_off = batch * M * N;
-            if (pa.grad_dptr) |ga| rt.cuda_ctx.sgemmAccum(CUBLAS_OP_T, CUBLAS_OP_N, @intCast(K), @intCast(M), @intCast(N), 1.0, pb.dptr + b_off * @sizeOf(f32), @intCast(N), go + o_off * @sizeOf(f32), @intCast(N), ga, @intCast(K)) catch unreachable;
-            if (pb.grad_dptr) |gb| rt.cuda_ctx.sgemmAccum(CUBLAS_OP_N, CUBLAS_OP_T, @intCast(N), @intCast(K), @intCast(M), 1.0, go + o_off * @sizeOf(f32), @intCast(N), pa.dptr, @intCast(K), gb + b_off * @sizeOf(f32), @intCast(N)) catch unreachable;
+        // dA (2D) += sum_b(go_b @ B_b^T): compute batched into temp 3D, then reduce
+        if (pa.grad_dptr) |ga| {
+            // Use batched sgemm into a temp [B, M, K] buffer, then reduce-sum over B
+            const tmp = rt.allocGpuBufZeroed(B * M * K);
+            rt.cuda_ctx.sgemmStridedBatched(
+                CUBLAS_OP_T, CUBLAS_OP_N,
+                @intCast(K), @intCast(M), @intCast(N), 1.0,
+                pb.dptr, @intCast(N), @intCast(K * N),
+                go, @intCast(N), @intCast(M * N),
+                0.0, tmp, @intCast(K), @intCast(M * K),
+                @intCast(B),
+            ) catch unreachable;
+            // Reduce: ga += sum over batch dimension
+            for (0..B) |batch| {
+                ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp + batch * M * K * @sizeOf(f32), M * K);
+            }
         }
+        // dB (3D) += A^T @ go_b: batched sgemm (A is shared across batches, stride_a=0)
+        if (pb.grad_dptr) |gb| rt.cuda_ctx.sgemmStridedBatched(
+            CUBLAS_OP_N, CUBLAS_OP_T,
+            @intCast(N), @intCast(K), @intCast(M), 1.0,
+            go, @intCast(N), @intCast(M * N),
+            pa.dptr, @intCast(K), 0, // stride_a=0: same A for all batches
+            1.0, gb, @intCast(N), @intCast(K * N),
+            @intCast(B),
+        ) catch unreachable;
     }
 
     // ════════════════════════════════════════════════════════════════

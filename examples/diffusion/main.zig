@@ -59,10 +59,10 @@ const DdpmModel = struct {
         const t_h1 = ctx.silu(self.time_fc1.forward(ctx, time_emb));
         const t_hidden = self.time_fc2.forward(ctx, t_h1);
 
-        // MLP with time injection
-        const h1 = ctx.silu(ctx.add(self.fc1.forward(ctx, x_t), self.tp1.forward(ctx, t_hidden)));
-        const h2 = ctx.silu(ctx.add(self.fc2.forward(ctx, h1), self.tp2.forward(ctx, t_hidden)));
-        const h3 = ctx.silu(ctx.add(self.fc3.forward(ctx, h2), self.tp3.forward(ctx, t_hidden)));
+        // MLP with time injection (fused add+silu)
+        const h1 = ctx.addSilu(self.fc1.forward(ctx, x_t), self.tp1.forward(ctx, t_hidden));
+        const h2 = ctx.addSilu(self.fc2.forward(ctx, h1), self.tp2.forward(ctx, t_hidden));
+        const h3 = ctx.addSilu(self.fc3.forward(ctx, h2), self.tp3.forward(ctx, t_hidden));
         return self.fc_out.forward(ctx, h3);
     }
 };

@@ -30,3 +30,4 @@ pub const CUBLAS_TENSOR_OP_MATH = cuda_blas.CUBLAS_TENSOR_OP_MATH;
 
 // CudaContext
 pub const CudaContext = cuda_context.CudaContext;
+pub const GpuMemPool = cuda_context.GpuMemPool;
