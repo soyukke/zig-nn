@@ -1,0 +1,43 @@
+# gitleaks 設定
+# デフォルトルール（API keys, tokens等）に加えてカスタムルールを定義
+[extend]
+useDefault = true
+
+# カスタムルール: 個人情報・秘密情報の検出
+[[rules]]
+id = "email-address"
+description = "メールアドレスの検出"
+regex = '''[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'''
+keywords = ["@"]
+tags = ["personal-info"]
+
+[[rules]]
+id = "japanese-phone-number"
+description = "日本の電話番号の検出（ハイフン区切り形式）"
+regex = '''0\d{1,4}-\d{1,4}-\d{3,4}'''
+tags = ["personal-info"]
+
+[[rules]]
+id = "env-file-content"
+description = ".env ファイルの内容がハードコードされていないか"
+regex = '''(?i)(password|secret|api_key|token|credential)\s*[=:]\s*['"][^'"]{8,}['"]'''
+tags = ["secret"]
+
+[[rules]]
+id = "private-key"
+description = "秘密鍵の検出"
+regex = '''-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'''
+tags = ["secret"]
+
+# 除外設定
+[allowlist]
+paths = [
+    '''\.gitleaks\.toml$''',
+    '''flake\.lock$''',
+]
+
+# Co-Authored-By の noreply アドレス、テストのダミーデータは許可
+regexes = [
+    '''noreply@(anthropic|github)\.com''',
+    '''test@example\.com|dummy@test\.org''',
+]
