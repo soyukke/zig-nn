@@ -14,8 +14,9 @@ const CUdeviceptr = cuda.CUdeviceptr;
 const CUfunction = cuda.CUfunction;
 const CUBLAS_OP_N = cuda.CUBLAS_OP_N;
 const CUBLAS_OP_T = cuda.CUBLAS_OP_T;
+const ops = @import("cuda_ops.zig");
 
-pub const MAX_NDIM = 8;
+pub const MAX_NDIM = ops.MAX_NDIM;
 
 pub const GpuTensorInfo = struct {
     dptr: CUdeviceptr,
@@ -60,11 +61,9 @@ pub const CudaRuntime = struct {
     fn_scale: CUfunction,
 
     pub fn init(mod: *const Module, cuda_ctx: *CudaContext, allocator: Allocator) !CudaRuntime {
-        // Load PTX module (embedded at compile time)
         const ptx_data = @embedFile("backend/cuda_kernels.ptx");
         try cuda_ctx.loadModule(@ptrCast(ptx_data.ptr));
 
-        // Get kernel functions
         const fn_add = try cuda_ctx.getFunction("add_broadcast");
         const fn_mul = try cuda_ctx.getFunction("mul_broadcast");
         const fn_gelu = try cuda_ctx.getFunction("gelu_kernel");
@@ -76,7 +75,6 @@ pub const CudaRuntime = struct {
         const fn_gather = try cuda_ctx.getFunction("gather_kernel");
         const fn_scale = try cuda_ctx.getFunction("scale_kernel");
 
-        // Allocate GPU param buffers
         const count = mod.paramCount();
         const param_bufs = try allocator.alloc(GpuTensorInfo, count);
         for (mod.params.items, 0..) |meta, i| {
@@ -84,7 +82,7 @@ pub const CudaRuntime = struct {
             const dptr = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
             param_bufs[i] = .{
                 .dptr = dptr,
-                .shape = initShapeArray(meta.shape),
+                .shape = ops.initShapeArray(meta.shape),
                 .ndim = meta.shape.len,
             };
         }
@@ -145,7 +143,7 @@ pub const CudaRuntime = struct {
         const t = self.arenaAlloc().create(GpuTensorInfo) catch unreachable;
         t.* = .{
             .dptr = dptr,
-            .shape = initShapeArray(shape_slice),
+            .shape = ops.initShapeArray(shape_slice),
             .ndim = shape_slice.len,
         };
         return t;
@@ -168,32 +166,7 @@ pub const CudaRuntime = struct {
     }
 
     pub fn allocData(self: *CudaRuntime, size: usize) []f32 {
-        // For CudaRuntime, allocData returns CPU memory from arena (used for host-side prep)
         return self.arenaAlloc().alloc(f32, size) catch unreachable;
-    }
-
-    // ── Kernel launch helpers ──
-
-    const BLOCK_SIZE: c_uint = 256;
-
-    fn gridFor(n: usize) c_uint {
-        return @intCast((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
-    }
-
-    fn launchElementwise(self: *CudaRuntime, func: CUfunction, out_dptr: CUdeviceptr, x_dptr: CUdeviceptr, n: usize) void {
-        var n_i: c_int = @intCast(n);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&x_dptr)),
-            @ptrCast(&n_i),
-        };
-        self.cuda_ctx.launchKernel(
-            func,
-            .{ gridFor(n), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
     }
 
     // ── Ops ──
@@ -201,44 +174,13 @@ pub const CudaRuntime = struct {
     pub fn add(self: *CudaRuntime, a: GpuTensor, b: GpuTensor) GpuTensor {
         const a_total = a.totalElements();
         const b_total = b.totalElements();
-
         if (a_total >= b_total) {
             const out_dptr = self.allocGpuData(a_total) catch unreachable;
-            var a_i: c_int = @intCast(a_total);
-            var b_i: c_int = @intCast(b_total);
-            var params = [_]?*anyopaque{
-                @ptrCast(@constCast(&out_dptr)),
-                @ptrCast(@constCast(&a.dptr)),
-                @ptrCast(@constCast(&b.dptr)),
-                @ptrCast(&a_i),
-                @ptrCast(&b_i),
-            };
-            self.cuda_ctx.launchKernel(
-                self.fn_add,
-                .{ gridFor(a_total), 1, 1 },
-                .{ BLOCK_SIZE, 1, 1 },
-                0,
-                &params,
-            ) catch unreachable;
+            ops.dispatchBroadcastBinop(self.cuda_ctx, self.fn_add, out_dptr, a.dptr, b.dptr, a_total, b_total);
             return self.makeTensorGpu(out_dptr, a.shape[0..a.ndim]);
         } else {
             const out_dptr = self.allocGpuData(b_total) catch unreachable;
-            var a_i: c_int = @intCast(b_total);
-            var b_i: c_int = @intCast(a_total);
-            var params = [_]?*anyopaque{
-                @ptrCast(@constCast(&out_dptr)),
-                @ptrCast(@constCast(&b.dptr)),
-                @ptrCast(@constCast(&a.dptr)),
-                @ptrCast(&a_i),
-                @ptrCast(&b_i),
-            };
-            self.cuda_ctx.launchKernel(
-                self.fn_add,
-                .{ gridFor(b_total), 1, 1 },
-                .{ BLOCK_SIZE, 1, 1 },
-                0,
-                &params,
-            ) catch unreachable;
+            ops.dispatchBroadcastBinop(self.cuda_ctx, self.fn_add, out_dptr, b.dptr, a.dptr, b_total, a_total);
             return self.makeTensorGpu(out_dptr, b.shape[0..b.ndim]);
         }
     }
@@ -246,50 +188,18 @@ pub const CudaRuntime = struct {
     pub fn mul(self: *CudaRuntime, a: GpuTensor, b: GpuTensor) GpuTensor {
         const a_total = a.totalElements();
         const b_total = b.totalElements();
-
         if (a_total >= b_total) {
             const out_dptr = self.allocGpuData(a_total) catch unreachable;
-            var a_i: c_int = @intCast(a_total);
-            var b_i: c_int = @intCast(b_total);
-            var params = [_]?*anyopaque{
-                @ptrCast(@constCast(&out_dptr)),
-                @ptrCast(@constCast(&a.dptr)),
-                @ptrCast(@constCast(&b.dptr)),
-                @ptrCast(&a_i),
-                @ptrCast(&b_i),
-            };
-            self.cuda_ctx.launchKernel(
-                self.fn_mul,
-                .{ gridFor(a_total), 1, 1 },
-                .{ BLOCK_SIZE, 1, 1 },
-                0,
-                &params,
-            ) catch unreachable;
+            ops.dispatchBroadcastBinop(self.cuda_ctx, self.fn_mul, out_dptr, a.dptr, b.dptr, a_total, b_total);
             return self.makeTensorGpu(out_dptr, a.shape[0..a.ndim]);
         } else {
             const out_dptr = self.allocGpuData(b_total) catch unreachable;
-            var a_i: c_int = @intCast(b_total);
-            var b_i: c_int = @intCast(a_total);
-            var params = [_]?*anyopaque{
-                @ptrCast(@constCast(&out_dptr)),
-                @ptrCast(@constCast(&b.dptr)),
-                @ptrCast(@constCast(&a.dptr)),
-                @ptrCast(&a_i),
-                @ptrCast(&b_i),
-            };
-            self.cuda_ctx.launchKernel(
-                self.fn_mul,
-                .{ gridFor(b_total), 1, 1 },
-                .{ BLOCK_SIZE, 1, 1 },
-                0,
-                &params,
-            ) catch unreachable;
+            ops.dispatchBroadcastBinop(self.cuda_ctx, self.fn_mul, out_dptr, b.dptr, a.dptr, b_total, a_total);
             return self.makeTensorGpu(out_dptr, b.shape[0..b.ndim]);
         }
     }
 
     pub fn sub(self: *CudaRuntime, a: GpuTensor, b: GpuTensor) GpuTensor {
-        // a - b = a + (-1 * b)
         const neg_b = self.negative(b);
         return self.add(a, neg_b);
     }
@@ -297,38 +207,14 @@ pub const CudaRuntime = struct {
     pub fn gelu(self: *CudaRuntime, x: GpuTensor) GpuTensor {
         const total = x.totalElements();
         const out_dptr = self.allocGpuData(total) catch unreachable;
-        var n_i: c_int = @intCast(total);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&x.dptr)),
-            @ptrCast(&n_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_gelu,
-            .{ gridFor(total), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
+        ops.dispatchElementwise(self.cuda_ctx, self.fn_gelu, out_dptr, x.dptr, total);
         return self.makeTensorGpu(out_dptr, x.shape[0..x.ndim]);
     }
 
     pub fn silu(self: *CudaRuntime, x: GpuTensor) GpuTensor {
         const total = x.totalElements();
         const out_dptr = self.allocGpuData(total) catch unreachable;
-        var n_i: c_int = @intCast(total);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&x.dptr)),
-            @ptrCast(&n_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_silu,
-            .{ gridFor(total), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
+        ops.dispatchElementwise(self.cuda_ctx, self.fn_silu, out_dptr, x.dptr, total);
         return self.makeTensorGpu(out_dptr, x.shape[0..x.ndim]);
     }
 
@@ -337,26 +223,9 @@ pub const CudaRuntime = struct {
         const total = x.totalElements();
         const cols = x.lastDim();
         const rows = total / cols;
-        // softmax kernel works in-place, so copy first
         const out_dptr = self.allocGpuData(total) catch unreachable;
         self.cuda_ctx.copyDeviceToDevice(out_dptr, x.dptr, total * @sizeOf(f32)) catch unreachable;
-        const block_dim: c_uint = @intCast(@min(cols, 1024));
-        // Ensure block_dim is power of 2 for reduction
-        const block_pow2 = nextPow2(block_dim);
-        var rows_i: c_int = @intCast(rows);
-        var cols_i: c_int = @intCast(cols);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(&rows_i),
-            @ptrCast(&cols_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_softmax,
-            .{ @intCast(rows), 1, 1 },
-            .{ block_pow2, 1, 1 },
-            block_pow2 * @sizeOf(f32),
-            &params,
-        ) catch unreachable;
+        ops.dispatchSoftmax(self.cuda_ctx, self.fn_softmax, out_dptr, rows, cols);
         return self.makeTensorGpu(out_dptr, x.shape[0..x.ndim]);
     }
 
@@ -366,26 +235,7 @@ pub const CudaRuntime = struct {
         const cols = x.lastDim();
         const rows = total / cols;
         const out_dptr = self.allocGpuData(total) catch unreachable;
-        const block_dim = nextPow2(@intCast(@min(cols, 1024)));
-        var rows_i: c_int = @intCast(rows);
-        var cols_i: c_int = @intCast(cols);
-        var eps_v: f32 = eps;
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&x.dptr)),
-            @ptrCast(@constCast(&gamma.dptr)),
-            @ptrCast(@constCast(&beta.dptr)),
-            @ptrCast(&rows_i),
-            @ptrCast(&cols_i),
-            @ptrCast(&eps_v),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_layernorm,
-            .{ @intCast(rows), 1, 1 },
-            .{ block_dim, 1, 1 },
-            block_dim * @sizeOf(f32),
-            &params,
-        ) catch unreachable;
+        ops.dispatchLayerNorm(self.cuda_ctx, self.fn_layernorm, out_dptr, x.dptr, gamma.dptr, beta.dptr, rows, cols, eps);
         return self.makeTensorGpu(out_dptr, x.shape[0..x.ndim]);
     }
 
@@ -393,27 +243,8 @@ pub const CudaRuntime = struct {
         const B = norm.shape[0];
         const S = norm.shape[1];
         const D = norm.shape[2];
-        const total = B * S * D;
-        const out_dptr = self.allocGpuData(total) catch unreachable;
-        var b_i: c_int = @intCast(B);
-        var s_i: c_int = @intCast(S);
-        var d_i: c_int = @intCast(D);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&norm.dptr)),
-            @ptrCast(@constCast(&scale_t.dptr)),
-            @ptrCast(@constCast(&beta.dptr)),
-            @ptrCast(&b_i),
-            @ptrCast(&s_i),
-            @ptrCast(&d_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_adaln,
-            .{ gridFor(total), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
+        const out_dptr = self.allocGpuData(B * S * D) catch unreachable;
+        ops.dispatchAdaLN(self.cuda_ctx, self.fn_adaln, out_dptr, norm.dptr, scale_t.dptr, beta.dptr, B, S, D);
         return self.makeTensorGpu(out_dptr, norm.shape[0..norm.ndim]);
     }
 
@@ -424,26 +255,10 @@ pub const CudaRuntime = struct {
             const K = a.shape[1];
             const N = b.shape[1];
             const out_dptr = self.allocGpuData(M * N) catch unreachable;
-            // cuBLAS is column-major: C = A @ B in row-major = B^T @ A^T in col-major
-            self.cuda_ctx.sgemm(
-                CUBLAS_OP_N,
-                CUBLAS_OP_N,
-                @intCast(N),
-                @intCast(M),
-                @intCast(K),
-                1.0,
-                b.dptr,
-                @intCast(N),
-                a.dptr,
-                @intCast(K),
-                0.0,
-                out_dptr,
-                @intCast(N),
-            ) catch unreachable;
+            self.cuda_ctx.sgemm(CUBLAS_OP_N, CUBLAS_OP_N, @intCast(N), @intCast(M), @intCast(K), 1.0, b.dptr, @intCast(N), a.dptr, @intCast(K), 0.0, out_dptr, @intCast(N)) catch unreachable;
             return self.makeTensorGpu(out_dptr, &.{ M, N });
         }
 
-        // Batched: 3D @ 3D
         if (a.ndim == 3 and b.ndim == 3) {
             const B = a.shape[0];
             const M = a.shape[1];
@@ -454,26 +269,11 @@ pub const CudaRuntime = struct {
                 const a_off = a.dptr + batch * M * K * @sizeOf(f32);
                 const b_off = b.dptr + batch * K * N * @sizeOf(f32);
                 const c_off = out_dptr + batch * M * N * @sizeOf(f32);
-                self.cuda_ctx.sgemm(
-                    CUBLAS_OP_N,
-                    CUBLAS_OP_N,
-                    @intCast(N),
-                    @intCast(M),
-                    @intCast(K),
-                    1.0,
-                    b_off,
-                    @intCast(N),
-                    a_off,
-                    @intCast(K),
-                    0.0,
-                    c_off,
-                    @intCast(N),
-                ) catch unreachable;
+                self.cuda_ctx.sgemm(CUBLAS_OP_N, CUBLAS_OP_N, @intCast(N), @intCast(M), @intCast(K), 1.0, b_off, @intCast(N), a_off, @intCast(K), 0.0, c_off, @intCast(N)) catch unreachable;
             }
             return self.makeTensorGpu(out_dptr, &.{ B, M, N });
         }
 
-        // 2D @ 3D: treat as batch with shared 2D
         if (a.ndim == 2 and b.ndim == 3) {
             const B = b.shape[0];
             const M = a.shape[0];
@@ -483,21 +283,7 @@ pub const CudaRuntime = struct {
             for (0..B) |batch| {
                 const b_off = b.dptr + batch * K * N * @sizeOf(f32);
                 const c_off = out_dptr + batch * M * N * @sizeOf(f32);
-                self.cuda_ctx.sgemm(
-                    CUBLAS_OP_N,
-                    CUBLAS_OP_N,
-                    @intCast(N),
-                    @intCast(M),
-                    @intCast(K),
-                    1.0,
-                    b_off,
-                    @intCast(N),
-                    a.dptr,
-                    @intCast(K),
-                    0.0,
-                    c_off,
-                    @intCast(N),
-                ) catch unreachable;
+                self.cuda_ctx.sgemm(CUBLAS_OP_N, CUBLAS_OP_N, @intCast(N), @intCast(M), @intCast(K), 1.0, b_off, @intCast(N), a.dptr, @intCast(K), 0.0, c_off, @intCast(N)) catch unreachable;
             }
             return self.makeTensorGpu(out_dptr, &.{ B, M, N });
         }
@@ -510,31 +296,13 @@ pub const CudaRuntime = struct {
         const B = a.shape[0];
         const M = a.shape[1];
         const K = a.shape[2];
-        const N = b.shape[1]; // b is [B, N, K] (NOT transposed in memory)
+        const N = b.shape[1];
         const out_dptr = self.allocGpuData(B * M * N) catch unreachable;
         for (0..B) |batch| {
             const a_off = a.dptr + batch * M * K * @sizeOf(f32);
             const b_off = b.dptr + batch * N * K * @sizeOf(f32);
             const c_off = out_dptr + batch * M * N * @sizeOf(f32);
-            // row-major A @ B^T: cuBLAS col-major B^T^T @ A^T = B @ A^T
-            // Actually: C_rowmajor = A @ B^T  ↔  C_colmajor^T = A @ B^T
-            // cuBLAS: C_col = B @ A^T → sgemm(N=N, M=M, K=K, B=B_ptr(N×K colmaj), A=A_ptr, C=C_ptr)
-            // B is [N, K] in row-major = [K, N] in col-major, need transpose = OP_T
-            self.cuda_ctx.sgemm(
-                CUBLAS_OP_T,
-                CUBLAS_OP_N,
-                @intCast(N),
-                @intCast(M),
-                @intCast(K),
-                1.0,
-                b_off,
-                @intCast(K),
-                a_off,
-                @intCast(K),
-                0.0,
-                c_off,
-                @intCast(N),
-            ) catch unreachable;
+            self.cuda_ctx.sgemm(CUBLAS_OP_T, CUBLAS_OP_N, @intCast(N), @intCast(M), @intCast(K), 1.0, b_off, @intCast(K), a_off, @intCast(K), 0.0, c_off, @intCast(N)) catch unreachable;
         }
         return self.makeTensorGpu(out_dptr, &.{ B, M, N });
     }
@@ -553,27 +321,11 @@ pub const CudaRuntime = struct {
             const B = x.shape[0];
             const R = x.shape[1];
             const C = x.shape[2];
-            const total = B * R * C;
-            const out_dptr = self.allocGpuData(total) catch unreachable;
-            // Transpose each batch's R×C matrix
+            const out_dptr = self.allocGpuData(B * R * C) catch unreachable;
             for (0..B) |batch| {
                 const in_off = x.dptr + batch * R * C * @sizeOf(f32);
                 const out_off = out_dptr + batch * R * C * @sizeOf(f32);
-                var rows_i: c_int = @intCast(R);
-                var cols_i: c_int = @intCast(C);
-                var params = [_]?*anyopaque{
-                    @ptrCast(@constCast(&out_off)),
-                    @ptrCast(@constCast(&in_off)),
-                    @ptrCast(&rows_i),
-                    @ptrCast(&cols_i),
-                };
-                self.cuda_ctx.launchKernel(
-                    self.fn_transpose,
-                    .{ gridFor(R * C), 1, 1 },
-                    .{ BLOCK_SIZE, 1, 1 },
-                    0,
-                    &params,
-                ) catch unreachable;
+                ops.dispatchTranspose2d(self.cuda_ctx, self.fn_transpose, out_off, in_off, R, C);
             }
             return self.makeTensorGpu(out_dptr, &.{ B, C, R });
         }
@@ -582,21 +334,7 @@ pub const CudaRuntime = struct {
             const R = x.shape[0];
             const C = x.shape[1];
             const out_dptr = self.allocGpuData(R * C) catch unreachable;
-            var rows_i: c_int = @intCast(R);
-            var cols_i: c_int = @intCast(C);
-            var params = [_]?*anyopaque{
-                @ptrCast(@constCast(&out_dptr)),
-                @ptrCast(@constCast(&x.dptr)),
-                @ptrCast(&rows_i),
-                @ptrCast(&cols_i),
-            };
-            self.cuda_ctx.launchKernel(
-                self.fn_transpose,
-                .{ gridFor(R * C), 1, 1 },
-                .{ BLOCK_SIZE, 1, 1 },
-                0,
-                &params,
-            ) catch unreachable;
+            ops.dispatchTranspose2d(self.cuda_ctx, self.fn_transpose, out_dptr, x.dptr, R, C);
             return self.makeTensorGpu(out_dptr, &.{ C, R });
         }
 
@@ -625,29 +363,10 @@ pub const CudaRuntime = struct {
     pub fn gather(self: *CudaRuntime, table: GpuTensor, indices: []const u32) GpuTensor {
         const embed_dim = table.shape[1];
         const num_indices = indices.len;
-        const total = num_indices * embed_dim;
-
-        // Upload indices to GPU as int32
-        const idx_dptr = self.allocGpuData(num_indices) catch unreachable; // reuse f32 alloc (same size as i32)
+        const idx_dptr = self.allocGpuData(num_indices) catch unreachable;
         self.cuda_ctx.copyHostToDevice(idx_dptr, @ptrCast(indices.ptr), num_indices * @sizeOf(u32)) catch unreachable;
-
-        const out_dptr = self.allocGpuData(total) catch unreachable;
-        var n_i: c_int = @intCast(num_indices);
-        var ed_i: c_int = @intCast(embed_dim);
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&table.dptr)),
-            @ptrCast(@constCast(&idx_dptr)),
-            @ptrCast(&n_i),
-            @ptrCast(&ed_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_gather,
-            .{ gridFor(total), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
+        const out_dptr = self.allocGpuData(num_indices * embed_dim) catch unreachable;
+        ops.dispatchGather(self.cuda_ctx, self.fn_gather, out_dptr, table.dptr, idx_dptr, num_indices, embed_dim);
         return self.makeTensorGpu(out_dptr, &.{ num_indices, embed_dim });
     }
 
@@ -655,21 +374,7 @@ pub const CudaRuntime = struct {
     pub fn negative(self: *CudaRuntime, x: GpuTensor) GpuTensor {
         const total = x.totalElements();
         const out_dptr = self.allocGpuData(total) catch unreachable;
-        var n_i: c_int = @intCast(total);
-        var s: f32 = -1.0;
-        var params = [_]?*anyopaque{
-            @ptrCast(@constCast(&out_dptr)),
-            @ptrCast(@constCast(&x.dptr)),
-            @ptrCast(&s),
-            @ptrCast(&n_i),
-        };
-        self.cuda_ctx.launchKernel(
-            self.fn_scale,
-            .{ gridFor(total), 1, 1 },
-            .{ BLOCK_SIZE, 1, 1 },
-            0,
-            &params,
-        ) catch unreachable;
+        ops.dispatchScale(self.cuda_ctx, self.fn_scale, out_dptr, x.dptr, -1.0, total);
         return self.makeTensorGpu(out_dptr, x.shape[0..x.ndim]);
     }
 
@@ -699,24 +404,5 @@ pub const CudaRuntime = struct {
     /// 同期
     pub fn synchronize(self: *CudaRuntime) void {
         self.cuda_ctx.synchronize();
-    }
-
-    // ── Helpers ──
-
-    fn nextPow2(v: c_uint) c_uint {
-        if (v == 0) return 1;
-        var x = v - 1;
-        x |= x >> 1;
-        x |= x >> 2;
-        x |= x >> 4;
-        x |= x >> 8;
-        x |= x >> 16;
-        return x + 1;
-    }
-
-    fn initShapeArray(shape_slice: []const usize) [MAX_NDIM]usize {
-        var arr: [MAX_NDIM]usize = .{0} ** MAX_NDIM;
-        for (shape_slice, 0..) |s, i| arr[i] = s;
-        return arr;
     }
 };
