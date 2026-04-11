@@ -144,6 +144,7 @@ pub const unified = struct {
     pub const SiLU = @import("nn/graph_sequential.zig").SiLU;
     pub const Sigmoid = @import("nn/graph_sequential.zig").Sigmoid;
     pub const Tanh = @import("nn/graph_sequential.zig").Tanh;
+    pub const Device = @import("trainer.zig").Device;
     pub const Trainer = @import("trainer.zig").Trainer;
     pub const MpsRuntime = if (is_macos) @import("mps_runtime.zig").MpsRuntime else struct {};
     pub const CpuRuntime = @import("cpu_runtime.zig").CpuRuntime;

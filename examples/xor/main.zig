@@ -4,7 +4,6 @@ const Sequential = nn.unified.Sequential;
 const Linear = nn.unified.Linear;
 const ReLU = nn.unified.ReLU;
 const Trainer = nn.unified.Trainer;
-const CudaTrainer = nn.unified.CudaTrainer;
 
 pub fn main() !void {
     var args = std.process.args();
@@ -12,21 +11,24 @@ pub fn main() !void {
     const mode = args.next() orelse "cpu";
 
     if (std.mem.eql(u8, mode, "cuda")) {
-        try xorDemoCuda();
+        const cuda = nn.cuda;
+        var cuda_ctx = try cuda.CudaContext.init(0);
+        defer cuda_ctx.deinit();
+        var trainer = try Trainer(XorModel, .cuda).init(std.heap.page_allocator, &cuda_ctx, .{ .lr = 0.01 });
+        defer trainer.deinit();
+        try xorDemo(&trainer, "CUDA");
     } else {
-        try xorDemo();
+        var trainer = try Trainer(XorModel, .cpu).init(std.heap.page_allocator, {}, .{ .lr = 0.01 });
+        defer trainer.deinit();
+        try xorDemo(&trainer, "CPU");
     }
 }
 
 /// XOR model: Linear(2,8) -> ReLU -> Linear(8,1)
 const XorModel = Sequential(.{ Linear(2, 8), ReLU, Linear(8, 1) });
 
-fn xorDemo() !void {
-    const allocator = std.heap.page_allocator;
-    std.debug.print("=== XOR Training (CPU: MSE + Adam) ===\n\n", .{});
-
-    var trainer = try Trainer(XorModel).init(allocator, .{ .lr = 0.01 });
-    defer trainer.deinit();
+fn xorDemo(trainer: anytype, device_name: []const u8) !void {
+    std.debug.print("=== XOR Training ({s}: MSE + Adam) ===\n\n", .{device_name});
 
     var inputs = [_]f32{ 0, 0, 0, 1, 1, 0, 1, 1 };
     const targets = [_]f32{ 0, 1, 1, 0 };
@@ -36,51 +38,13 @@ fn xorDemo() !void {
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
-        const pred = trainer.rt.reshape(output, &.{4});
+        const pred = trainer.reshape(output, &.{4});
         const loss = trainer.mseLoss(pred, &targets);
         trainer.backward(loss);
         trainer.step();
 
         if (epoch % 400 == 0 or epoch == num_epochs - 1) {
-            std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss.data[0] });
-        }
-    }
-    const elapsed_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
-
-    std.debug.print("\n  Predictions:\n", .{});
-    trainer.zeroGrad();
-    const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
-    const pred = trainer.rt.reshape(output, &.{4});
-    printPredictions(pred.data[0..4]);
-}
-
-fn xorDemoCuda() !void {
-    const allocator = std.heap.page_allocator;
-    std.debug.print("=== XOR Training (CUDA: MSE + Adam) ===\n\n", .{});
-
-    const cuda = nn.cuda;
-    var cuda_ctx = try cuda.CudaContext.init(0);
-    defer cuda_ctx.deinit();
-
-    var trainer = try CudaTrainer(XorModel).init(allocator, &cuda_ctx, .{ .lr = 0.01 });
-    defer trainer.deinit();
-
-    var inputs = [_]f32{ 0, 0, 0, 1, 1, 0, 1, 1 };
-    const targets = [_]f32{ 0, 1, 1, 0 };
-
-    const num_epochs = 2000;
-    var timer = try std.time.Timer.start();
-    for (0..num_epochs) |epoch| {
-        trainer.zeroGrad();
-        const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
-        const pred = trainer.rt.reshape(output, &.{4});
-        const loss = trainer.mseLoss(pred, &targets);
-        trainer.backward(loss);
-        trainer.step();
-
-        if (epoch % 400 == 0 or epoch == num_epochs - 1) {
-            const loss_val = trainer.rt.copyScalarToHost(loss);
+            const loss_val = trainer.lossValue(loss);
             std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss_val });
         }
     }
@@ -90,10 +54,10 @@ fn xorDemoCuda() !void {
     std.debug.print("\n  Predictions:\n", .{});
     trainer.zeroGrad();
     const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
-    const pred = trainer.rt.reshape(output, &.{4});
-    var pred_host: [4]f32 = undefined;
-    trainer.rt.copyToHost(pred, &pred_host);
-    printPredictions(&pred_host);
+    const pred = trainer.reshape(output, &.{4});
+    var pred_buf: [4]f32 = undefined;
+    const pred_data = trainer.dataSlice(pred, &pred_buf);
+    printPredictions(pred_data);
 }
 
 fn printPredictions(pred: []const f32) void {
