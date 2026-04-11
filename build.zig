@@ -9,6 +9,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const enable_cuda = b.option(bool, "cuda", "Enable CUDA GPU backend (requires CUDA toolkit)") orelse false;
+
     // Linux backend dependencies
     if (target.result.os.tag == .linux) {
         mod.linkSystemLibrary("c", .{});
@@ -20,23 +22,25 @@ pub fn build(b: *std.Build) void {
         } else |_| {}
         mod.linkSystemLibrary("openblas", .{});
 
-        // CUDA GPU backend
-        // WSL2 driver library path (libcuda.so)
-        mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
+        // CUDA GPU backend (opt-in via -Dcuda=true)
+        if (enable_cuda) {
+            // WSL2 driver library path (libcuda.so)
+            mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
 
-        // Nix-managed CUDA paths from devShell
-        if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
-            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
-            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
-        } else |_| {}
+            // Nix-managed CUDA paths from devShell
+            if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
+                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
+                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
+            } else |_| {}
 
-        if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
-            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
-            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
-        } else |_| {}
+            if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
+                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
+                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
+            } else |_| {}
 
-        mod.linkSystemLibrary("cuda", .{});
-        mod.linkSystemLibrary("cublas", .{});
+            mod.linkSystemLibrary("cuda", .{});
+            mod.linkSystemLibrary("cublas", .{});
+        }
     }
 
     // Metal GPU backend (macOS only)
