@@ -40,14 +40,14 @@ zig build xor
 
 ## サンプル
 
-| サンプル | コマンド | 説明 |
-|---------|---------|------|
-| XOR | `zig build xor` | XOR 分類 |
-| Spiral | `zig build spiral` | 2D スパイラル分類 |
-| CharLM | `zig build charlm` | 文字レベル言語モデル |
-| Diffusion | `zig build diffusion` | DDPM 拡散モデル |
-| GPT-2 | `zig build gpt2 -Doptimize=ReleaseFast` | GPT-2 テキスト生成 (GGUF モデルが必要) |
-| Gemma 3 | `zig build gemma3 -Doptimize=ReleaseFast` | Gemma 3 1B テキスト生成 (GGUF モデルが必要) |
+| サンプル | コマンド | 説明 | コード |
+|---------|---------|------|--------|
+| XOR | `zig build xor` | XOR 分類 | [examples/xor/main.zig](examples/xor/main.zig) |
+| Spiral | `zig build spiral` | 2D スパイラル分類 | [examples/spiral/main.zig](examples/spiral/main.zig) |
+| CharLM | `zig build charlm` | 文字レベル言語モデル | [examples/charlm/main.zig](examples/charlm/main.zig) |
+| Diffusion | `zig build diffusion` | DDPM 拡散モデル | [examples/diffusion/main.zig](examples/diffusion/main.zig) |
+| GPT-2 | `zig build gpt2 -Doptimize=ReleaseFast` | GPT-2 テキスト生成 (GGUF モデルが必要) | [examples/gpt2/main.zig](examples/gpt2/main.zig) |
+| Gemma 3 | `zig build gemma3 -Doptimize=ReleaseFast` | Gemma 3 1B テキスト生成 (GGUF モデルが必要) | [examples/gemma3/main.zig](examples/gemma3/main.zig) |
 
 ### モデルのダウンロード
 

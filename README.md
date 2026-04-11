@@ -40,14 +40,14 @@ zig build xor
 
 ## Examples
 
-| Example | Command | Description |
-|---------|---------|-------------|
-| XOR | `zig build xor` | Basic XOR classification |
-| Spiral | `zig build spiral` | 2D spiral classification |
-| CharLM | `zig build charlm` | Character-level language model |
-| Diffusion | `zig build diffusion` | DDPM diffusion model |
-| GPT-2 | `zig build gpt2 -Doptimize=ReleaseFast` | GPT-2 text generation (requires GGUF model) |
-| Gemma 3 | `zig build gemma3 -Doptimize=ReleaseFast` | Gemma 3 1B text generation (requires GGUF model) |
+| Example | Command | Description | Code |
+|---------|---------|-------------|------|
+| XOR | `zig build xor` | Basic XOR classification | [examples/xor/main.zig](examples/xor/main.zig) |
+| Spiral | `zig build spiral` | 2D spiral classification | [examples/spiral/main.zig](examples/spiral/main.zig) |
+| CharLM | `zig build charlm` | Character-level language model | [examples/charlm/main.zig](examples/charlm/main.zig) |
+| Diffusion | `zig build diffusion` | DDPM diffusion model | [examples/diffusion/main.zig](examples/diffusion/main.zig) |
+| GPT-2 | `zig build gpt2 -Doptimize=ReleaseFast` | GPT-2 text generation (requires GGUF model) | [examples/gpt2/main.zig](examples/gpt2/main.zig) |
+| Gemma 3 | `zig build gemma3 -Doptimize=ReleaseFast` | Gemma 3 1B text generation (requires GGUF model) | [examples/gemma3/main.zig](examples/gemma3/main.zig) |
 
 ### Downloading Models
 
