@@ -5,6 +5,8 @@ const Module = compute.Module;
 const AdamState = compute.AdamState;
 const DiffCpuRuntime = nn.unified.DiffCpuRuntime;
 const DiffTensor = nn.unified.DiffTensor;
+const DiffCudaRuntime = nn.unified.DiffCudaRuntime;
+const GpuAdamState = nn.unified.GpuAdamState;
 const Linear = nn.unified.Linear;
 const diffusion = nn.diffusion;
 
@@ -15,12 +17,18 @@ const DIFF_T = 200;
 const DIFF_NUM_SAMPLES = 1024;
 
 pub fn main() !void {
-    try diffusionDemo();
+    var args = std.process.args();
+    _ = args.skip();
+    const mode = args.next() orelse "cpu";
+
+    if (std.mem.eql(u8, mode, "cuda")) {
+        try diffusionDemoCuda();
+    } else {
+        try diffusionDemo();
+    }
 }
 
 /// DDPM Model: MLP with sinusoidal time embedding injection
-/// time_mlp: time_dim → hidden → hidden (SiLU)
-/// main: fc1(x) + tp1(t) → SiLU → fc2(h) + tp2(t) → SiLU → fc3(h) + tp3(t) → SiLU → fc_out(h)
 const DdpmModel = struct {
     time_fc1: Linear(DIFF_TIME_DIM, DIFF_HIDDEN),
     time_fc2: Linear(DIFF_HIDDEN, DIFF_HIDDEN),
@@ -46,7 +54,7 @@ const DdpmModel = struct {
         };
     }
 
-    fn forward(self: DdpmModel, ctx: *DiffCpuRuntime, x_t: DiffTensor, time_emb: DiffTensor) DiffTensor {
+    fn forward(self: DdpmModel, ctx: anytype, x_t: anytype, time_emb: anytype) @TypeOf(x_t) {
         // Time MLP
         const t_h1 = ctx.silu(self.time_fc1.forward(ctx, time_emb));
         const t_hidden = self.time_fc2.forward(ctx, t_h1);
@@ -74,11 +82,41 @@ fn generateGaussianMixture(x_out: []f32, rng: std.Random) void {
     }
 }
 
+fn prepareBatch(
+    rng: std.Random,
+    dataset: []const f32,
+    schedule: anytype,
+    batch_x0: *[DIFF_BATCH * 2]f32,
+    x_t_data: *[DIFF_BATCH * 2]f32,
+    epsilon: *[DIFF_BATCH * 2]f32,
+    time_emb_data: *[DIFF_BATCH * DIFF_TIME_DIM]f32,
+) void {
+    for (0..DIFF_BATCH) |i| {
+        const idx = rng.intRangeAtMost(usize, 0, DIFF_NUM_SAMPLES - 1);
+        batch_x0[i * 2 + 0] = dataset[idx * 2 + 0];
+        batch_x0[i * 2 + 1] = dataset[idx * 2 + 1];
+    }
+
+    var timesteps: [DIFF_BATCH]usize = undefined;
+    for (0..DIFF_BATCH) |i| timesteps[i] = rng.intRangeAtMost(usize, 0, DIFF_T - 1);
+
+    diffusion.boxMullerGaussian(rng, epsilon);
+
+    for (0..DIFF_BATCH) |i| {
+        const t = timesteps[i];
+        x_t_data[i * 2 + 0] = schedule.sqrt_alpha_bars[t] * batch_x0[i * 2 + 0] + schedule.sqrt_one_minus_alpha_bars[t] * epsilon[i * 2 + 0];
+        x_t_data[i * 2 + 1] = schedule.sqrt_alpha_bars[t] * batch_x0[i * 2 + 1] + schedule.sqrt_one_minus_alpha_bars[t] * epsilon[i * 2 + 1];
+    }
+
+    for (0..DIFF_BATCH) |i| {
+        diffusion.sinusoidalEmbedding(DIFF_TIME_DIM, timesteps[i], time_emb_data[i * DIFF_TIME_DIM .. (i + 1) * DIFF_TIME_DIM]);
+    }
+}
+
 fn diffusionDemo() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== DDPM Diffusion (Unified API) ===\n\n", .{});
+    std.debug.print("=== DDPM Diffusion (CPU) ===\n\n", .{});
 
-    // --- Data ---
     var prng = std.Random.DefaultPrng.init(12345);
     const rng = prng.random();
     var dataset: [DIFF_NUM_SAMPLES * 2]f32 = undefined;
@@ -87,7 +125,6 @@ fn diffusionDemo() !void {
 
     const schedule = diffusion.NoiseSchedule(DIFF_T).initLinear(1e-4, 0.02);
 
-    // --- Model ---
     var module = Module.init(allocator);
     defer module.deinit();
     const model = DdpmModel.init(&module);
@@ -96,15 +133,7 @@ fn diffusionDemo() !void {
     defer rt.deinit();
     rt.initParams();
 
-    const total_params = blk: {
-        var sum: usize = 0;
-        for (module.params.items) |meta| {
-            var s: usize = 1;
-            for (meta.shape) |d| s *= d;
-            sum += s;
-        }
-        break :blk sum;
-    };
+    const total_params = module.totalParamElements();
     std.debug.print("  Model parameters: {d} (~{d}KB)\n", .{ total_params, total_params * 4 / 1024 });
     std.debug.print("  Diffusion steps: T={d}, batch={d}\n\n", .{ DIFF_T, DIFF_BATCH });
 
@@ -113,7 +142,6 @@ fn diffusionDemo() !void {
     var adam = try AdamState.init(allocator, sizes);
     defer adam.deinit();
 
-    // --- Training ---
     const num_epochs = 1000;
     var timer = std.time.Timer.start() catch unreachable;
 
@@ -121,36 +149,12 @@ fn diffusionDemo() !void {
         rt.resetArena();
         rt.zeroGrad();
 
-        // Sample batch
         var batch_x0: [DIFF_BATCH * 2]f32 = undefined;
-        for (0..DIFF_BATCH) |i| {
-            const idx = rng.intRangeAtMost(usize, 0, DIFF_NUM_SAMPLES - 1);
-            batch_x0[i * 2 + 0] = dataset[idx * 2 + 0];
-            batch_x0[i * 2 + 1] = dataset[idx * 2 + 1];
-        }
-
-        // Random timesteps + noise
-        var timesteps: [DIFF_BATCH]usize = undefined;
-        for (0..DIFF_BATCH) |i| timesteps[i] = rng.intRangeAtMost(usize, 0, DIFF_T - 1);
-
-        var epsilon: [DIFF_BATCH * 2]f32 = undefined;
-        diffusion.boxMullerGaussian(rng, &epsilon);
-
-        // Forward diffusion: x_t = sqrt(alpha_bar) * x0 + sqrt(1-alpha_bar) * eps
         var x_t_data: [DIFF_BATCH * 2]f32 = undefined;
-        for (0..DIFF_BATCH) |i| {
-            const t = timesteps[i];
-            x_t_data[i * 2 + 0] = schedule.sqrt_alpha_bars[t] * batch_x0[i * 2 + 0] + schedule.sqrt_one_minus_alpha_bars[t] * epsilon[i * 2 + 0];
-            x_t_data[i * 2 + 1] = schedule.sqrt_alpha_bars[t] * batch_x0[i * 2 + 1] + schedule.sqrt_one_minus_alpha_bars[t] * epsilon[i * 2 + 1];
-        }
-
-        // Sinusoidal time embeddings
+        var epsilon: [DIFF_BATCH * 2]f32 = undefined;
         var time_emb_data: [DIFF_BATCH * DIFF_TIME_DIM]f32 = undefined;
-        for (0..DIFF_BATCH) |i| {
-            diffusion.sinusoidalEmbedding(DIFF_TIME_DIM, timesteps[i], time_emb_data[i * DIFF_TIME_DIM .. (i + 1) * DIFF_TIME_DIM]);
-        }
+        prepareBatch(rng, &dataset, schedule, &batch_x0, &x_t_data, &epsilon, &time_emb_data);
 
-        // Forward + loss
         const x_t = rt.makeTensor(&x_t_data, &.{ DIFF_BATCH, 2 });
         const time_emb = rt.makeTensor(&time_emb_data, &.{ DIFF_BATCH, DIFF_TIME_DIM });
         const eps_pred = model.forward(&rt, x_t, time_emb);
@@ -167,7 +171,76 @@ fn diffusionDemo() !void {
     const train_ms = timer.read() / 1_000_000;
     std.debug.print("\n  Training time: {d}ms\n\n", .{train_ms});
 
-    // --- DDPM Sampling ---
+    sampleAndPrint(&rt, model, rng, schedule);
+}
+
+fn diffusionDemoCuda() !void {
+    const allocator = std.heap.page_allocator;
+    std.debug.print("=== DDPM Diffusion (CUDA) ===\n\n", .{});
+
+    var prng = std.Random.DefaultPrng.init(12345);
+    const rng = prng.random();
+    var dataset: [DIFF_NUM_SAMPLES * 2]f32 = undefined;
+    generateGaussianMixture(&dataset, rng);
+    std.debug.print("  Dataset: {d} points, 4 Gaussian clusters\n", .{DIFF_NUM_SAMPLES});
+
+    const schedule = diffusion.NoiseSchedule(DIFF_T).initLinear(1e-4, 0.02);
+
+    var module = Module.init(allocator);
+    defer module.deinit();
+    const model = DdpmModel.init(&module);
+
+    const cuda = nn.cuda;
+    var cuda_ctx = try cuda.CudaContext.init(0);
+    defer cuda_ctx.deinit();
+
+    var rt = try DiffCudaRuntime.init(&module, &cuda_ctx, allocator);
+    defer rt.deinit();
+    rt.initParams();
+
+    const total_params = module.totalParamElements();
+    std.debug.print("  Model parameters: {d} (~{d}KB)\n", .{ total_params, total_params * 4 / 1024 });
+    std.debug.print("  Diffusion steps: T={d}, batch={d}\n\n", .{ DIFF_T, DIFF_BATCH });
+
+    const sizes = try module.paramSizes(allocator);
+    defer allocator.free(sizes);
+    var adam = try GpuAdamState.init(allocator, &cuda_ctx, sizes);
+    defer adam.deinit();
+
+    const num_epochs = 1000;
+    var timer = std.time.Timer.start() catch unreachable;
+
+    for (0..num_epochs) |epoch| {
+        rt.resetArena();
+        rt.zeroGrad();
+
+        var batch_x0: [DIFF_BATCH * 2]f32 = undefined;
+        var x_t_data: [DIFF_BATCH * 2]f32 = undefined;
+        var epsilon: [DIFF_BATCH * 2]f32 = undefined;
+        var time_emb_data: [DIFF_BATCH * DIFF_TIME_DIM]f32 = undefined;
+        prepareBatch(rng, &dataset, schedule, &batch_x0, &x_t_data, &epsilon, &time_emb_data);
+
+        const x_t = rt.makeTensor(&x_t_data, &.{ DIFF_BATCH, 2 });
+        const time_emb = rt.makeTensor(&time_emb_data, &.{ DIFF_BATCH, DIFF_TIME_DIM });
+        const eps_pred = model.forward(&rt, x_t, time_emb);
+        const loss = rt.mseLoss(rt.reshape(eps_pred, &.{DIFF_BATCH * 2}), &epsilon);
+
+        rt.backward(loss);
+        rt.applyAdam(&adam, 1e-3, 0.9, 0.999, 1e-8, 0);
+
+        if (epoch % 500 == 0 or epoch == num_epochs - 1) {
+            const loss_val = rt.copyScalarToHost(loss);
+            std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss_val });
+        }
+    }
+
+    const train_ms = timer.read() / 1_000_000;
+    std.debug.print("\n  Training time: {d}ms\n\n", .{train_ms});
+
+    sampleAndPrintCuda(&rt, model, rng, schedule);
+}
+
+fn sampleAndPrint(rt: *DiffCpuRuntime, model: DdpmModel, rng: std.Random, schedule: anytype) void {
     std.debug.print("  Sampling 64 points via DDPM reverse process...\n", .{});
     const N_GEN = 64;
     var x_gen: [N_GEN * 2]f32 = undefined;
@@ -185,7 +258,7 @@ fn diffusionDemo() !void {
 
         const xg = rt.makeTensor(&x_gen, &.{ N_GEN, 2 });
         const te = rt.makeTensor(&time_emb_gen, &.{ N_GEN, DIFF_TIME_DIM });
-        const gen_pred = model.forward(&rt, xg, te);
+        const gen_pred = model.forward(rt, xg, te);
 
         var noise_z: [N_GEN * 2]f32 = undefined;
         diffusion.boxMullerGaussian(rng, &noise_z);
@@ -202,7 +275,52 @@ fn diffusionDemo() !void {
         }
     }
 
-    // Print generated samples + cluster analysis
+    printResults(&x_gen);
+}
+
+fn sampleAndPrintCuda(rt: *DiffCudaRuntime, model: DdpmModel, rng: std.Random, schedule: anytype) void {
+    std.debug.print("  Sampling 64 points via DDPM reverse process...\n", .{});
+    const N_GEN = 64;
+    var x_gen: [N_GEN * 2]f32 = undefined;
+    diffusion.boxMullerGaussian(rng, &x_gen);
+
+    var t_idx: usize = DIFF_T;
+    while (t_idx > 0) {
+        t_idx -= 1;
+        rt.resetArena();
+
+        var time_emb_gen: [N_GEN * DIFF_TIME_DIM]f32 = undefined;
+        for (0..N_GEN) |i| {
+            diffusion.sinusoidalEmbedding(DIFF_TIME_DIM, t_idx, time_emb_gen[i * DIFF_TIME_DIM .. (i + 1) * DIFF_TIME_DIM]);
+        }
+
+        const xg = rt.makeTensor(&x_gen, &.{ N_GEN, 2 });
+        const te = rt.makeTensor(&time_emb_gen, &.{ N_GEN, DIFF_TIME_DIM });
+        const gen_pred = model.forward(rt, xg, te);
+
+        var pred_host: [N_GEN * 2]f32 = undefined;
+        rt.copyToHost(gen_pred, &pred_host);
+
+        var noise_z: [N_GEN * 2]f32 = undefined;
+        diffusion.boxMullerGaussian(rng, &noise_z);
+
+        for (0..N_GEN) |i| {
+            for (0..2) |d| {
+                const idx = i * 2 + d;
+                const inv_sqrt_alpha = 1.0 / @sqrt(schedule.alphas[t_idx]);
+                const coeff = schedule.betas[t_idx] / schedule.sqrt_one_minus_alpha_bars[t_idx];
+                const sigma = @sqrt(schedule.betas[t_idx]);
+                x_gen[idx] = inv_sqrt_alpha * (x_gen[idx] - coeff * pred_host[idx]);
+                if (t_idx > 0) x_gen[idx] += sigma * noise_z[idx];
+            }
+        }
+    }
+
+    printResults(&x_gen);
+}
+
+fn printResults(x_gen: []const f32) void {
+    const N_GEN = 64;
     std.debug.print("\n  Generated samples (x, y):\n", .{});
     for (0..N_GEN) |i| {
         std.debug.print("    ({d:>7.3}, {d:>7.3})", .{ x_gen[i * 2], x_gen[i * 2 + 1] });

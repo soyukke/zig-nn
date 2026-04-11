@@ -45,6 +45,8 @@ pub const mps_graph = if (is_macos) @import("backend/mps_graph.zig") else struct
 // CUDA (Linux only)
 pub const cuda = if (is_linux) @import("backend/cuda.zig") else struct {};
 pub const cuda_runtime = if (is_linux) @import("cuda_runtime.zig") else struct {};
+pub const diff_cuda_runtime = if (is_linux) @import("diff_cuda_runtime.zig") else struct {};
+pub const cuda_trainer = if (is_linux) @import("cuda_trainer.zig") else struct {};
 
 // Autograd
 pub const Variable = @import("autograd/variable.zig").Variable;
@@ -152,6 +154,10 @@ pub const unified = struct {
     pub const BatchIterator = @import("data/dataloader.zig").BatchIterator;
     pub const Conv2d = @import("nn/graph_conv2d.zig").Conv2d;
     pub const MaxPool2d = @import("nn/graph_conv2d.zig").MaxPool2d;
+    pub const DiffCudaRuntime = if (is_linux) @import("diff_cuda_runtime.zig").DiffCudaRuntime else struct {};
+    pub const DiffCudaTensor = if (is_linux) @import("diff_cuda_runtime.zig").DiffCudaTensor else struct {};
+    pub const GpuAdamState = if (is_linux) @import("diff_cuda_runtime.zig").GpuAdamState else struct {};
+    pub const CudaTrainer = if (is_linux) @import("cuda_trainer.zig").CudaTrainer else struct {};
 };
 
 // Graph NN layers (legacy aliases, MPSGraph backend - macOS only)

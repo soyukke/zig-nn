@@ -4,9 +4,18 @@ const Sequential = nn.unified.Sequential;
 const Linear = nn.unified.Linear;
 const ReLU = nn.unified.ReLU;
 const Trainer = nn.unified.Trainer;
+const CudaTrainer = nn.unified.CudaTrainer;
 
 pub fn main() !void {
-    try spiralDemo();
+    var args = std.process.args();
+    _ = args.skip();
+    const mode = args.next() orelse "cpu";
+
+    if (std.mem.eql(u8, mode, "cuda")) {
+        try spiralDemoCuda();
+    } else {
+        try spiralDemo();
+    }
 }
 
 const SPIRAL_N_PER_CLASS = 50;
@@ -61,24 +70,21 @@ const SpiralModel = Sequential(.{ Linear(2, 32), ReLU, Linear(32, 32), ReLU, Lin
 
 fn spiralDemo() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Spiral Classification (Trainer API: CrossEntropy + Adam) ===\n\n", .{});
+    std.debug.print("=== Spiral Classification (CPU: CrossEntropy + Adam) ===\n\n", .{});
 
-    // Generate data
     var x_data: [SPIRAL_TOTAL * 2]f32 = undefined;
     var y_data: [SPIRAL_TOTAL]u32 = undefined;
     generateSpiralData(&x_data, &y_data);
 
     std.debug.print("  Data: {d} samples, {d} classes\n", .{ SPIRAL_TOTAL, SPIRAL_N_CLASSES });
 
-    // 1. Trainer (Module + Runtime + Adam を一括管理)
     var trainer = try Trainer(SpiralModel).init(allocator, .{ .lr = 0.01 });
     defer trainer.deinit();
 
-    // 2. Training loop
     const num_epochs = 500;
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
-        const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 })); // [150, 3]
+        const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
         const loss = trainer.crossEntropyLoss(logits, &y_data);
         trainer.backward(loss);
         trainer.step();
@@ -91,17 +97,63 @@ fn spiralDemo() !void {
         }
     }
 
-    // 3. Final accuracy
     trainer.zeroGrad();
     const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
     const final_acc = computeAccuracy(SPIRAL_TOTAL, 3, logits.data[0 .. SPIRAL_TOTAL * 3], &y_data);
     std.debug.print("\n  Final accuracy: {d:.1}%\n", .{final_acc * 100.0});
+    printSamplePredictions(logits.data[0 .. SPIRAL_TOTAL * 3], &x_data, &y_data);
+}
 
-    // Show a few predictions
+fn spiralDemoCuda() !void {
+    const allocator = std.heap.page_allocator;
+    std.debug.print("=== Spiral Classification (CUDA: CrossEntropy + Adam) ===\n\n", .{});
+
+    var x_data: [SPIRAL_TOTAL * 2]f32 = undefined;
+    var y_data: [SPIRAL_TOTAL]u32 = undefined;
+    generateSpiralData(&x_data, &y_data);
+
+    std.debug.print("  Data: {d} samples, {d} classes\n", .{ SPIRAL_TOTAL, SPIRAL_N_CLASSES });
+
+    const cuda = nn.cuda;
+    var cuda_ctx = try cuda.CudaContext.init(0);
+    defer cuda_ctx.deinit();
+
+    var trainer = try CudaTrainer(SpiralModel).init(allocator, &cuda_ctx, .{ .lr = 0.01 });
+    defer trainer.deinit();
+
+    const num_epochs = 500;
+    for (0..num_epochs) |epoch| {
+        trainer.zeroGrad();
+        const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
+        const loss = trainer.crossEntropyLoss(logits, &y_data);
+        trainer.backward(loss);
+        trainer.step();
+
+        if (epoch % 100 == 0 or epoch == num_epochs - 1) {
+            const loss_val = trainer.rt.copyScalarToHost(loss);
+            var logits_host: [SPIRAL_TOTAL * 3]f32 = undefined;
+            trainer.rt.copyToHost(logits, &logits_host);
+            const acc = computeAccuracy(SPIRAL_TOTAL, 3, &logits_host, &y_data);
+            std.debug.print("  Epoch {d:>3}: loss = {d:.4}, accuracy = {d:.1}%\n", .{
+                epoch, loss_val, acc * 100.0,
+            });
+        }
+    }
+
+    trainer.zeroGrad();
+    const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
+    var logits_host: [SPIRAL_TOTAL * 3]f32 = undefined;
+    trainer.rt.copyToHost(logits, &logits_host);
+    const final_acc = computeAccuracy(SPIRAL_TOTAL, 3, &logits_host, &y_data);
+    std.debug.print("\n  Final accuracy: {d:.1}%\n", .{final_acc * 100.0});
+    printSamplePredictions(&logits_host, &x_data, &y_data);
+}
+
+fn printSamplePredictions(logits_data: []const f32, x_data: []const f32, y_data: []const u32) void {
     std.debug.print("\n  Sample predictions:\n", .{});
     const show_indices = [_]usize{ 0, 25, 49, 50, 75, 99, 100, 125, 149 };
     for (show_indices) |idx| {
-        const pred_class = argmax(3, logits.data[idx * 3 .. (idx + 1) * 3]);
+        const pred_class = argmax(3, logits_data[idx * 3 .. (idx + 1) * 3]);
         const correct: []const u8 = if (pred_class == y_data[idx]) "OK" else "NG";
         std.debug.print("    [{d:>3}] ({d:>6.3}, {d:>6.3}) -> pred={d} target={d} {s}\n", .{
             idx, x_data[idx * 2], x_data[idx * 2 + 1], pred_class, y_data[idx], correct,
