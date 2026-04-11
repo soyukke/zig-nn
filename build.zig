@@ -9,8 +9,32 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
-    // CUDA GPU backend (Linux only)
+    // Linux backend dependencies
     if (target.result.os.tag == .linux) {
+        mod.linkSystemLibrary("c", .{});
+
+        // OpenBLAS (CBLAS) for CPU backend
+        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
+            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
+            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
+        } else |_| {}
+        mod.linkSystemLibrary("openblas", .{});
+
+        // CUDA GPU backend
+        // WSL2 driver library path (libcuda.so)
+        mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
+
+        // Nix-managed CUDA paths from devShell
+        if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
+            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
+            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
+            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
+            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
+        } else |_| {}
+
         mod.linkSystemLibrary("cuda", .{});
         mod.linkSystemLibrary("cublas", .{});
     }
