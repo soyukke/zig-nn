@@ -1,37 +1,58 @@
-/// Trainer: PyTorch ライクな training ループヘルパー
+/// Trainer: PyTorch ライクな training ループヘルパー (CPU / CUDA 統一)
 ///
-/// Module + DiffCpuRuntime + AdamState + Config を1つにまとめ、
-/// training ループのボイラープレートを削減する。
+/// comptime `device` パラメータで CPU / CUDA を切り替える。
+/// vtable なし、runtime dispatch なし。全て comptime で解決。
 ///
-/// Usage:
-///   const MLP = Sequential(.{ Linear_(2, 16), ReLU, Linear_(16, 1) });
-///   var trainer = try Trainer(MLP).init(allocator, .{ .lr = 1e-3 });
-///   defer trainer.deinit();
+/// Usage (CPU):
+///   var trainer = try Trainer(MLP, .cpu).init(allocator, {}, .{ .lr = 1e-3 });
 ///
-///   for (0..epochs) |_| {
-///       trainer.zeroGrad();
-///       const out = trainer.forward(trainer.tensor(&input, &.{1, 2}));
-///       const loss = trainer.mseLoss(out, &target);
-///       trainer.backward(loss);
-///       trainer.step();
-///   }
+/// Usage (CUDA):
+///   var trainer = try Trainer(MLP, .cuda).init(allocator, &cuda_ctx, .{ .lr = 1e-3 });
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
+const is_linux = builtin.os.tag == .linux;
+
 const compute = @import("compute.zig");
 const Module = compute.Module;
 const AdamState = compute.AdamState;
+
+// CPU types (常に利用可)
 const diff_cpu = @import("diff_cpu_runtime.zig");
 const DiffCpuRuntime = diff_cpu.DiffCpuRuntime;
 const DiffTensor = diff_cpu.DiffTensor;
 
-pub fn Trainer(comptime ModelType: type) type {
+// CUDA types (Linux のみ、comptime で解決)
+const cuda_mod = if (is_linux) @import("backend/cuda.zig") else struct {
+    pub const CudaContext = void;
+};
+const CudaContext = cuda_mod.CudaContext;
+const diff_cuda = if (is_linux) @import("diff_cuda_runtime.zig") else struct {
+    pub const DiffCudaRuntime = void;
+    pub const DiffCudaTensor = void;
+    pub const GpuAdamState = void;
+};
+const DiffCudaRuntime = diff_cuda.DiffCudaRuntime;
+const DiffCudaTensor = diff_cuda.DiffCudaTensor;
+const GpuAdamState = diff_cuda.GpuAdamState;
+
+pub const Device = enum { cpu, cuda };
+
+pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
+    const is_cuda = (device == .cuda);
+    const Rt = if (is_cuda) DiffCudaRuntime else DiffCpuRuntime;
+    const Adam = if (is_cuda) GpuAdamState else AdamState;
+    const DeviceCtx = if (is_cuda) *CudaContext else void;
+
     return struct {
         allocator: Allocator,
         module: *Module,
         model: ModelType,
-        rt: *DiffCpuRuntime,
-        adam: AdamState,
+        rt: *Rt,
+        adam: Adam,
         config: Config,
+
+        pub const Tensor = if (is_cuda) DiffCudaTensor else DiffTensor;
 
         pub const Config = struct {
             lr: f32 = 1e-3,
@@ -42,19 +63,32 @@ pub fn Trainer(comptime ModelType: type) type {
             max_grad_norm: ?f32 = null,
         };
 
-        pub fn init(allocator: Allocator, config: Config) !@This() {
-            // Heap-allocate Module and Runtime for pointer stability
+        pub fn init(allocator: Allocator, device_ctx: DeviceCtx, config: Config) !@This() {
             const module = try allocator.create(Module);
+            errdefer {
+                module.deinit();
+                allocator.destroy(module);
+            }
             module.* = Module.init(allocator);
             const model = ModelType.init(module);
 
-            const rt = try allocator.create(DiffCpuRuntime);
-            rt.* = try DiffCpuRuntime.init(module, allocator);
+            const rt = try allocator.create(Rt);
+            errdefer {
+                rt.deinit();
+                allocator.destroy(rt);
+            }
+            rt.* = if (is_cuda)
+                try DiffCudaRuntime.init(module, device_ctx, allocator)
+            else
+                try DiffCpuRuntime.init(module, allocator);
             rt.initParams();
 
             const sizes = try module.paramSizes(allocator);
             defer allocator.free(sizes);
-            const adam = try AdamState.init(allocator, sizes);
+            const adam = if (is_cuda)
+                try GpuAdamState.init(allocator, device_ctx, sizes)
+            else
+                try AdamState.init(allocator, sizes);
 
             return .{
                 .allocator = allocator,
@@ -83,12 +117,12 @@ pub fn Trainer(comptime ModelType: type) type {
         }
 
         /// モデルの forward pass
-        pub fn forward(self: *@This(), x: DiffTensor) DiffTensor {
+        pub fn forward(self: *@This(), x: Tensor) Tensor {
             return self.model.forward(self.rt, x);
         }
 
         /// 損失からの逆伝播
-        pub fn backward(self: *@This(), loss: DiffTensor) void {
+        pub fn backward(self: *@This(), loss: Tensor) void {
             self.rt.backward(loss);
         }
 
@@ -114,44 +148,81 @@ pub fn Trainer(comptime ModelType: type) type {
 
         // ── Tensor creation ──
 
-        pub fn tensor(self: *@This(), data: []f32, shape: []const usize) DiffTensor {
+        pub fn tensor(self: *@This(), data: []f32, shape: []const usize) Tensor {
             return self.rt.makeTensor(data, shape);
         }
 
-        pub fn param(self: *@This(), handle: compute.ParamHandle) DiffTensor {
+        pub fn param(self: *@This(), handle: compute.ParamHandle) Tensor {
             return self.rt.param(handle);
+        }
+
+        // ── Tensor operations ──
+
+        pub fn reshape(self: *@This(), t: Tensor, new_shape: []const usize) Tensor {
+            return self.rt.reshape(t, new_shape);
         }
 
         // ── Loss functions ──
 
-        pub fn mseLoss(self: *@This(), pred: DiffTensor, target: []const f32) DiffTensor {
+        pub fn mseLoss(self: *@This(), pred: Tensor, target: []const f32) Tensor {
             return self.rt.mseLoss(pred, target);
         }
 
-        pub fn crossEntropyLoss(self: *@This(), logits: DiffTensor, indices: []const u32) DiffTensor {
+        pub fn crossEntropyLoss(self: *@This(), logits: Tensor, indices: []const u32) Tensor {
             return self.rt.crossEntropyLossWithIndices(logits, indices);
         }
 
-        pub fn bceLoss(self: *@This(), logits: DiffTensor, target: []const f32) DiffTensor {
+        pub fn bceLoss(self: *@This(), logits: Tensor, target: []const f32) Tensor {
             return self.rt.bceLossWithLogits(logits, target);
+        }
+
+        // ── Device helper methods ──
+
+        /// loss のスカラー値取得 (CPU: 直接読み、CUDA: D2H コピー)
+        pub fn lossValue(self: *@This(), loss: Tensor) f32 {
+            return if (is_cuda) self.rt.copyScalarToHost(loss) else loss.data[0];
+        }
+
+        /// テンソルデータをホストバッファにコピー
+        pub fn copyToHost(self: *@This(), t: Tensor, dst: []f32) void {
+            if (is_cuda) {
+                self.rt.copyToHost(t, dst);
+            } else {
+                @memcpy(dst, t.data[0..dst.len]);
+            }
+        }
+
+        /// ホスト上の読み取り用スライスを返す (CPU: ゼロコピー、CUDA: dst にコピー)
+        /// 注意: 返り値の lifetime は次の zeroGrad() / resetArena() まで。
+        /// CPU ではテンソル内部バッファを直接参照するため、arena リセット後はアクセス不可。
+        pub fn dataSlice(self: *@This(), t: Tensor, dst: []f32) []const f32 {
+            if (is_cuda) {
+                self.rt.copyToHost(t, dst);
+                return dst;
+            } else {
+                return t.data[0..dst.len];
+            }
         }
 
         // ── Custom loss ──
 
         /// 事前計算された loss から backward + step を一括実行
-        pub fn backwardAndStep(self: *@This(), loss: DiffTensor) f32 {
+        pub fn backwardAndStep(self: *@This(), loss: Tensor) f32 {
+            const val = self.lossValue(loss);
             self.backward(loss);
             self.step();
-            return loss.data[0];
+            return val;
         }
 
         // ── Checkpoint ──
 
         pub fn save(self: *@This(), path: []const u8) !void {
+            if (is_cuda) @compileError("save() is not yet supported for CUDA");
             try self.rt.saveCheckpoint(&self.adam, path);
         }
 
         pub fn load(self: *@This(), path: []const u8) !void {
+            if (is_cuda) @compileError("load() is not yet supported for CUDA");
             try self.rt.loadCheckpoint(&self.adam, path);
         }
 
@@ -202,7 +273,7 @@ test "Trainer: XOR-like training loop" {
         Linear_(8, 1),
     });
 
-    var trainer = try Trainer(MLP).init(testing.allocator, .{ .lr = 1e-2 });
+    var trainer = try Trainer(MLP, .cpu).init(testing.allocator, {}, .{ .lr = 1e-2 });
     defer trainer.deinit();
 
     try testing.expectEqual(@as(usize, 4), trainer.paramCount()); // W1, b1, W2, b2
@@ -218,8 +289,8 @@ test "Trainer: XOR-like training loop" {
         trainer.zeroGrad();
         const out = trainer.forward(trainer.tensor(&input_data, &.{ 1, 2 }));
         const loss = trainer.mseLoss(out, &target);
-        if (i == 0) initial_loss = loss.data[0];
-        if (i == 99) final_loss = loss.data[0];
+        if (i == 0) initial_loss = trainer.lossValue(loss);
+        if (i == 99) final_loss = trainer.lossValue(loss);
         trainer.backward(loss);
         trainer.step();
     }
@@ -231,7 +302,7 @@ test "Trainer: XOR-like training loop" {
 test "Trainer: gradient clipping" {
     const Model = Sequential(.{Linear_(2, 1)});
 
-    var trainer = try Trainer(Model).init(testing.allocator, .{
+    var trainer = try Trainer(Model, .cpu).init(testing.allocator, {}, .{
         .lr = 1e-2,
         .max_grad_norm = 1.0,
     });
@@ -245,13 +316,13 @@ test "Trainer: gradient clipping" {
     const loss = trainer.mseLoss(out, &target);
     trainer.backward(loss);
     trainer.step(); // should not crash with large gradients
-    try testing.expect(loss.data[0] > 0);
+    try testing.expect(trainer.lossValue(loss) > 0);
 }
 
 test "Trainer: eval/train mode" {
     const Model = Sequential(.{Linear_(2, 1)});
 
-    var trainer = try Trainer(Model).init(testing.allocator, .{});
+    var trainer = try Trainer(Model, .cpu).init(testing.allocator, {}, .{});
     defer trainer.deinit();
 
     trainer.eval();
@@ -263,7 +334,7 @@ test "Trainer: eval/train mode" {
 test "Trainer: save and load checkpoint" {
     const Model = Sequential(.{Linear_(2, 4)});
 
-    var trainer = try Trainer(Model).init(testing.allocator, .{ .lr = 1e-2 });
+    var trainer = try Trainer(Model, .cpu).init(testing.allocator, {}, .{ .lr = 1e-2 });
     defer trainer.deinit();
 
     // Train a few steps
@@ -314,7 +385,7 @@ test "Trainer: backwardAndStep with custom loss" {
         Linear_(4, 1),
     });
 
-    var trainer = try Trainer(Model).init(testing.allocator, .{ .lr = 1e-2 });
+    var trainer = try Trainer(Model, .cpu).init(testing.allocator, {}, .{ .lr = 1e-2 });
     defer trainer.deinit();
 
     var input_data = [_]f32{ 1.0, 0.0 };
@@ -346,7 +417,7 @@ test "Trainer: backwardAndStep with custom loss" {
 test "Trainer: crossEntropyLoss" {
     const Model = Sequential(.{Linear_(3, 4)});
 
-    var trainer = try Trainer(Model).init(testing.allocator, .{ .lr = 1e-2 });
+    var trainer = try Trainer(Model, .cpu).init(testing.allocator, {}, .{ .lr = 1e-2 });
     defer trainer.deinit();
 
     var input_data = [_]f32{ 1, 2, 3, 4, 5, 6 }; // [2, 3]
@@ -359,8 +430,8 @@ test "Trainer: crossEntropyLoss" {
         trainer.zeroGrad();
         const out = trainer.forward(trainer.tensor(&input_data, &.{ 2, 3 }));
         const loss = trainer.crossEntropyLoss(out, &indices);
-        if (i == 0) initial_loss = loss.data[0];
-        if (i == 49) final_loss = loss.data[0];
+        if (i == 0) initial_loss = trainer.lossValue(loss);
+        if (i == 49) final_loss = trainer.lossValue(loss);
         trainer.backward(loss);
         trainer.step();
     }
