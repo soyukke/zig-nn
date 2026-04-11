@@ -82,6 +82,7 @@ fn spiralDemo() !void {
     defer trainer.deinit();
 
     const num_epochs = 500;
+    var timer = try std.time.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
@@ -96,6 +97,8 @@ fn spiralDemo() !void {
             });
         }
     }
+    const elapsed_ms = timer.read() / 1_000_000;
+    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
 
     trainer.zeroGrad();
     const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
@@ -122,6 +125,7 @@ fn spiralDemoCuda() !void {
     defer trainer.deinit();
 
     const num_epochs = 500;
+    var timer = try std.time.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
@@ -139,6 +143,8 @@ fn spiralDemoCuda() !void {
             });
         }
     }
+    const elapsed_ms = timer.read() / 1_000_000;
+    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
 
     trainer.zeroGrad();
     const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));

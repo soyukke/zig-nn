@@ -32,6 +32,7 @@ fn xorDemo() !void {
     const targets = [_]f32{ 0, 1, 1, 0 };
 
     const num_epochs = 2000;
+    var timer = try std.time.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
@@ -44,6 +45,8 @@ fn xorDemo() !void {
             std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss.data[0] });
         }
     }
+    const elapsed_ms = timer.read() / 1_000_000;
+    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
 
     std.debug.print("\n  Predictions:\n", .{});
     trainer.zeroGrad();
@@ -67,6 +70,7 @@ fn xorDemoCuda() !void {
     const targets = [_]f32{ 0, 1, 1, 0 };
 
     const num_epochs = 2000;
+    var timer = try std.time.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
@@ -80,6 +84,8 @@ fn xorDemoCuda() !void {
             std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss_val });
         }
     }
+    const elapsed_ms = timer.read() / 1_000_000;
+    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
 
     std.debug.print("\n  Predictions:\n", .{});
     trainer.zeroGrad();
