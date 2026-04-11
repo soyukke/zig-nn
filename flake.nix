@@ -32,6 +32,7 @@
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             openblas32.dev
             pkgs.cudaPackages.cuda_cudart
+            pkgs.cudaPackages.cuda_nvcc
             pkgs.cudaPackages.libcublas.lib
           ];
           shellHook = ''
