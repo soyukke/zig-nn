@@ -861,6 +861,101 @@ pub fn dispatchSiluFwdCache(
     ) catch unreachable;
 }
 
+/// Fused Add+SiLU forward with cache: func(out, sig_cache, a, b, a_total, b_total).
+pub fn dispatchAddSiluFwdCache(
+    ctx: *CudaContext,
+    func: CUfunction,
+    out_dptr: CUdeviceptr,
+    sig_cache_dptr: CUdeviceptr,
+    a_dptr: CUdeviceptr,
+    b_dptr: CUdeviceptr,
+    a_total: usize,
+    b_total: usize,
+) void {
+    var a_i: c_int = @intCast(a_total);
+    var b_i: c_int = @intCast(b_total);
+    var params = [_]?*anyopaque{
+        @ptrCast(@constCast(&out_dptr)),
+        @ptrCast(@constCast(&sig_cache_dptr)),
+        @ptrCast(@constCast(&a_dptr)),
+        @ptrCast(@constCast(&b_dptr)),
+        @ptrCast(&a_i),
+        @ptrCast(&b_i),
+    };
+    ctx.launchKernel(
+        func,
+        .{ gridFor(a_total), 1, 1 },
+        .{ BLOCK_SIZE, 1, 1 },
+        0,
+        &params,
+    ) catch unreachable;
+}
+
+/// Fused Add+SiLU backward (same-size): func(ga, gb, go, sig_cache, a, b, n).
+pub fn dispatchAddSiluBackwardSame(
+    ctx: *CudaContext,
+    func: CUfunction,
+    ga_dptr: CUdeviceptr,
+    gb_dptr: CUdeviceptr,
+    go_dptr: CUdeviceptr,
+    sig_cache_dptr: CUdeviceptr,
+    a_dptr: CUdeviceptr,
+    b_dptr: CUdeviceptr,
+    n: usize,
+) void {
+    var n_i: c_int = @intCast(n);
+    var params = [_]?*anyopaque{
+        @ptrCast(@constCast(&ga_dptr)),
+        @ptrCast(@constCast(&gb_dptr)),
+        @ptrCast(@constCast(&go_dptr)),
+        @ptrCast(@constCast(&sig_cache_dptr)),
+        @ptrCast(@constCast(&a_dptr)),
+        @ptrCast(@constCast(&b_dptr)),
+        @ptrCast(&n_i),
+    };
+    ctx.launchKernel(
+        func,
+        .{ gridFor(n), 1, 1 },
+        .{ BLOCK_SIZE, 1, 1 },
+        0,
+        &params,
+    ) catch unreachable;
+}
+
+/// Fused Add+SiLU backward (broadcast b): func(ga, gb, go, sig_cache, a, b, a_total, b_total).
+pub fn dispatchAddSiluBackwardBcast(
+    ctx: *CudaContext,
+    func: CUfunction,
+    ga_dptr: CUdeviceptr,
+    gb_dptr: CUdeviceptr,
+    go_dptr: CUdeviceptr,
+    sig_cache_dptr: CUdeviceptr,
+    a_dptr: CUdeviceptr,
+    b_dptr: CUdeviceptr,
+    a_total: usize,
+    b_total: usize,
+) void {
+    var a_i: c_int = @intCast(a_total);
+    var b_i: c_int = @intCast(b_total);
+    var params = [_]?*anyopaque{
+        @ptrCast(@constCast(&ga_dptr)),
+        @ptrCast(@constCast(&gb_dptr)),
+        @ptrCast(@constCast(&go_dptr)),
+        @ptrCast(@constCast(&sig_cache_dptr)),
+        @ptrCast(@constCast(&a_dptr)),
+        @ptrCast(@constCast(&b_dptr)),
+        @ptrCast(&a_i),
+        @ptrCast(&b_i),
+    };
+    ctx.launchKernel(
+        func,
+        .{ gridFor(a_total), 1, 1 },
+        .{ BLOCK_SIZE, 1, 1 },
+        0,
+        &params,
+    ) catch unreachable;
+}
+
 /// Dropout forward: func(out, mask, x, seed, rate, inv_keep, n).
 pub fn dispatchDropout(
     ctx: *CudaContext,

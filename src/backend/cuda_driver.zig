@@ -48,3 +48,4 @@ pub extern "c" fn cuLaunchKernel(
     extra: ?[*]?*anyopaque,
 ) CUresult;
 pub extern "c" fn cuMemsetD32_v2(dstDevice: CUdeviceptr, ui: c_uint, N: usize) CUresult;
+pub extern "c" fn cuMemsetD32Async(dstDevice: CUdeviceptr, ui: c_uint, N: usize, stream: ?CUstream) CUresult;

@@ -19,6 +19,69 @@ const cublasHandle_t = cuda_blas.cublasHandle_t;
 const cublasOperation_t = cuda_blas.cublasOperation_t;
 const CUBLAS_STATUS_SUCCESS = cuda_blas.CUBLAS_STATUS_SUCCESS;
 
+/// Size-bucketed free list pool for GPU memory.
+/// Avoids repeated cuMemAlloc/cuMemFree for intermediate buffers.
+/// Bucket i holds buffers of size 2^(i + MIN_BUCKET) bytes.
+pub const GpuMemPool = struct {
+    const NUM_BUCKETS = 25; // 2^4 (16B) ~ 2^28 (256MB)
+    const MIN_BUCKET: u5 = 4;
+    buckets: [NUM_BUCKETS]std.ArrayListUnmanaged(CUdeviceptr),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) GpuMemPool {
+        var pool: GpuMemPool = undefined;
+        pool.allocator = allocator;
+        for (&pool.buckets) |*b| b.* = .empty;
+        return pool;
+    }
+
+    pub fn deinit(self: *GpuMemPool) void {
+        for (&self.buckets) |*b| {
+            for (b.items) |dptr| {
+                _ = cuda_driver.cuMemFree_v2(dptr);
+            }
+            b.deinit(self.allocator);
+        }
+    }
+
+    pub fn bucketIndex(size: usize) usize {
+        if (size == 0) return 0;
+        // Round up to next power of 2, then find log2
+        var s = size - 1;
+        var bits: usize = 0;
+        while (s > 0) {
+            s >>= 1;
+            bits += 1;
+        }
+        if (bits < MIN_BUCKET) return 0;
+        const idx = bits - MIN_BUCKET;
+        if (idx >= NUM_BUCKETS) return NUM_BUCKETS - 1;
+        return idx;
+    }
+
+    pub fn bucketSize(idx: usize) usize {
+        return @as(usize, 1) << @intCast(idx + MIN_BUCKET);
+    }
+
+    /// Try to acquire a buffer from the pool. Returns null if none available.
+    pub fn acquire(self: *GpuMemPool, size: usize) ?CUdeviceptr {
+        const idx = bucketIndex(size);
+        if (self.buckets[idx].items.len > 0) {
+            return self.buckets[idx].pop();
+        }
+        return null;
+    }
+
+    /// Return a buffer to the pool for reuse.
+    pub fn release(self: *GpuMemPool, dptr: CUdeviceptr, size: usize) void {
+        const idx = bucketIndex(size);
+        self.buckets[idx].append(self.allocator, dptr) catch {
+            // If we can't track it, just free it
+            _ = cuda_driver.cuMemFree_v2(dptr);
+        };
+    }
+};
+
 pub const CudaContext = struct {
     device: CUdevice,
     context: CUcontext,
@@ -256,5 +319,10 @@ pub const CudaContext = struct {
     /// GPU メモリをゼロクリア
     pub fn memsetZero(_: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
         if (cuda_driver.cuMemsetD32_v2(dptr, 0, num_floats) != CUDA_SUCCESS) return error.MemcpyFailed;
+    }
+
+    /// GPU メモリをゼロクリア (非同期)
+    pub fn memsetZeroAsync(self: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
+        if (cuda_driver.cuMemsetD32Async(dptr, 0, num_floats, self.stream) != CUDA_SUCCESS) return error.MemcpyFailed;
     }
 };

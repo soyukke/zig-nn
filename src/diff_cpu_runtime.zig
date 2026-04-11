@@ -294,6 +294,11 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
+    /// Fused add + silu: silu(a + b) — delegates to add then silu
+    pub fn addSilu(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
+        return self.silu(self.add(a, b));
+    }
+
     pub fn square(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
         const total = x.totalElements();
         const out = self.allocData(total);
