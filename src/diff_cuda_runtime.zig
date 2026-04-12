@@ -1590,27 +1590,37 @@ pub const DiffCudaRuntime = struct {
         const s = self.reductionSum(x, axis);
         const actual_axis: usize = if (axis < 0) @intCast(@as(i64, @intCast(x.ndim)) + axis) else @intCast(axis);
         const count = x.shape[actual_axis];
+        const scale = 1.0 / @as(f32, @floatFromInt(count));
         const total = s.totalElements();
         const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchScale(self.cuda_ctx, self.kernels.fn_scale, out_dptr, s.dptr, 1.0 / @as(f32, @floatFromInt(count)), total);
+        ops.dispatchScale(self.cuda_ctx, self.kernels.fn_scale, out_dptr, s.dptr, scale, total);
         const node = self.makeNode(out_dptr, s.shape[0..s.ndim], s.requires_grad);
         if (s.requires_grad) {
             node.parents[0] = s;
-            const ctx = self.allocContext(RtContext);
-            ctx.* = .{ .rt = self };
+            const ctx = self.allocContext(ScaleCtx);
+            ctx.* = .{ .rt = self, .scale = scale };
             node.context = @ptrCast(ctx);
             node.backward_fn = &backwardScale;
         }
         return node;
     }
 
+    const ScaleCtx = struct {
+        rt: *DiffCudaRuntime,
+        scale: f32,
+    };
+
     fn backwardScale(self_node: *DiffCudaNode) void {
-        // This is backward for a simple scale operation: inherits from parent
-        const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
+        const ctx: *ScaleCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad_dptr) |ga| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, self_node.grad_dptr.?, self_node.totalElements());
+            const total = self_node.totalElements();
+            const go = self_node.grad_dptr.?;
+            // ga += go * scale
+            const tmp = rt.allocGpuBuf(total);
+            ops.dispatchScale(rt.cuda_ctx, rt.kernels.fn_scale, tmp, go, ctx.scale, total);
+            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, total);
         }
     }
 
