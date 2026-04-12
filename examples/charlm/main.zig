@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const nn = @import("nn");
 const compute = nn.compute;
 const Module = compute.Module;
@@ -12,12 +13,14 @@ const LayerNorm = nn.unified.LayerNorm;
 const Embedding = nn.unified.Embedding;
 const CausalSelfAttention = nn.unified.CausalSelfAttention;
 
+const is_cuda_available = builtin.os.tag == .linux;
+
 pub fn main() !void {
     var args = std.process.args();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
-    if (std.mem.eql(u8, mode, "cuda")) {
+    if (is_cuda_available and std.mem.eql(u8, mode, "cuda")) {
         try charLMDemoCuda();
     } else {
         try charLMDemo();

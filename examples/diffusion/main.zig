@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const nn = @import("nn");
 const compute = nn.compute;
 const Module = compute.Module;
@@ -9,6 +10,8 @@ const DiffCudaRuntime = nn.unified.DiffCudaRuntime;
 const GpuAdamState = nn.unified.GpuAdamState;
 const Linear = nn.unified.Linear;
 const diffusion = nn.diffusion;
+
+const is_cuda_available = builtin.os.tag == .linux;
 
 const DIFF_BATCH = 256;
 const DIFF_HIDDEN = 128;
@@ -21,7 +24,7 @@ pub fn main() !void {
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
-    if (std.mem.eql(u8, mode, "cuda")) {
+    if (is_cuda_available and std.mem.eql(u8, mode, "cuda")) {
         try diffusionDemoCuda();
     } else {
         try diffusionDemo();
