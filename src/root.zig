@@ -180,6 +180,9 @@ pub const graph_nn = if (is_macos) struct {
 // Shared runtime computation kernels
 pub const runtime_kernels = @import("runtime_kernels.zig");
 
+// Shared diff node type (backend-agnostic)
+pub const diff_node = @import("diff_node.zig");
+
 // Data utilities
 pub const BatchIterator = @import("data/dataloader.zig").BatchIterator;
 

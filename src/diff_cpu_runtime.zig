@@ -12,37 +12,14 @@ const ParamHandle = compute.ParamHandle;
 const AdamState = compute.AdamState;
 const cpu_backend = @import("backend/cpu.zig");
 const kernels = @import("runtime_kernels.zig");
+const diff_node = @import("diff_node.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
+pub const DiffNode = diff_node.DiffNodeGeneric([]f32, kernels.MAX_NDIM);
+
 // ── Backward function types ──
 const BackwardFn = *const fn (*DiffNode) void;
-
-pub const DiffNode = struct {
-    data: []f32, // forward 結果
-    shape: [MAX_NDIM]usize,
-    ndim: usize,
-    grad: ?[]f32, // 勾配 (backward で割り当て)
-    backward_fn: ?BackwardFn,
-    parents: [3]?*DiffNode, // 最大3入力 (layerNorm: x, gamma, beta)
-    context: ?*anyopaque, // backward 用キャッシュ
-    requires_grad: bool,
-    visited: bool, // トポソート用
-    is_param: bool,
-    param_index: ?usize,
-
-    pub fn totalElements(self: *const DiffNode) usize {
-        return kernels.totalElements(self.shape, self.ndim);
-    }
-
-    pub fn lastDim(self: *const DiffNode) usize {
-        return kernels.lastDim(self.shape, self.ndim);
-    }
-
-    pub fn numRows(self: *const DiffNode) usize {
-        return kernels.numRows(self.shape, self.ndim);
-    }
-};
 
 pub const DiffTensor = *DiffNode;
 
@@ -168,6 +145,27 @@ pub const DiffCpuRuntime = struct {
         return self.arenaAlloc().create(T) catch unreachable;
     }
 
+    // ── Unary op helper ──
+
+    /// context 不要の単純 unary op のボイラープレートを吸収する。
+    /// fwd は comptime 関数ポインタなので確実にインライン展開される。
+    fn unaryOp(
+        self: *DiffCpuRuntime,
+        x: DiffTensor,
+        comptime fwd: fn ([]const f32, []f32) void,
+        bwd: *const fn (*DiffNode) void,
+    ) DiffTensor {
+        const total = x.totalElements();
+        const out = self.allocData(total);
+        fwd(x.data[0..total], out[0..total]);
+        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            node.backward_fn = bwd;
+        }
+        return node;
+    }
+
     // ── Param access ──
 
     pub fn param(self: *DiffCpuRuntime, handle: ParamHandle) DiffTensor {
@@ -201,15 +199,7 @@ pub const DiffCpuRuntime = struct {
     // ── Unary ops ──
 
     pub fn negative(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = -x.data[i];
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardNegative;
-        }
-        return node;
+        return self.unaryOp(x, kernels.negativeForward, &backwardNegative);
     }
 
     fn backwardNegative(self_node: *DiffNode) void {
@@ -221,20 +211,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn gelu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        const sqrt_2_over_pi: f32 = 0.7978845608028654;
-        for (0..total) |i| {
-            const v = x.data[i];
-            const inner = sqrt_2_over_pi * (v + 0.044715 * v * v * v);
-            out[i] = 0.5 * v * (1.0 + std.math.tanh(inner));
-        }
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardGelu;
-        }
-        return node;
+        return self.unaryOp(x, kernels.geluForward, &backwardGelu);
     }
 
     fn backwardGelu(self_node: *DiffNode) void {
@@ -257,14 +234,8 @@ pub const DiffCpuRuntime = struct {
     pub fn silu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
         const total = x.totalElements();
         const out = self.allocData(total);
-        // Also save sigmoid for backward
         const sig_cache = self.allocData(total);
-        for (0..total) |i| {
-            const v = x.data[i];
-            const sig = 1.0 / (1.0 + @exp(-v));
-            sig_cache[i] = sig;
-            out[i] = v * sig;
-        }
+        kernels.siluForward(x.data[0..total], out[0..total], sig_cache[0..total]);
         const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
@@ -300,15 +271,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn square(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = x.data[i] * x.data[i];
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardSquare;
-        }
-        return node;
+        return self.unaryOp(x, kernels.squareForward, &backwardSquare);
     }
 
     fn backwardSquare(self_node: *DiffNode) void {
@@ -326,15 +289,7 @@ pub const DiffCpuRuntime = struct {
 
     /// exp(x) — d/dx exp(x) = exp(x) = out
     pub fn exp(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = @exp(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardExp;
-        }
-        return node;
+        return self.unaryOp(x, kernels.expForward, &backwardExp);
     }
 
     fn backwardExp(self_node: *DiffNode) void {
@@ -475,15 +430,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn tanh_(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = std.math.tanh(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardTanh;
-        }
-        return node;
+        return self.unaryOp(x, kernels.tanhForward, &backwardTanh);
     }
 
     fn backwardTanh(self_node: *DiffNode) void {
@@ -499,17 +446,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn sigmoid(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| {
-            out[i] = 1.0 / (1.0 + @exp(-x.data[i]));
-        }
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardSigmoid;
-        }
-        return node;
+        return self.unaryOp(x, kernels.sigmoidForward, &backwardSigmoid);
     }
 
     fn backwardSigmoid(self_node: *DiffNode) void {
@@ -1462,15 +1399,7 @@ pub const DiffCpuRuntime = struct {
     // ── ReLU ──
 
     pub fn relu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = if (x.data[i] > 0) x.data[i] else 0;
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardRelu;
-        }
-        return node;
+        return self.unaryOp(x, kernels.reluForward, &backwardRelu);
     }
 
     fn backwardRelu(self_node: *DiffNode) void {
@@ -1760,7 +1689,7 @@ pub const DiffCpuRuntime = struct {
     // ── Backward (topological sort + reverse traversal) ──
 
     pub fn backward(self: *DiffCpuRuntime, loss: DiffTensor) void {
-        // 1. Set loss gradient to 1.0
+        // 1. Set loss gradient to 1.0 (CPU: fill loop)
         const loss_total = loss.totalElements();
         if (loss.grad == null) {
             loss.grad = self.allocGrad(loss_total);
@@ -1769,9 +1698,9 @@ pub const DiffCpuRuntime = struct {
 
         // 2. Topological sort (DFS)
         self.topo_buf.clearRetainingCapacity();
-        self.topoSort(loss);
+        diff_node.topoSort(DiffNode, loss, &self.topo_buf, self.allocator);
 
-        // 3. Allocate grad buffers for intermediate nodes
+        // 3. Allocate grad buffers for intermediate nodes (CPU: allocGrad)
         for (self.topo_buf.items) |node| {
             if (node.grad == null and node.requires_grad) {
                 const total = node.totalElements();
@@ -1779,36 +1708,8 @@ pub const DiffCpuRuntime = struct {
             }
         }
 
-        // 4. Reverse traversal: call backward_fn
-        var idx = self.topo_buf.items.len;
-        while (idx > 0) {
-            idx -= 1;
-            const node = self.topo_buf.items[idx];
-            if (node.backward_fn) |bfn| {
-                bfn(node);
-            }
-        }
-
-        // 5. Reset visited flags
-        for (self.topo_buf.items) |node| {
-            node.visited = false;
-        }
-        for (self.param_nodes) |*node| {
-            node.visited = false;
-        }
-    }
-
-    fn topoSort(self: *DiffCpuRuntime, node: *DiffNode) void {
-        if (node.visited) return;
-        node.visited = true;
-
-        for (&node.parents) |maybe_parent| {
-            if (maybe_parent) |parent| {
-                self.topoSort(parent);
-            }
-        }
-
-        self.topo_buf.append(self.allocator, node) catch unreachable;
+        // 4-5. Reverse traversal + reset visited
+        diff_node.backwardPass(DiffNode, &self.topo_buf, self.param_nodes);
     }
 
     // ── Adam optimizer ──
