@@ -260,15 +260,20 @@ pub const DiffCudaRuntime = struct {
         // Allocate parameter nodes and GPU buffers
         const count = module.paramCount();
         const param_nodes = try allocator.alloc(DiffCudaNode, count);
+        errdefer allocator.free(param_nodes);
         const param_grad_dptrs = try allocator.alloc(CUdeviceptr, count);
+        errdefer allocator.free(param_grad_dptrs);
 
         // Compute total gradient size and allocate one contiguous buffer
         var total_grad_floats: usize = 0;
         for (0..count) |i| total_grad_floats += module.paramSize(.{ .index = i });
         const grad_base_dptr = try cuda_ctx.allocBuffer(total_grad_floats * @sizeOf(f32));
+        errdefer cuda_ctx.freeBuffer(grad_base_dptr);
         try cuda_ctx.memsetZero(grad_base_dptr, total_grad_floats);
 
         var grad_offset: usize = 0;
+        var alloc_count: usize = 0;
+        errdefer for (param_nodes[0..alloc_count]) |node| cuda_ctx.freeBuffer(node.dptr);
         for (module.params.items, 0..) |meta, i| {
             const size = module.paramSize(.{ .index = i });
             const dptr = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
@@ -289,6 +294,7 @@ pub const DiffCudaRuntime = struct {
             };
             param_grad_dptrs[i] = grad_dptr;
             grad_offset += size;
+            alloc_count += 1;
         }
 
         return .{
