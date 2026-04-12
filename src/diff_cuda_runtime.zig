@@ -242,9 +242,12 @@ pub const DiffCudaRuntime = struct {
         // Compute total gradient size and allocate one contiguous buffer
         var total_grad_floats: usize = 0;
         for (0..count) |i| total_grad_floats += module.paramSize(.{ .index = i });
-        const grad_base_dptr = try cuda_ctx.allocBuffer(total_grad_floats * @sizeOf(f32));
-        errdefer cuda_ctx.freeBuffer(grad_base_dptr);
-        try cuda_ctx.memsetZero(grad_base_dptr, total_grad_floats);
+        const grad_base_dptr = if (total_grad_floats > 0)
+            try cuda_ctx.allocBuffer(total_grad_floats * @sizeOf(f32))
+        else
+            @as(CUdeviceptr, 0);
+        errdefer if (total_grad_floats > 0) cuda_ctx.freeBuffer(grad_base_dptr);
+        if (total_grad_floats > 0) try cuda_ctx.memsetZero(grad_base_dptr, total_grad_floats);
 
         var grad_offset: usize = 0;
         var alloc_count: usize = 0;
@@ -300,7 +303,7 @@ pub const DiffCudaRuntime = struct {
         for (self.param_nodes) |node| {
             self.cuda_ctx.freeBuffer(node.data);
         }
-        self.cuda_ctx.freeBuffer(self.grad_base_dptr);
+        if (self.total_grad_floats > 0) self.cuda_ctx.freeBuffer(self.grad_base_dptr);
         self.allocator.free(self.param_nodes);
         self.allocator.free(self.param_grad_dptrs);
         self.topo_buf.deinit(self.allocator);
@@ -324,7 +327,8 @@ pub const DiffCudaRuntime = struct {
 
     pub fn zeroGrad(self: *DiffCudaRuntime) void {
         // Single async memset for the entire contiguous gradient buffer
-        self.cuda_ctx.memsetZeroAsync(self.grad_base_dptr, self.total_grad_floats) catch unreachable;
+        if (self.total_grad_floats > 0)
+            self.cuda_ctx.memsetZeroAsync(self.grad_base_dptr, self.total_grad_floats) catch unreachable;
         for (self.param_nodes, 0..) |*node, i| {
             node.grad = self.param_grad_dptrs[i];
         }
@@ -1532,26 +1536,35 @@ pub const DiffCudaRuntime = struct {
     }
 
     fn backwardReductionSumAxis1(self_node: *DiffCudaNode) void {
-        // [rows, cols] → [rows, 1]: broadcast go back
+        // [rows, cols] → [rows, 1]: go has rows elements
+        // Need: ga[r*cols + c] += go[r] for all r, c
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
             const rows = pa.shape[0];
             const cols = pa.shape[1];
-            // go is [rows, 1], need to broadcast-add to ga [rows, cols]
-            ops.dispatchReduceToBroadcast(rt.cuda_ctx, rt.kernels.fn_reduce_add_bcast, ga, self_node.grad.?, rows * cols, rows);
+            const go = self_node.grad.?;
+            // Per-row broadcast: ga_row[c] += go[r] (scalar broadcast to cols elements)
+            for (0..rows) |r| {
+                const ga_row = ga + r * cols * @sizeOf(f32);
+                const go_r = go + r * @sizeOf(f32);
+                ops.dispatchBroadcastBinop(rt.cuda_ctx, rt.kernels.fn_add, ga_row, ga_row, go_r, cols, 1);
+            }
         }
     }
 
     fn backwardReductionSumAxis0(self_node: *DiffCudaNode) void {
+        // [rows, cols] → [1, cols]: go has cols elements
+        // Need: ga[r*cols + c] += go[c] for all r, c
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
             const rows = pa.shape[0];
             const cols = pa.shape[1];
-            ops.dispatchReduceToBroadcast(rt.cuda_ctx, rt.kernels.fn_reduce_add_bcast, ga, self_node.grad.?, rows * cols, cols);
+            // go[i % cols] = go[c], so broadcast-add works directly
+            ops.dispatchBroadcastBinop(rt.cuda_ctx, rt.kernels.fn_add, ga, ga, self_node.grad.?, rows * cols, cols);
         }
     }
 
@@ -1561,8 +1574,8 @@ pub const DiffCudaRuntime = struct {
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
             const total = pa.totalElements();
-            // go is scalar [1], broadcast to all elements
-            ops.dispatchReduceToBroadcast(rt.cuda_ctx, rt.kernels.fn_reduce_add_bcast, ga, self_node.grad.?, total, 1);
+            // go is scalar [1], broadcast-add to all elements: ga[i] += go[0]
+            ops.dispatchBroadcastBinop(rt.cuda_ctx, rt.kernels.fn_add, ga, ga, self_node.grad.?, total, 1);
         }
     }
 

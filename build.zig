@@ -65,10 +65,18 @@ pub fn build(b: *std.Build) void {
 
     // Standalone test for diff_cpu_runtime only
     const diff_cpu_mod = b.addModule("diff_cpu_test", .{
-        .root_source_file = b.path("src/diff_cpu_runtime.zig"),
+        .root_source_file = b.path("src/diff_cpu_runtime_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    if (target.result.os.tag == .linux) {
+        diff_cpu_mod.linkSystemLibrary("c", .{});
+        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
+            diff_cpu_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
+            diff_cpu_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
+        } else |_| {}
+        diff_cpu_mod.linkSystemLibrary("openblas", .{});
+    }
     if (target.result.os.tag == .macos) {
         const fw = std.Build.LazyPath{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks" };
         diff_cpu_mod.addFrameworkPath(fw);
@@ -78,6 +86,36 @@ pub fn build(b: *std.Build) void {
     const run_diff_cpu_tests = b.addRunArtifact(diff_cpu_tests);
     const diff_cpu_test_step = b.step("test-diff-cpu", "Run diff_cpu_runtime tests only");
     diff_cpu_test_step.dependOn(&run_diff_cpu_tests.step);
+
+    // Standalone test for diff_cuda_runtime (requires -Dcuda=true)
+    if (enable_cuda and target.result.os.tag == .linux) {
+        const diff_cuda_mod = b.addModule("diff_cuda_test", .{
+            .root_source_file = b.path("src/diff_cuda_runtime_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        diff_cuda_mod.linkSystemLibrary("c", .{});
+        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
+        } else |_| {}
+        diff_cuda_mod.linkSystemLibrary("openblas", .{});
+        diff_cuda_mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
+        if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
+        } else |_| {}
+        if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
+        } else |_| {}
+        diff_cuda_mod.linkSystemLibrary("cuda", .{});
+        diff_cuda_mod.linkSystemLibrary("cublas", .{});
+        const diff_cuda_tests = b.addTest(.{ .root_module = diff_cuda_mod });
+        const run_diff_cuda_tests = b.addRunArtifact(diff_cuda_tests);
+        const diff_cuda_test_step = b.step("test-diff-cuda", "Run diff_cuda_runtime tests only (requires GPU)");
+        diff_cuda_test_step.dependOn(&run_diff_cuda_tests.step);
+    }
 
     // Examples
     const examples = [_]struct { name: []const u8, path: []const u8 }{
