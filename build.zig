@@ -87,6 +87,26 @@ pub fn build(b: *std.Build) void {
     const diff_cpu_test_step = b.step("test-diff-cpu", "Run diff_cpu_runtime tests only");
     diff_cpu_test_step.dependOn(&run_diff_cpu_tests.step);
 
+    // Standalone test for diff_mps_runtime (macOS only)
+    if (target.result.os.tag == .macos) {
+        const diff_mps_mod = b.addModule("diff_mps_test", .{
+            .root_source_file = b.path("src/diff_mps_runtime_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const fw = std.Build.LazyPath{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks" };
+        diff_mps_mod.addFrameworkPath(fw);
+        diff_mps_mod.linkFramework("Metal", .{});
+        diff_mps_mod.linkFramework("Foundation", .{});
+        diff_mps_mod.linkFramework("Accelerate", .{});
+        diff_mps_mod.linkFramework("MetalPerformanceShaders", .{});
+        diff_mps_mod.linkFramework("MetalPerformanceShadersGraph", .{});
+        const diff_mps_tests = b.addTest(.{ .root_module = diff_mps_mod });
+        const run_diff_mps_tests = b.addRunArtifact(diff_mps_tests);
+        const diff_mps_test_step = b.step("test-diff-mps", "Run diff_mps_runtime tests only (macOS Metal)");
+        diff_mps_test_step.dependOn(&run_diff_mps_tests.step);
+    }
+
     // Standalone test for diff_cuda_runtime (requires -Dcuda=true)
     if (enable_cuda and target.result.os.tag == .linux) {
         const diff_cuda_mod = b.addModule("diff_cuda_test", .{

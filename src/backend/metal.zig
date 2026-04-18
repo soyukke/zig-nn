@@ -572,6 +572,12 @@ pub const MetalContext = struct {
     // カーネルディスパッチ共通ヘルパー
     // ============================================================
 
+    /// Parallel reduction 用: 2冪に切り上げ (reduction の s >>= 1 が全要素をカバーするため)
+    fn ceilPow2(v: u64) u64 {
+        if (v <= 1) return 1;
+        return std.math.ceilPowerOfTwo(u64, v) catch v;
+    }
+
     fn setPipeline(encoder: id, pipeline: id) void {
         send1v(encoder, sel("setComputePipelineState:"), pipeline);
     }
@@ -1579,8 +1585,9 @@ pub const MetalContext = struct {
         setBuffer(encoder, input_buf, 0, 0);
         setBuffer(encoder, output_buf, 0, 1);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingSoftmaxParams), 2);
-        // One threadgroup per row, 256 threads per group
-        const tg_size: u64 = @min(@as(u64, cols), 256);
+        // Parallel reduction requires power-of-2 threadgroup size;
+        // extra threads use identity values (-INFINITY for max, 0 for sum)
+        const tg_size: u64 = @min(ceilPow2(@as(u64, cols)), 256);
         dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
     }
 
@@ -1600,7 +1607,7 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_out_buf, 0, 1);
         setBuffer(encoder, grad_in_buf, 0, 2);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingSoftmaxParams), 3);
-        const tg_size: u64 = @min(@as(u64, cols), 256);
+        const tg_size: u64 = @min(ceilPow2(@as(u64, cols)), 256);
         dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
     }
 

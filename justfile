@@ -16,6 +16,18 @@ build-release:
 test:
     zig build test
 
+# CPU 微分ランタイムテスト
+test-diff-cpu:
+    NIX_CFLAGS_COMPILE="" zig build test-diff-cpu
+
+# Metal 微分ランタイムテスト (macOS only)
+test-diff-mps:
+    NIX_CFLAGS_COMPILE="" zig build test-diff-mps
+
+# CUDA 微分ランタイムテスト (Linux only, requires GPU)
+test-diff-cuda:
+    zig build test-diff-cuda -Dcuda=true
+
 # 全デモ実行
 run-all:
     zig build run
