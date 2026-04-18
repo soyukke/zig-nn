@@ -141,8 +141,9 @@ pub const DiffMpsRuntime = struct {
         return self.arena.allocator();
     }
 
-    /// MTLBuffer 確保 (arena tracked)
-    fn allocBuf(self: *DiffMpsRuntime, num_floats: usize) id {
+    /// MTLBuffer 確保 (arena tracked, resetArena で解放される)。
+    /// num_floats × 4 バイトを確保する。u32 等 4 バイト型にも流用可。
+    pub fn allocBuf(self: *DiffMpsRuntime, num_floats: usize) id {
         const b = self.metal_ctx.createBuffer(num_floats * @sizeOf(f32)) catch unreachable;
         self.arena_bufs.append(self.allocator, b) catch unreachable;
         return b;
@@ -1256,6 +1257,114 @@ pub const DiffMpsRuntime = struct {
         n_heads: u32,
         half_dim: u32,
     };
+
+    // ════════════════════════════════════════════════════════════════
+    // mulScalar: y = x * c (compile-time constant multiplier)
+    // ════════════════════════════════════════════════════════════════
+
+    pub fn mulScalar(self: *DiffMpsRuntime, x: DiffMpsTensor, c: f32) DiffMpsTensor {
+        const n = x.totalElements();
+        const out_buf = self.allocBuf(n);
+        const src = bufPtr(x.data);
+        const dst = bufPtr(out_buf);
+        for (0..n) |i| dst[i] = src[i] * c;
+        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            const ctx = self.allocContext(MulScalarCtx);
+            ctx.* = .{ .c = c };
+            node.context = @ptrCast(ctx);
+            node.backward_fn = &backwardMulScalar;
+        }
+        return node;
+    }
+
+    const MulScalarCtx = struct { c: f32 };
+
+    fn backwardMulScalar(self_node: *DiffMpsNode) void {
+        const pa = self_node.parents[0].?;
+        if (pa.grad) |g| {
+            const ctx: *MulScalarCtx = @ptrCast(@alignCast(self_node.context.?));
+            const go = bufPtr(self_node.grad.?);
+            const ga = bufPtr(g);
+            const total = self_node.totalElements();
+            for (0..total) |i| ga[i] += go[i] * ctx.c;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Quantized matmul (no gradient on weights: frozen base for QLoRA)
+    // x: [..., in_dim], quant_weight: [out_dim, in_dim] (Q4_0/Q4_1/Q8_0)
+    // out: [..., out_dim]
+    // ════════════════════════════════════════════════════════════════
+
+    pub const QuantWeight = struct {
+        buf: id, // GPU-side quantized bytes (MTLBuffer)
+        quant_type: metal.QuantType,
+        out_dim: u32,
+        in_dim: u32,
+    };
+
+    pub fn quantMatmulNoGrad(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        qw: *const QuantWeight,
+    ) DiffMpsTensor {
+        const m: u32 = @intCast(x.numRows());
+        std.debug.assert(@as(u32, @intCast(x.lastDim())) == qw.in_dim);
+        const total_out: usize = @as(usize, m) * @as(usize, qw.out_dim);
+        const out_buf = self.allocBuf(total_out);
+        const gpu = beginGpu(self.metal_ctx);
+        self.metal_ctx.dispatchMatmulBatched(
+            gpu.enc,
+            qw.buf,
+            x.data,
+            out_buf,
+            qw.out_dim,
+            qw.in_dim,
+            m,
+            qw.quant_type,
+        );
+        endGpu(gpu);
+
+        var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
+        for (0..x.ndim - 1) |i| new_shape[i] = x.shape[i];
+        new_shape[x.ndim - 1] = @as(usize, qw.out_dim);
+        const node = self.makeNode(out_buf, new_shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            const ctx = self.allocContext(QuantMatmulCtx);
+            ctx.* = .{ .metal_ctx = self.metal_ctx, .qw = qw };
+            node.context = @ptrCast(ctx);
+            node.backward_fn = &backwardQuantMatmul;
+        }
+        return node;
+    }
+
+    const QuantMatmulCtx = struct {
+        metal_ctx: *MetalContext,
+        qw: *const QuantWeight,
+    };
+
+    fn backwardQuantMatmul(self_node: *DiffMpsNode) void {
+        const pa = self_node.parents[0].?;
+        if (pa.grad) |ga_buf| {
+            const ctx: *QuantMatmulCtx = @ptrCast(@alignCast(self_node.context.?));
+            const m: u32 = @intCast(pa.numRows());
+            const gpu = beginGpu(ctx.metal_ctx);
+            ctx.metal_ctx.dispatchQuantTransBatched(
+                gpu.enc,
+                ctx.qw.buf,
+                self_node.grad.?,
+                ga_buf,
+                ctx.qw.out_dim,
+                ctx.qw.in_dim,
+                m,
+                ctx.qw.quant_type,
+            );
+            endGpu(gpu);
+        }
+    }
 
     fn backwardRope(self_node: *DiffMpsNode) void {
         const pa = self_node.parents[0].?;

@@ -585,6 +585,170 @@ test "diff_mps_runtime: causalSoftmax gradient" {
     }.f, &rt, &data, &.{ 4, 4 }, 1e-4, 2e-2);
 }
 
+// Q8_0 encoder for testing (mirror of gguf/dequant.zig: dequantizeQ8_0)
+// Block layout: [f16 scale (2 bytes)] [32 × int8 quants] → 34 bytes/block.
+fn quantizeQ8_0(src: []const f32, dst: []u8) void {
+    const BLOCK: usize = 32;
+    const BPB: usize = 34;
+    const n_blocks = src.len / BLOCK;
+    for (0..n_blocks) |bi| {
+        const blk = src[bi * BLOCK ..][0..BLOCK];
+        var max_abs: f32 = 0;
+        for (blk) |v| {
+            const av = @abs(v);
+            if (av > max_abs) max_abs = av;
+        }
+        const scale: f32 = if (max_abs == 0) 0 else max_abs / 127.0;
+        const inv: f32 = if (scale == 0) 0 else 1.0 / scale;
+        const out = dst[bi * BPB ..][0..BPB];
+        const s16: f16 = @floatCast(scale);
+        const s_bits: u16 = @bitCast(s16);
+        out[0] = @intCast(s_bits & 0xFF);
+        out[1] = @intCast((s_bits >> 8) & 0xFF);
+        for (0..BLOCK) |j| {
+            const qf: f32 = @round(blk[j] * inv);
+            const qi: i32 = @max(-128, @min(127, @as(i32, @intFromFloat(qf))));
+            const qi8: i8 = @intCast(qi);
+            out[2 + j] = @bitCast(qi8);
+        }
+    }
+}
+
+fn dequantizeQ8_0_inline(src: []const u8, dst: []f32) void {
+    const BLOCK: usize = 32;
+    const BPB: usize = 34;
+    const n_blocks = dst.len / BLOCK;
+    for (0..n_blocks) |bi| {
+        const blk = src[bi * BPB ..][0..BPB];
+        var s_bits: u16 = 0;
+        s_bits |= @as(u16, blk[0]);
+        s_bits |= @as(u16, blk[1]) << 8;
+        const s16: f16 = @bitCast(s_bits);
+        const scale: f32 = @floatCast(s16);
+        for (0..BLOCK) |j| {
+            const qi: i8 = @bitCast(blk[2 + j]);
+            dst[bi * BLOCK + j] = @as(f32, @floatFromInt(qi)) * scale;
+        }
+    }
+}
+
+test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+
+    const M: usize = 2;
+    const IN: usize = 32;
+    const OUT: usize = 4;
+
+    // Random-ish f32 weight [OUT, IN]
+    var w_f32: [OUT * IN]f32 = undefined;
+    for (0..OUT * IN) |i| {
+        const fi: f32 = @floatFromInt(i);
+        w_f32[i] = 0.01 * ((fi - 50.0) * (fi + 3.0)) * 0.001;
+    }
+
+    // Encode to Q8_0 per row (row_bytes = (IN/32) * 34 = 34)
+    const row_bytes: usize = 34;
+    var w_q8: [OUT * row_bytes]u8 = undefined;
+    var w_dequant: [OUT * IN]f32 = undefined;
+    for (0..OUT) |o| {
+        quantizeQ8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
+        dequantizeQ8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
+    }
+
+    // Upload weight bytes to MTLBuffer
+    const w_buf = try metal_ctx.createBufferWithData(w_q8[0..]);
+    defer metal.objRelease(w_buf);
+
+    const qw = DiffMpsRuntime.QuantWeight{
+        .buf = w_buf,
+        .quant_type = .q8_0,
+        .out_dim = @intCast(OUT),
+        .in_dim = @intCast(IN),
+    };
+
+    // Input x [M, IN]
+    var x_data: [M * IN]f32 = undefined;
+    for (0..M * IN) |i| x_data[i] = 0.05 * (@as(f32, @floatFromInt(i)) - 15.0);
+
+    rt.resetArena();
+    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ M, IN }, false);
+    const y = rt.quantMatmulNoGrad(x, &qw);
+
+    var y_out: [M * OUT]f32 = undefined;
+    MpsAdapter.readData(&rt, y, &y_out);
+
+    // Reference: dequant(W) @ X^T → y_ref[m, o] = Σ_i X[m, i] * W_deq[o, i]
+    for (0..M) |m| {
+        for (0..OUT) |o| {
+            var acc: f32 = 0;
+            for (0..IN) |i| acc += x_data[m * IN + i] * w_dequant[o * IN + i];
+            try testing.expectApproxEqAbs(acc, y_out[m * OUT + o], 1e-3);
+        }
+    }
+}
+
+test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+
+    const M: usize = 2;
+    const IN: usize = 32;
+    const OUT: usize = 4;
+
+    var w_f32: [OUT * IN]f32 = undefined;
+    for (0..OUT * IN) |i| {
+        const fi: f32 = @floatFromInt(i);
+        w_f32[i] = 0.005 * ((fi - 30.0) * (fi + 7.0)) * 0.001;
+    }
+
+    const row_bytes: usize = 34;
+    var w_q8: [OUT * row_bytes]u8 = undefined;
+    var w_dequant: [OUT * IN]f32 = undefined;
+    for (0..OUT) |o| {
+        quantizeQ8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
+        dequantizeQ8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
+    }
+
+    const w_buf = try metal_ctx.createBufferWithData(w_q8[0..]);
+    defer metal.objRelease(w_buf);
+
+    const qw = DiffMpsRuntime.QuantWeight{
+        .buf = w_buf,
+        .quant_type = .q8_0,
+        .out_dim = @intCast(OUT),
+        .in_dim = @intCast(IN),
+    };
+
+    var x_data: [M * IN]f32 = undefined;
+    for (0..M * IN) |i| x_data[i] = 0.03 * (@as(f32, @floatFromInt(i)) - 8.0);
+
+    rt.resetArena();
+    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ M, IN }, true);
+    const y = rt.quantMatmulNoGrad(x, &qw);
+
+    // Loss = sum(y) → grad_y = 1 → grad_x[m, i] = Σ_o W_deq[o, i]
+    const loss = rt.reductionSum(rt.reductionSum(y, -1), 0);
+    rt.backward(loss);
+
+    var gx: [M * IN]f32 = undefined;
+    _ = MpsAdapter.readGrad(&rt, x, &gx) orelse unreachable;
+
+    for (0..M) |m| {
+        for (0..IN) |i| {
+            var expected: f32 = 0;
+            for (0..OUT) |o| expected += w_dequant[o * IN + i];
+            try testing.expectApproxEqAbs(expected, gx[m * IN + i], 1e-4);
+        }
+    }
+}
+
 test "diff_mps_runtime: rope gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
