@@ -1995,7 +1995,9 @@ pub const MetalContext = struct {
         setBuffer(encoder, out_buf, 0, 2);
         setBuffer(encoder, inv_rms_buf, 0, 3);
         setBytes(encoder, @ptrCast(&params), @sizeOf(RMSNormTrainParams), 4);
-        const tg_size: u64 = @min(@as(u64, dim), 256);
+        // Parallel reduction requires power-of-2 threadgroup size; MSL fills extra
+        // lanes with local_ss=0 because the per-lane stride loop skips them.
+        const tg_size: u64 = @min(ceilPow2(@as(u64, dim)), 256);
         dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
     }
 
@@ -2019,7 +2021,7 @@ pub const MetalContext = struct {
         setBuffer(encoder, inv_rms_buf, 0, 3);
         setBuffer(encoder, grad_x_buf, 0, 4);
         setBytes(encoder, @ptrCast(&params), @sizeOf(RMSNormTrainParams), 5);
-        const tg_size: u64 = @min(@as(u64, dim), 256);
+        const tg_size: u64 = @min(ceilPow2(@as(u64, dim)), 256);
         dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
     }
 

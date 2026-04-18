@@ -1125,6 +1125,173 @@ pub const DiffMpsRuntime = struct {
     }
 
     // ════════════════════════════════════════════════════════════════
+    // RMSNorm: y = x * inv_rms * weight, inv_rms = 1/sqrt(mean(x²) + eps)
+    // ════════════════════════════════════════════════════════════════
+
+    pub fn rmsNorm(self: *DiffMpsRuntime, x: DiffMpsTensor, weight: DiffMpsTensor, eps: f32) DiffMpsTensor {
+        const rows: u32 = @intCast(x.numRows());
+        const cols: u32 = @intCast(x.lastDim());
+        const n = x.totalElements();
+        const out_buf = self.allocBuf(n);
+        const inv_rms_buf = self.allocBuf(rows);
+        const gpu = beginGpu(self.metal_ctx);
+        self.metal_ctx.dispatchRMSNormForwardTraining(gpu.enc, x.data, weight.data, out_buf, inv_rms_buf, rows, cols, eps);
+        endGpu(gpu);
+        const rg = x.requires_grad or weight.requires_grad;
+        const node = self.makeNode(out_buf, x.shape[0..x.ndim], rg);
+        if (rg) {
+            node.parents[0] = x;
+            node.parents[1] = weight;
+            const ctx = self.allocContext(RmsNormCtx);
+            ctx.* = .{ .inv_rms_buf = inv_rms_buf };
+            node.context = @ptrCast(ctx);
+            node.backward_fn = &backwardRmsNorm;
+        }
+        return node;
+    }
+
+    const RmsNormCtx = struct { inv_rms_buf: id };
+
+    fn backwardRmsNorm(self_node: *DiffMpsNode) void {
+        const pa = self_node.parents[0].?; // x
+        const pw = self_node.parents[1].?; // weight
+        const ctx: *RmsNormCtx = @ptrCast(@alignCast(self_node.context.?));
+        const rows = pa.numRows();
+        const cols = pa.lastDim();
+        const go = bufPtr(self_node.grad.?);
+        const x_data = bufPtr(pa.data);
+        const w_data = bufPtr(pw.data);
+        const inv_rms = bufPtr(ctx.inv_rms_buf);
+        const cols_f: f32 = @floatFromInt(cols);
+
+        // dWeight[c] = Σ_r go[r,c] * x[r,c] * inv_rms[r]
+        if (pw.grad) |g| {
+            const g_w = bufPtr(g);
+            for (0..rows) |r| {
+                const s = inv_rms[r];
+                for (0..cols) |c| {
+                    g_w[c] += go[r * cols + c] * x_data[r * cols + c] * s;
+                }
+            }
+        }
+        // dX[r,c] = inv_rms[r] * (w[c] * go[r,c] - x[r,c] * inv_rms[r]² · (Σⱼ x[r,j]·w[j]·go[r,j]) / D)
+        if (pa.grad) |g| {
+            const ga = bufPtr(g);
+            for (0..rows) |r| {
+                const s = inv_rms[r];
+                var dot: f32 = 0;
+                for (0..cols) |c| {
+                    dot += x_data[r * cols + c] * w_data[c] * go[r * cols + c];
+                }
+                const coef = dot * s * s / cols_f;
+                for (0..cols) |c| {
+                    const idx = r * cols + c;
+                    ga[idx] += s * (w_data[c] * go[idx] - x_data[idx] * coef);
+                }
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Causal softmax: softmax with upper-triangular mask (attention scores)
+    // x shape: [batch*num_heads, seq_q, seq_k] flattened to rows×cols
+    // where rows = batch*num_heads*seq_q, cols = seq_k = seq_len
+    // ════════════════════════════════════════════════════════════════
+
+    pub fn causalSoftmax(self: *DiffMpsRuntime, x: DiffMpsTensor, num_heads: u32, seq_len: u32) DiffMpsTensor {
+        const rows: u32 = @intCast(x.numRows());
+        const cols: u32 = @intCast(x.lastDim());
+        const n = x.totalElements();
+        const out_buf = self.allocBuf(n);
+        const gpu = beginGpu(self.metal_ctx);
+        self.metal_ctx.dispatchCausalSoftmaxF32(gpu.enc, x.data, out_buf, rows, cols, num_heads, seq_len);
+        endGpu(gpu);
+        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            // Masked positions have softmax output = 0, so standard softmax backward
+            // naturally zeroes the gradient at those positions. Reuse existing kernel.
+            node.backward_fn = &backwardSoftmax;
+        }
+        return node;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Rotary Position Embedding (RoPE)
+    // x shape: [seq_len, n_heads, 2*half_dim] (last dim is head_dim, must be even)
+    // freqs shape: [half_dim] precomputed frequencies θᵢ = base^(-2i/d)
+    // ════════════════════════════════════════════════════════════════
+
+    pub fn rope(self: *DiffMpsRuntime, x: DiffMpsTensor, freqs: DiffMpsTensor, n_heads: u32, seq_len: u32, half_dim: u32) DiffMpsTensor {
+        const n = x.totalElements();
+        const out_buf = self.allocBuf(n);
+        // Metal RoPE kernel works in-place; copy x into out_buf first.
+        @memcpy(bufPtr(out_buf)[0..n], bufPtr(x.data)[0..n]);
+        const sin_cache = self.allocBuf(seq_len * half_dim);
+        const cos_cache = self.allocBuf(seq_len * half_dim);
+        const gpu = beginGpu(self.metal_ctx);
+        self.metal_ctx.dispatchRoPEForwardTraining(gpu.enc, out_buf, freqs.data, sin_cache, cos_cache, seq_len, n_heads, half_dim);
+        endGpu(gpu);
+        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            const ctx = self.allocContext(RopeCtx);
+            ctx.* = .{
+                .sin_cache = sin_cache,
+                .cos_cache = cos_cache,
+                .seq_len = seq_len,
+                .n_heads = n_heads,
+                .half_dim = half_dim,
+            };
+            node.context = @ptrCast(ctx);
+            node.backward_fn = &backwardRope;
+        }
+        return node;
+    }
+
+    const RopeCtx = struct {
+        sin_cache: id,
+        cos_cache: id,
+        seq_len: u32,
+        n_heads: u32,
+        half_dim: u32,
+    };
+
+    fn backwardRope(self_node: *DiffMpsNode) void {
+        const pa = self_node.parents[0].?;
+        if (pa.grad) |ga_buf| {
+            const ctx: *RopeCtx = @ptrCast(@alignCast(self_node.context.?));
+            const go = bufPtr(self_node.grad.?);
+            const ga = bufPtr(ga_buf);
+            const sin_c = bufPtr(ctx.sin_cache);
+            const cos_c = bufPtr(ctx.cos_cache);
+            const seq_len: usize = ctx.seq_len;
+            const n_heads: usize = ctx.n_heads;
+            const half_dim: usize = ctx.half_dim;
+            const head_dim = half_dim * 2;
+            // Metal kernel stores rotated pairs as interleaved [i*2, i*2+1]
+            // Forward: (x0, x1) → (x0·cos - x1·sin, x0·sin + x1·cos)
+            // Backward (transpose):
+            //   g_x0 =  g_out0·cos + g_out1·sin
+            //   g_x1 = -g_out0·sin + g_out1·cos
+            for (0..seq_len) |t| {
+                for (0..n_heads) |h| {
+                    const base = (t * n_heads + h) * head_dim;
+                    const trig_base = t * half_dim;
+                    for (0..half_dim) |i| {
+                        const c = cos_c[trig_base + i];
+                        const s = sin_c[trig_base + i];
+                        const g0 = go[base + i * 2];
+                        const g1 = go[base + i * 2 + 1];
+                        ga[base + i * 2] += g0 * c + g1 * s;
+                        ga[base + i * 2 + 1] += -g0 * s + g1 * c;
+                    }
+                }
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // Gather (Embedding lookup — CPU via UMA)
     // ════════════════════════════════════════════════════════════════
 

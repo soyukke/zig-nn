@@ -481,3 +481,137 @@ test "diff_mps_runtime: softmax 3x33 (non-power-of-2)" {
     defer rt.deinit();
     try helpers.testSoftmaxBoundary(MpsAdapter, &rt, 3, 33);
 }
+
+// ════════════════════════════════════════════════════════════════
+// Phase 2: rmsNorm / causalSoftmax / rope
+// ════════════════════════════════════════════════════════════════
+
+test "diff_mps_runtime: rmsNorm gradient (x)" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    _ = module.addParam(&.{4}, .ones);
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+    rt.initParams();
+
+    var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
+    try checkGrad(struct {
+        fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
+            const w = ctx.param(.{ .index = 0 });
+            return ctx.rmsNorm(x, w, 1e-5);
+        }
+    }.f, &rt, &data, &.{ 2, 4 }, 1e-4, 2e-2);
+}
+
+test "diff_mps_runtime: rmsNorm forward sanity" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    _ = module.addParam(&.{3}, .ones);
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+    rt.initParams();
+
+    // x = [[1, 2, 3]], inv_rms = 1/sqrt((1+4+9)/3) = sqrt(3/14) ≈ 0.4629
+    // out = x * inv_rms * w = [0.4629, 0.9258, 1.3887]
+    var x_data = [_]f32{ 1.0, 2.0, 3.0 };
+
+    rt.resetArena();
+    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ 1, 3 }, false);
+    const w = rt.param(.{ .index = 0 });
+    const y = rt.rmsNorm(x, w, 0);
+
+    var out: [3]f32 = undefined;
+    MpsAdapter.readData(&rt, y, &out);
+    const inv_rms: f32 = 1.0 / @sqrt((1.0 + 4.0 + 9.0) / 3.0);
+    try testing.expectApproxEqAbs(1.0 * inv_rms, out[0], 1e-4);
+    try testing.expectApproxEqAbs(2.0 * inv_rms, out[1], 1e-4);
+    try testing.expectApproxEqAbs(3.0 * inv_rms, out[2], 1e-4);
+}
+
+test "diff_mps_runtime: causalSoftmax upper-triangular mask" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+
+    const seq: u32 = 4;
+    const num_heads: u32 = 1;
+    var scores = [_]f32{
+        1.0, 2.0, 3.0, 4.0,
+        0.5, 1.5, 2.5, 3.5,
+        0.1, 0.2, 0.3, 0.4,
+        2.0, 2.0, 2.0, 2.0,
+    };
+
+    rt.resetArena();
+    const x = MpsAdapter.makeInput(&rt, &scores, &.{ @as(usize, seq), @as(usize, seq) }, false);
+    const y = rt.causalSoftmax(x, num_heads, seq);
+
+    var out: [16]f32 = undefined;
+    MpsAdapter.readData(&rt, y, &out);
+
+    // 上三角 (j > i) は 0、各行の合計は 1.0
+    for (0..seq) |i| {
+        var row_sum: f32 = 0;
+        for (0..seq) |j| {
+            const v = out[i * seq + j];
+            if (j > i) try testing.expectApproxEqAbs(@as(f32, 0), v, 1e-6);
+            row_sum += v;
+        }
+        try testing.expectApproxEqAbs(@as(f32, 1.0), row_sum, 1e-5);
+    }
+}
+
+test "diff_mps_runtime: causalSoftmax gradient" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+
+    var data = [_]f32{
+        0.5, 1.3, 2.7, 0.1,
+        3.2, 0.8, 1.5, 2.1,
+        0.3, 0.6, 1.2, 2.4,
+        1.1, 0.4, 0.9, 1.8,
+    };
+    try checkGrad(struct {
+        fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
+            return ctx.causalSoftmax(x, 1, 4);
+        }
+    }.f, &rt, &data, &.{ 4, 4 }, 1e-4, 2e-2);
+}
+
+test "diff_mps_runtime: rope gradient" {
+    const metal_ctx = try getOrInitMetalCtx();
+    var module = Module.init(testing.allocator);
+    defer module.deinit();
+    var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
+    defer rt.deinit();
+
+    // x: [seq_len=3, n_heads=2, head_dim=4] = 24
+    var data = [_]f32{
+        0.1,  0.2,  0.3, 0.4,
+        0.5,  0.6,  0.7, 0.8,
+        -0.1, -0.2, 0.3, 0.4,
+        0.5,  -0.6, 0.7, -0.8,
+        0.9,  0.1,  -0.2, 0.3,
+        -0.4, 0.5,  0.6, -0.7,
+    };
+
+    try checkGrad(struct {
+        const SEQ: u32 = 3;
+        const HEADS: u32 = 2;
+        const HALF: u32 = 2;
+        // freqs are recreated in f so checkGrad's resetArena between probes stays safe.
+        fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
+            var freqs_host = [_]f32{ 1.0, 0.01 };
+            const fr = ctx.makeTensor(&freqs_host, &.{HALF});
+            fr.requires_grad = false;
+            return ctx.rope(x, fr, HEADS, SEQ, HALF);
+        }
+    }.f, &rt, &data, &.{ 3, 2, 4 }, 1e-3, 3e-2);
+}
