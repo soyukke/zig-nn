@@ -340,3 +340,71 @@ pub fn testReshapeGrad(comptime A: type, rt: *A.Runtime) !void {
         1e-2,
     );
 }
+
+// ════════════════════════════════════════════════════════════════
+// 境界サイズテスト: threadgroup / tiling 境界での正当性検証
+//
+// GPU カーネルは threadgroup サイズ (256) や tiling ブロック (64) の
+// 境界で端数処理のバグが出やすい。小データと合わせて検証する。
+//
+// NOTE: softmax は要素数が増えると exp の累積で数値勾配の有限差分が
+// 不正確になるため tolerance を緩めている (5e-2)。
+// ════════════════════════════════════════════════════════════════
+
+fn makeRandomData(buf: []f32, seed: u64) void {
+    var rng = std.Random.DefaultPrng.init(seed);
+    const r = rng.random();
+    for (buf) |*v| v.* = r.float(f32) * 2.0 - 1.0;
+}
+
+pub fn testGeluBoundary(comptime A: type, rt: *A.Runtime, comptime n: usize) !void {
+    var data: [n]f32 = undefined;
+    makeRandomData(&data, n);
+    try GradientChecker(A).checkGrad(
+        struct {
+            fn f(ctx: *A.Runtime, x: A.Tensor) A.Tensor {
+                return ctx.gelu(x);
+            }
+        }.f,
+        rt,
+        &data,
+        &.{n},
+        1e-4,
+        1e-2,
+    );
+}
+
+pub fn testMatmulBoundary(comptime A: type, rt: *A.Runtime, comptime M: usize, comptime K: usize, comptime N: usize) !void {
+    var data: [M * K]f32 = undefined;
+    makeRandomData(&data, M * K + N);
+    try GradientChecker(A).checkGrad(
+        struct {
+            fn f(ctx: *A.Runtime, x: A.Tensor) A.Tensor {
+                const w = ctx.param(.{ .index = 0 });
+                return ctx.matmul(x, w);
+            }
+        }.f,
+        rt,
+        &data,
+        &.{ M, K },
+        1e-3,
+        5e-2,
+    );
+}
+
+pub fn testSoftmaxBoundary(comptime A: type, rt: *A.Runtime, comptime rows: usize, comptime cols: usize) !void {
+    var data: [rows * cols]f32 = undefined;
+    makeRandomData(&data, rows * cols);
+    try GradientChecker(A).checkGrad(
+        struct {
+            fn f(ctx: *A.Runtime, x: A.Tensor) A.Tensor {
+                return ctx.softmax(x, -1);
+            }
+        }.f,
+        rt,
+        &data,
+        &.{ rows, cols },
+        1e-3,
+        5e-2,
+    );
+}
