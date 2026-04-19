@@ -116,9 +116,10 @@ pub fn logSoftmaxForward(in_data: []const f32, out_data: []f32, rows: usize, col
             const cache_row = cache[i * cols ..][0..cols];
             while (k + vl <= cols) : (k += vl) {
                 const v: @Vector(vl, f32) = row[k..][0..vl].*;
-                const ls = v - log_sum_splat;
+                const ls: @Vector(vl, f32) = v - log_sum_splat;
+                const ls_exp: @Vector(vl, f32) = @exp(ls);
                 out_row[k..][0..vl].* = ls;
-                cache_row[k..][0..vl].* = @exp(ls);
+                cache_row[k..][0..vl].* = ls_exp;
             }
             while (k < cols) : (k += 1) {
                 out_row[k] = row[k] - log_sum;

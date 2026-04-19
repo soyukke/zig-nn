@@ -1,11 +1,11 @@
 const std = @import("std");
 const nn = @import("nn");
 
-pub fn main() !void {
-    try gpt2Demo();
+pub fn main(init: std.process.Init) !void {
+    try gpt2Demo(init.io);
 }
 
-fn gpt2Demo() !void {
+fn gpt2Demo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
     std.debug.print("=== Demo 4: GPT-2 Text Generation (GGUF Loader) ===\n\n", .{});
 
@@ -13,7 +13,7 @@ fn gpt2Demo() !void {
 
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
-    var gguf_file = nn.gguf.parse(allocator, model_path) catch |err| {
+    var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
         std.debug.print("  (Download GPT-2 GGUF model to models/ directory)\n", .{});
         return;
@@ -71,12 +71,12 @@ fn gpt2Demo() !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
     const rng = prng.random();
 
     model.resetCache();
 
-    var timer = std.time.Timer.start() catch unreachable;
+    var timer = nn.Timer.start() catch unreachable;
 
     // Prefill: プロンプト全体を一括処理
     {

@@ -2386,25 +2386,25 @@ pub const DiffCpuRuntime = struct {
     }
 
     /// Checkpoint 保存
-    pub fn saveCheckpoint(self: *const DiffCpuRuntime, adam: *const AdamState, path: []const u8) !void {
+    pub fn saveCheckpoint(self: *const DiffCpuRuntime, io: std.Io, adam: *const AdamState, path: []const u8) !void {
         const count = self.module.paramCount();
         const slices = try self.allocator.alloc([]const f32, count);
         defer self.allocator.free(slices);
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }
-        try compute.saveCheckpoint(self.module, slices, adam, path);
+        try compute.saveCheckpoint(self.module, io, slices, adam, path);
     }
 
     /// Checkpoint 読み込み
-    pub fn loadCheckpoint(self: *DiffCpuRuntime, adam: *AdamState, path: []const u8) !void {
+    pub fn loadCheckpoint(self: *DiffCpuRuntime, io: std.Io, adam: *AdamState, path: []const u8) !void {
         const count = self.module.paramCount();
         const slices = try self.allocator.alloc([]f32, count);
         defer self.allocator.free(slices);
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }
-        try compute.loadCheckpoint(self.module, slices, adam, path);
+        try compute.loadCheckpoint(self.module, io, slices, adam, path);
     }
 };
 

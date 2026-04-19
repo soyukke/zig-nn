@@ -2,17 +2,17 @@ const std = @import("std");
 const nn = @import("nn");
 const metal = nn.metal;
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init) !void {
+    var args = init.minimal.args.iterate();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
     if (std.mem.eql(u8, mode, "cpu")) {
-        try gemma3Demo();
+        try gemma3Demo(init.io);
     } else if (std.mem.eql(u8, mode, "metal")) {
-        try gemma3MetalDemo();
+        try gemma3MetalDemo(init.io);
     } else if (std.mem.eql(u8, mode, "qlora")) {
-        try gemma3QLoRADemo();
+        try gemma3QLoRADemo(init.io);
     } else {
         std.debug.print("Usage: gemma3 [cpu|metal|qlora]\n", .{});
     }
@@ -22,7 +22,7 @@ pub fn main() !void {
 // Gemma 3 1B CPU Text Generation
 // ============================================================
 
-fn gemma3Demo() !void {
+fn gemma3Demo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
     std.debug.print("=== Demo 5: Gemma 3 1B Text Generation (GGUF Loader) ===\n\n", .{});
 
@@ -30,7 +30,7 @@ fn gemma3Demo() !void {
 
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
-    var gguf_file = nn.gguf.parse(allocator, model_path) catch |err| {
+    var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
         std.debug.print("  (Download Gemma 3 1B GGUF model to models/ directory)\n", .{});
         return;
@@ -88,12 +88,12 @@ fn gemma3Demo() !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
     const rng = prng.random();
 
     model.resetCache();
 
-    var timer = std.time.Timer.start() catch unreachable;
+    var timer = nn.Timer.start() catch unreachable;
 
     // Prefill
     {
@@ -185,7 +185,7 @@ fn gemma3Demo() !void {
 // Gemma 3 1B Metal GPU Text Generation
 // ============================================================
 
-fn gemma3MetalDemo() !void {
+fn gemma3MetalDemo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
     std.debug.print("=== Demo 5b: Gemma 3 1B Metal GPU Text Generation ===\n\n", .{});
 
@@ -193,7 +193,7 @@ fn gemma3MetalDemo() !void {
 
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
-    var gguf_file = nn.gguf.parse(allocator, model_path) catch |err| {
+    var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
         return;
     };
@@ -241,12 +241,12 @@ fn gemma3MetalDemo() !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
     const rng = prng.random();
 
     model.resetCache();
 
-    var timer_gen = std.time.Timer.start() catch unreachable;
+    var timer_gen = nn.Timer.start() catch unreachable;
     var prefill_ns: u64 = 0;
 
     // Prefill
@@ -296,7 +296,7 @@ fn gemma3MetalDemo() !void {
         std.debug.print("  Generated 1 tokens in {d:.0}ms\n", .{elapsed_ms});
         return;
     }
-    var timer_decode = std.time.Timer.start() catch unreachable;
+    var timer_decode = nn.Timer.start() catch unreachable;
     for (1..gen_tokens) |_| {
         _ = gen_arena.reset(.retain_capacity);
         const temp = gen_arena.allocator();
@@ -359,7 +359,7 @@ fn gemma3MetalDemo() !void {
 // Gemma 3 1B QLoRA Fine-tuning (Metal GPU, unified DiffMpsRuntime)
 // ============================================================
 
-fn gemma3QLoRADemo() !void {
+fn gemma3QLoRADemo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
     std.debug.print("=== Demo 9: Gemma 3 1B QLoRA Fine-tuning (Metal GPU) ===\n\n", .{});
 
@@ -375,7 +375,7 @@ fn gemma3QLoRADemo() !void {
     // --- GGUF ---
     const model_path = "models/gemma3-1b.gguf";
     std.debug.print("  Loading {s}...\n", .{model_path});
-    var gguf_file = nn.gguf.parse(allocator, model_path) catch |err| {
+    var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         std.debug.print("  Error: {}\n  Place gemma3-1b.gguf in models/\n", .{err});
         return;
     };
@@ -438,7 +438,7 @@ fn gemma3QLoRADemo() !void {
     const lr: f32 = 1e-4;
     std.debug.print("  Training {d} steps (lr={d}, α={d}, rank={d})...\n", .{ steps, lr, 16, RANK });
 
-    var timer = try std.time.Timer.start();
+    var timer = try nn.Timer.start();
     for (0..steps) |step| {
         var step_loss: f32 = 0;
         for (train_input_ids, 0..) |_, seq_idx| {

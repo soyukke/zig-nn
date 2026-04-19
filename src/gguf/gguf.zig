@@ -282,17 +282,18 @@ fn readI32(buf: *const [4]u8) i32 {
 // GGUF パーサー
 // ============================================================
 
-pub fn parse(allocator: Allocator, file_path: []const u8) !GGUFFile {
+pub fn parse(allocator: Allocator, io: std.Io, file_path: []const u8) !GGUFFile {
     // ファイル全体を読み込み
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = try cwd.openFile(io, file_path, .{});
+    defer file.close(io);
 
-    const stat = try file.stat();
+    const stat = try file.stat(io);
     const file_size = stat.size;
     const file_buf = try allocator.alloc(u8, file_size);
     errdefer allocator.free(file_buf);
 
-    const bytes_read = try file.readAll(file_buf);
+    const bytes_read = try file.readPositionalAll(io, file_buf, 0);
     if (bytes_read != file_size) return error.IncompleteRead;
 
     return parseFromBuffer(allocator, file_buf, file_path);

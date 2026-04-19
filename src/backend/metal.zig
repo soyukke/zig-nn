@@ -5,6 +5,7 @@
 /// MTLResourceStorageModeShared でゼロコピーバッファ共有を実現。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Timer = @import("../util/timer.zig").Timer;
 
 // Objective-C ランタイム
 const objc = @cImport({
@@ -158,7 +159,7 @@ pub const MetalContext = struct {
     profile_mode: bool = false,
     profile_stats: ProfileStats = .{},
     profile_current_cat: u8 = 255, // 現在のカテゴリ (255=none)
-    profile_timer: ?std.time.Timer = null, // カテゴリ開始タイマー
+    profile_timer: ?Timer = null, // カテゴリ開始タイマー
 
     pub const ProfileStats = struct {
         mps_matmul_ns: u64 = 0,
@@ -2675,7 +2676,7 @@ pub const MetalContext = struct {
             if (self.profile_current_cat != mps_cat_id) {
                 self.profileFlush();
                 self.profile_current_cat = mps_cat_id;
-                self.profile_timer = std.time.Timer.start() catch null;
+                self.profile_timer = Timer.start() catch null;
             }
             // MPS encode (通常の batch mode と同じパス)
             memoryBarrier(self.batch_encoder.?);

@@ -192,44 +192,48 @@ pub fn warmupCosineDecayLR(step: u32, warmup_steps: u32, total_steps: u32, lr_mi
 const CHECKPOINT_MAGIC: u32 = 0x4D504752; // "MPGR"
 const CHECKPOINT_VERSION: u32 = 1;
 
-fn readExact(f: std.fs.File, out: []u8) !void {
-    var total: usize = 0;
-    while (total < out.len) {
-        const n = try f.read(out[total..]);
-        if (n == 0) return error.EndOfStream;
-        total += n;
-    }
+fn readExactPositional(f: std.Io.File, io: std.Io, offset: *u64, out: []u8) !void {
+    const n = try f.readPositionalAll(io, out, offset.*);
+    if (n != out.len) return error.EndOfStream;
+    offset.* += out.len;
 }
 
-fn readU32(f: std.fs.File) !u32 {
+fn readU32Positional(f: std.Io.File, io: std.Io, offset: *u64) !u32 {
     var bytes: [4]u8 = undefined;
-    var total: usize = 0;
-    while (total < 4) {
-        const n = try f.read(bytes[total..]);
-        if (n == 0) return error.EndOfStream;
-        total += n;
-    }
+    try readExactPositional(f, io, offset, &bytes);
     return std.mem.littleToNative(u32, @bitCast(bytes));
+}
+
+fn writeExactPositional(f: std.Io.File, io: std.Io, offset: *u64, bytes: []const u8) !void {
+    try f.writePositionalAll(io, bytes, offset.*);
+    offset.* += bytes.len;
+}
+
+fn writeU32Positional(f: std.Io.File, io: std.Io, offset: *u64, v: u32) !void {
+    const le = std.mem.nativeToLittle(u32, v);
+    try writeExactPositional(f, io, offset, std.mem.asBytes(&le));
 }
 
 /// Checkpoint 保存 (パラメータデータ + Adam state)
 /// param_data: 各パラメータの f32 スライス
 pub fn saveCheckpoint(
     module: *const Module,
+    io: std.Io,
     param_data: []const []const f32,
     adam: *const AdamState,
     path: []const u8,
 ) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = try cwd.createFile(io, path, .{});
+    defer file.close(io);
 
+    var offset: u64 = 0;
     const count: u32 = @intCast(module.params.items.len);
 
-    // Header
-    try file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, CHECKPOINT_MAGIC)));
-    try file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, CHECKPOINT_VERSION)));
-    try file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, count)));
-    try file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, adam.step)));
+    try writeU32Positional(file, io, &offset, CHECKPOINT_MAGIC);
+    try writeU32Positional(file, io, &offset, CHECKPOINT_VERSION);
+    try writeU32Positional(file, io, &offset, count);
+    try writeU32Positional(file, io, &offset, adam.step);
 
     // Each param: num_elements, weight_data, adam_m, adam_v
     for (module.params.items, 0..) |meta, i| {
@@ -237,11 +241,10 @@ pub fn saveCheckpoint(
         for (meta.shape) |d| size *= d;
 
         const n: u32 = @intCast(size);
-        try file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, n)));
-
-        try file.writeAll(std.mem.sliceAsBytes(param_data[i]));
-        try file.writeAll(std.mem.sliceAsBytes(adam.m[i]));
-        try file.writeAll(std.mem.sliceAsBytes(adam.v[i]));
+        try writeU32Positional(file, io, &offset, n);
+        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
+        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
+        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
     }
 }
 
@@ -249,33 +252,37 @@ pub fn saveCheckpoint(
 /// param_data: 各パラメータの f32 スライス (書き込み先)
 pub fn loadCheckpoint(
     module: *const Module,
+    io: std.Io,
     param_data: [][]f32,
     adam: *AdamState,
     path: []const u8,
 ) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = try cwd.openFile(io, path, .{});
+    defer file.close(io);
+
+    var offset: u64 = 0;
 
     // Header
-    const magic = try readU32(file);
+    const magic = try readU32Positional(file, io, &offset);
     if (magic != CHECKPOINT_MAGIC) return error.InvalidCheckpoint;
-    const version = try readU32(file);
+    const version = try readU32Positional(file, io, &offset);
     if (version != CHECKPOINT_VERSION) return error.UnsupportedVersion;
-    const num_params = try readU32(file);
+    const num_params = try readU32Positional(file, io, &offset);
     if (num_params != module.params.items.len) return error.ParamCountMismatch;
-    adam.step = try readU32(file);
+    adam.step = try readU32Positional(file, io, &offset);
 
     // Each param
     for (module.params.items, 0..) |meta, i| {
         var size: usize = 1;
         for (meta.shape) |d| size *= d;
 
-        const n = try readU32(file);
+        const n = try readU32Positional(file, io, &offset);
         if (n != size) return error.ParamSizeMismatch;
 
-        try readExact(file, std.mem.sliceAsBytes(param_data[i]));
-        try readExact(file, std.mem.sliceAsBytes(adam.m[i]));
-        try readExact(file, std.mem.sliceAsBytes(adam.v[i]));
+        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
+        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
+        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
     }
 }
 

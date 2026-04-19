@@ -93,6 +93,10 @@ pub const unified = struct {
 // Diffusion utilities (pure helpers, used by examples/diffusion and seqdiffuseq)
 pub const diffusion = @import("nn/diffusion.zig");
 
+// Timer shim (std.time.Timer が Zig 0.16 で削除されたため)
+pub const Timer = @import("util/timer.zig").Timer;
+pub const nowNanos = @import("util/timer.zig").nowNanos;
+
 test {
     @import("std").testing.refAllDecls(@This());
 }
