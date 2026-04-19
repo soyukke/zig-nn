@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const dequant = @import("dequant.zig");
+const log = @import("../log.zig").gguf;
 
 pub const GGMLType = dequant.GGMLType;
 
@@ -237,27 +238,29 @@ pub const GGUFFile = struct {
         return strings;
     }
 
-    /// モデル情報をデバッグ表示
+    /// モデル情報を logger に出力する。
+    /// サマリは info、テンソル毎の shape 列挙は debug。
     pub fn printInfo(self: *const GGUFFile) void {
-        std.debug.print("GGUF v{d}: {d} tensors, {d} metadata KV\n", .{
+        log.info("GGUF v{d}: {d} tensors, {d} metadata KV", .{
             self.version, self.tensors.len, self.metadata.len,
         });
 
         if (self.getMetadataString("general.architecture")) |arch| {
-            std.debug.print("  Architecture: {s}\n", .{arch});
+            log.info("  architecture: {s}", .{arch});
         }
         if (self.getMetadataString("general.name")) |name| {
-            std.debug.print("  Name: {s}\n", .{name});
+            log.info("  name: {s}", .{name});
         }
 
-        std.debug.print("  Tensors:\n", .{});
         for (self.tensors) |t| {
-            std.debug.print("    {s}: ", .{t.name});
+            var buf: [256]u8 = undefined;
+            var len: usize = 0;
             for (0..t.n_dims) |d| {
-                if (d > 0) std.debug.print("x", .{});
-                std.debug.print("{d}", .{t.dimensions[d]});
+                const sep: []const u8 = if (d > 0) "x" else "";
+                const written = std.fmt.bufPrint(buf[len..], "{s}{d}", .{ sep, t.dimensions[d] }) catch break;
+                len += written.len;
             }
-            std.debug.print(" (type={d})\n", .{@intFromEnum(t.type_)});
+            log.debug("  tensor {s}: {s} (type={d})", .{ t.name, buf[0..len], @intFromEnum(t.type_) });
         }
     }
 };

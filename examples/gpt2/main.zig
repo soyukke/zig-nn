@@ -1,6 +1,9 @@
 const std = @import("std");
 const nn = @import("nn");
 
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 pub fn main(init: std.process.Init) !void {
     try gpt2Demo(init.io);
 }
@@ -14,8 +17,7 @@ fn gpt2Demo(io: std.Io) !void {
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
-        std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
-        std.debug.print("  (Download GPT-2 GGUF model to models/ directory)\n", .{});
+        log.err("could not load {s}: {} (download GPT-2 GGUF model to models/)", .{ model_path, err });
         return;
     };
     defer gguf_file.deinit();
@@ -32,7 +34,7 @@ fn gpt2Demo(io: std.Io) !void {
     // 2. Load tokenizer
     std.debug.print("  Loading tokenizer...\n", .{});
     var tokenizer = nn.bpe.BPETokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
@@ -41,7 +43,7 @@ fn gpt2Demo(io: std.Io) !void {
     // 3. Load model weights
     std.debug.print("  Loading weights...\n", .{});
     var model = nn.gpt2.GPT2(nn.gpt2.GPT2Small).init(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading weights: {}\n", .{err});
+        log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
@@ -58,7 +60,7 @@ fn gpt2Demo(io: std.Io) !void {
     var tokens: std.ArrayListAligned(u32, null) = .empty;
     defer tokens.deinit(allocator);
     const prompt_ids = tokenizer.encode(prompt, allocator) catch |err| {
-        std.debug.print("  Error encoding: {}\n", .{err});
+        log.err("encoding: {}", .{err});
         return;
     };
     defer allocator.free(prompt_ids);
@@ -84,7 +86,7 @@ fn gpt2Demo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const logits = model.prefill(prompt_ids, temp) catch |err| {
-            std.debug.print("\n  Error in prefill: {}\n", .{err});
+            log.err("in prefill: {}", .{err});
             return;
         };
 
@@ -117,7 +119,7 @@ fn gpt2Demo(io: std.Io) !void {
 
         const last_token = tokens.items[tokens.items.len - 1];
         const logits = model.decodeNext(last_token, temp) catch |err| {
-            std.debug.print("\n  Error in decodeNext: {}\n", .{err});
+            log.err("in decodeNext: {}", .{err});
             return;
         };
 

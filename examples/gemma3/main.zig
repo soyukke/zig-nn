@@ -2,6 +2,9 @@ const std = @import("std");
 const nn = @import("nn");
 const metal = nn.metal;
 
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 pub fn main(init: std.process.Init) !void {
     var args = init.minimal.args.iterate();
     _ = args.skip();
@@ -31,8 +34,7 @@ fn gemma3Demo(io: std.Io) !void {
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
-        std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
-        std.debug.print("  (Download Gemma 3 1B GGUF model to models/ directory)\n", .{});
+        log.err("could not load {s}: {} (download Gemma 3 1B GGUF model to models/)", .{ model_path, err });
         return;
     };
     defer gguf_file.deinit();
@@ -49,7 +51,7 @@ fn gemma3Demo(io: std.Io) !void {
     // 2. Load tokenizer (SentencePiece for Gemma)
     std.debug.print("  Loading tokenizer...\n", .{});
     var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
@@ -58,7 +60,7 @@ fn gemma3Demo(io: std.Io) !void {
     // 3. Load model weights
     std.debug.print("  Loading weights...\n", .{});
     var model = nn.gemma3.Gemma3(nn.gemma3.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading weights: {}\n", .{err});
+        log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
@@ -75,7 +77,7 @@ fn gemma3Demo(io: std.Io) !void {
     var tokens: std.ArrayListAligned(u32, null) = .empty;
     defer tokens.deinit(allocator);
     const prompt_ids = tokenizer.encode(prompt, allocator) catch |err| {
-        std.debug.print("  Error encoding: {}\n", .{err});
+        log.err("encoding: {}", .{err});
         return;
     };
     defer allocator.free(prompt_ids);
@@ -101,7 +103,7 @@ fn gemma3Demo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const logits = model.prefill(prompt_ids, temp) catch |err| {
-            std.debug.print("\n  Error in prefill: {}\n", .{err});
+            log.err("in prefill: {}", .{err});
             return;
         };
 
@@ -145,7 +147,7 @@ fn gemma3Demo(io: std.Io) !void {
 
         const last_token = tokens.items[tokens.items.len - 1];
         const logits_d = model.decodeNext(last_token, temp) catch |err| {
-            std.debug.print("\n  Error in decodeNext: {}\n", .{err});
+            log.err("in decodeNext: {}", .{err});
             return;
         };
 
@@ -194,7 +196,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
     // 1. Parse GGUF file
     std.debug.print("  Loading {s}...\n", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
-        std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
+        log.err("could not load {s}: {}", .{ model_path, err });
         return;
     };
     defer gguf_file.deinit();
@@ -206,7 +208,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
     // 2. Load tokenizer
     std.debug.print("  Loading tokenizer...\n", .{});
     var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
@@ -214,7 +216,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
     // 3. Load model with Metal
     std.debug.print("  Loading weights (Metal GPU)...\n", .{});
     var model = nn.gemma3_metal.Gemma3Metal(nn.gemma3_metal.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading model: {}\n", .{err});
+        log.err("loading model: {}", .{err});
         return;
     };
     defer model.deinit();
@@ -230,7 +232,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
     var tokens: std.ArrayListAligned(u32, null) = .empty;
     defer tokens.deinit(allocator);
     const prompt_ids = tokenizer.encode(prompt, allocator) catch |err| {
-        std.debug.print("  Error encoding: {}\n", .{err});
+        log.err("encoding: {}", .{err});
         return;
     };
     defer allocator.free(prompt_ids);
@@ -255,7 +257,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const logits = model.prefill(prompt_ids, temp) catch |err| {
-            std.debug.print("\n  Error in prefill: {}\n", .{err});
+            log.err("in prefill: {}", .{err});
             return;
         };
 
@@ -303,7 +305,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
 
         const last_token = tokens.items[tokens.items.len - 1];
         const logits_d = model.decodeNext(last_token, temp) catch |err| {
-            std.debug.print("\n  Error in decodeNext: {}\n", .{err});
+            log.err("in decodeNext: {}", .{err});
             return;
         };
 
@@ -376,13 +378,13 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     const model_path = "models/gemma3-1b.gguf";
     std.debug.print("  Loading {s}...\n", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
-        std.debug.print("  Error: {}\n  Place gemma3-1b.gguf in models/\n", .{err});
+        log.err("could not load model: {} (place gemma3-1b.gguf in models/)", .{err});
         return;
     };
     defer gguf_file.deinit();
 
     var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
@@ -401,7 +403,7 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     rt.initParams();
 
     model.loadFromGguf(&rt, &gguf_file) catch |err| {
-        std.debug.print("  Error loading weights: {}\n", .{err});
+        log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();

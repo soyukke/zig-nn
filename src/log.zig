@@ -29,6 +29,7 @@ pub const gguf = std.log.scoped(.gguf);
 pub const gemma3 = std.log.scoped(.gemma3);
 pub const trainer = std.log.scoped(.trainer);
 pub const example = std.log.scoped(.example);
+pub const gradcheck = std.log.scoped(.gradcheck);
 
 var initialized: bool = false;
 var runtime_level: std.log.Level = .info;
