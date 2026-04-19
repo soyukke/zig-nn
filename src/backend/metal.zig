@@ -6,6 +6,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Timer = @import("../util/timer.zig").Timer;
+const log = @import("../log.zig").metal;
 
 // Objective-C ランタイム
 const objc = @cImport({
@@ -413,7 +414,7 @@ pub const MetalContext = struct {
                 if (desc) |d| {
                     const cstr = send0str(d, sel("UTF8String"));
                     if (cstr) |s| {
-                        std.debug.print("Metal shader compilation error: {s}\n", .{s});
+                        log.err("shader compilation error: {s}", .{s});
                     }
                 }
             }
@@ -458,7 +459,7 @@ pub const MetalContext = struct {
         if (name) |n| {
             const cstr = send0str(n, sel("UTF8String"));
             if (cstr) |s| {
-                std.debug.print("  Metal device: {s}\n", .{s});
+                log.info("device: {s}", .{s});
             }
         }
 
@@ -468,7 +469,7 @@ pub const MetalContext = struct {
     fn createPipeline(self: *MetalContext, name: [*:0]const u8) !id {
         const ns_name = nsString(name);
         const func = send1(self.library, sel("newFunctionWithName:"), ns_name) orelse {
-            std.debug.print("Metal: function '{s}' not found\n", .{name});
+            log.err("function '{s}' not found", .{name});
             return error.MetalFunctionNotFound;
         };
         defer objRelease(func);
@@ -1106,7 +1107,7 @@ pub const MetalContext = struct {
                 if (desc) |d| {
                     const cstr = send0str(d, sel("UTF8String"));
                     if (cstr) |s| {
-                        std.debug.print("Metal training shader compilation error: {s}\n", .{s});
+                        log.err("training shader compilation error: {s}", .{s});
                     }
                 }
             }
@@ -1183,7 +1184,7 @@ pub const MetalContext = struct {
     fn createTrainingPipeline(self: *MetalContext, lib: id, name: [*:0]const u8) !id {
         const ns_name = nsString(name);
         const func = send1(lib, sel("newFunctionWithName:"), ns_name) orelse {
-            std.debug.print("Metal: training function '{s}' not found\n", .{name});
+            log.err("training function '{s}' not found", .{name});
             return error.MetalFunctionNotFound;
         };
         defer objRelease(func);

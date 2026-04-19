@@ -13,6 +13,10 @@ const builtin = @import("builtin");
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
 
+// Logging infrastructure (scoped loggers + std_options)
+pub const log = @import("log.zig");
+pub const std_options = log.std_options;
+
 // Backend primitives
 pub const backend = @import("backend/backend.zig");
 pub const Backend = backend.Backend;

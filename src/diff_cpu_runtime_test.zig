@@ -2,6 +2,7 @@
 ///
 /// 共通テスト基盤 (diff_runtime_test_helpers.zig) を CPU Adapter 経由で使用する。
 const std = @import("std");
+pub const std_options = @import("log.zig").std_options;
 const compute = @import("compute.zig");
 const Module = compute.Module;
 const diff_cpu = @import("diff_cpu_runtime.zig");

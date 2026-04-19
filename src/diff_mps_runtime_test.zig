@@ -5,6 +5,7 @@
 ///
 /// ビルド: zig build test-diff-mps (macOS only)
 const std = @import("std");
+pub const std_options = @import("log.zig").stdOptionsAtLevel(.warn);
 const compute = @import("compute.zig");
 const Module = compute.Module;
 const diff_mps = @import("diff_mps_runtime.zig");
