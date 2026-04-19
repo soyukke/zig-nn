@@ -62,6 +62,50 @@ fn levelStr(comptime level: std.log.Level) []const u8 {
     };
 }
 
+/// Profile dump 用の artifact ファイルハンドル。
+/// `defer artifact.close()` で file と path を解放する。
+pub const ProfileArtifact = struct {
+    file: std.fs.File,
+    path: []u8,
+    allocator: std.mem.Allocator,
+
+    pub fn close(self: *ProfileArtifact) void {
+        self.file.close();
+        self.allocator.free(self.path);
+    }
+};
+
+fn isProfileEnabled() bool {
+    const v = std.process.getEnvVarOwned(std.heap.page_allocator, "NN_PROFILE") catch return false;
+    defer std.heap.page_allocator.free(v);
+    if (v.len == 0) return false;
+    if (std.mem.eql(u8, v, "0")) return false;
+    if (std.ascii.eqlIgnoreCase(v, "false")) return false;
+    return true;
+}
+
+/// Profile dump を artifact ファイルに書き出すための writer を開く。
+/// `NN_PROFILE` env が立っていない場合は null を返す (no-op gate)。
+/// 出力先: `NN_PROFILE_DIR` env か、既定 `zig-out/profiles`。
+/// ファイル名: `<prefix>-<unix_ts>.txt`。
+pub fn openProfileArtifact(prefix: []const u8) !?ProfileArtifact {
+    if (!isProfileEnabled()) return null;
+    const allocator = std.heap.page_allocator;
+
+    const dir_owned: ?[]u8 = std.process.getEnvVarOwned(allocator, "NN_PROFILE_DIR") catch null;
+    defer if (dir_owned) |d| allocator.free(d);
+    const dir: []const u8 = if (dir_owned) |d| d else "zig-out/profiles";
+
+    std.fs.cwd().makePath(dir) catch {};
+
+    const ts = std.time.timestamp();
+    const path = try std.fmt.allocPrint(allocator, "{s}/{s}-{d}.txt", .{ dir, prefix, ts });
+    errdefer allocator.free(path);
+
+    const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    return .{ .file = file, .path = path, .allocator = allocator };
+}
+
 fn nnLogFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),

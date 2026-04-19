@@ -6,7 +6,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Timer = @import("../util/timer.zig").Timer;
-const log = @import("../log.zig").metal;
+const log_mod = @import("../log.zig");
+const log = log_mod.metal;
 
 // Objective-C ランタイム
 const objc = @cImport({
@@ -197,25 +198,31 @@ pub const MetalContext = struct {
         }
 
         pub fn print(self: ProfileStats) void {
-            const total = self.totalNs();
-            const ms = std.time.ns_per_ms;
-            std.debug.print("  [GPU profile] total={d}ms\n", .{total / ms});
-            self.printLine("mps_matmul", self.mps_matmul_ns, self.mps_matmul_count, total);
-            self.printLine("batched_matmul", self.batched_matmul_ns, self.batched_matmul_count, total);
-            self.printLine("layernorm", self.layernorm_ns, self.layernorm_count, total);
-            self.printLine("softmax", self.softmax_ns, self.softmax_count, total);
-            self.printLine("gelu_tanh", self.gelu_tanh_ns, self.gelu_tanh_count, total);
-            self.printLine("embedding", self.embedding_ns, self.embedding_count, total);
-            self.printLine("add_bias", self.add_bias_ns, self.add_bias_count, total);
-            self.printLine("scale", self.scale_ns, self.scale_count, total);
-            self.printLine("concat", self.concat_ns, self.concat_count, total);
-            self.printLine("loss", self.loss_ns, self.loss_count, total);
-            self.printLine("other", self.other_ns, self.other_count, total);
+            var maybe_artifact = log_mod.openProfileArtifact("metal-gpu") catch null;
+            if (maybe_artifact) |*artifact| {
+                defer artifact.close();
+                const w = artifact.file.deprecatedWriter();
+                const total = self.totalNs();
+                const ms = std.time.ns_per_ms;
+                w.print("[GPU profile] total={d}ms\n", .{total / ms}) catch return;
+                self.writeLine(w, "mps_matmul", self.mps_matmul_ns, self.mps_matmul_count, total) catch return;
+                self.writeLine(w, "batched_matmul", self.batched_matmul_ns, self.batched_matmul_count, total) catch return;
+                self.writeLine(w, "layernorm", self.layernorm_ns, self.layernorm_count, total) catch return;
+                self.writeLine(w, "softmax", self.softmax_ns, self.softmax_count, total) catch return;
+                self.writeLine(w, "gelu_tanh", self.gelu_tanh_ns, self.gelu_tanh_count, total) catch return;
+                self.writeLine(w, "embedding", self.embedding_ns, self.embedding_count, total) catch return;
+                self.writeLine(w, "add_bias", self.add_bias_ns, self.add_bias_count, total) catch return;
+                self.writeLine(w, "scale", self.scale_ns, self.scale_count, total) catch return;
+                self.writeLine(w, "concat", self.concat_ns, self.concat_count, total) catch return;
+                self.writeLine(w, "loss", self.loss_ns, self.loss_count, total) catch return;
+                self.writeLine(w, "other", self.other_ns, self.other_count, total) catch return;
+                log.info("profile written: {s}", .{artifact.path});
+            }
         }
 
-        fn printLine(_: ProfileStats, name: []const u8, ns: u64, count: u32, total: u64) void {
+        fn writeLine(_: ProfileStats, w: anytype, name: []const u8, ns: u64, count: u32, total: u64) !void {
             const pct = if (total > 0) (ns * 100) / total else 0;
-            std.debug.print("    {s}: {d}ms ({d}%) [{d} calls]\n", .{ name, ns / std.time.ns_per_ms, pct, count });
+            try w.print("  {s}: {d}ms ({d}%) [{d} calls]\n", .{ name, ns / std.time.ns_per_ms, pct, count });
         }
 
         /// GpuProfileCat enum value でカウント加算
