@@ -11,8 +11,10 @@ pub fn main() !void {
         try gemma3Demo();
     } else if (std.mem.eql(u8, mode, "metal")) {
         try gemma3MetalDemo();
+    } else if (std.mem.eql(u8, mode, "qlora")) {
+        try gemma3QLoRADemo();
     } else {
-        std.debug.print("Usage: gemma3 [cpu|metal]\n", .{});
+        std.debug.print("Usage: gemma3 [cpu|metal|qlora]\n", .{});
     }
 }
 
@@ -351,4 +353,118 @@ fn gemma3MetalDemo() !void {
     std.debug.print("  Generated {d} tokens in {d:.0}ms ({d:.1} tokens/sec)\n", .{ generated + 1, elapsed_ms, tokens_per_sec });
     std.debug.print("  Prefill: {d:.1}ms | Decode: {d} tokens in {d:.1}ms ({d:.1} tok/s)\n", .{ prefill_ms, generated, decode_ms, decode_tps });
     model.profile.print();
+}
+
+// ============================================================
+// Gemma 3 1B QLoRA Fine-tuning (Metal GPU, unified DiffMpsRuntime)
+// ============================================================
+
+fn gemma3QLoRADemo() !void {
+    const allocator = std.heap.page_allocator;
+    std.debug.print("=== Demo 9: Gemma 3 1B QLoRA Fine-tuning (Metal GPU) ===\n\n", .{});
+
+    const C = nn.gemma3_qlora.Gemma3_1B;
+    const RANK = 8;
+    const SEQ_LEN = 32;
+
+    // --- Metal context ---
+    var mtl = try metal.MetalContext.init();
+    defer mtl.deinit();
+    std.debug.print("  Metal device initialized.\n", .{});
+
+    // --- GGUF ---
+    const model_path = "models/gemma3-1b.gguf";
+    std.debug.print("  Loading {s}...\n", .{model_path});
+    var gguf_file = nn.gguf.parse(allocator, model_path) catch |err| {
+        std.debug.print("  Error: {}\n  Place gemma3-1b.gguf in models/\n", .{err});
+        return;
+    };
+    defer gguf_file.deinit();
+
+    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
+        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        return;
+    };
+    defer tokenizer.deinit();
+
+    // --- Module + model + runtime ---
+    std.debug.print("  Initializing QLoRA model (rank={d})...\n", .{RANK});
+    const QLoRAModel = nn.gemma3_qlora.Gemma3QLoRA(C, RANK);
+
+    var module = nn.unified.Module.init(allocator);
+    defer module.deinit();
+
+    var model = QLoRAModel.initParams(&module);
+
+    var rt = try nn.unified.DiffMpsRuntime.init(&module, &mtl, allocator);
+    defer rt.deinit();
+    rt.initParams();
+
+    model.loadFromGguf(&rt, &gguf_file) catch |err| {
+        std.debug.print("  Error loading weights: {}\n", .{err});
+        return;
+    };
+    defer model.deinit();
+
+    const total_params = module.totalParamElements();
+    std.debug.print("  Trainable params: {d} ({d} handles)\n", .{ total_params, module.paramCount() });
+
+    // --- Adam (GPU-resident grad buffers already allocated by rt) ---
+    const sizes = try module.paramSizes(allocator);
+    defer allocator.free(sizes);
+    var adam = try nn.unified.AdamState.init(allocator, sizes);
+    defer adam.deinit();
+
+    // --- Training data (tiny demo) ---
+    const train_texts = [_][]const u8{
+        "The capital of Japan is Tokyo, which is one of the largest cities in the world with over thirteen million people.",
+        "The capital of France is Paris, which is known for the Eiffel Tower and its beautiful art museums and cafes.",
+    };
+
+    var train_input_ids: [train_texts.len][SEQ_LEN]u32 = undefined;
+    var train_target_ids: [train_texts.len][SEQ_LEN]u32 = undefined;
+    for (train_texts, 0..) |text, ti| {
+        const ids = tokenizer.encode(text, allocator) catch continue;
+        defer allocator.free(ids);
+        const n = @min(SEQ_LEN + 1, ids.len);
+        for (0..SEQ_LEN) |t| {
+            train_input_ids[ti][t] = if (t < n - 1) ids[t] else 0;
+            train_target_ids[ti][t] = if (t + 1 < n) ids[t + 1] else 0;
+        }
+    }
+
+    // --- Training loop ---
+    const steps: usize = 5;
+    const lr: f32 = 1e-4;
+    std.debug.print("  Training {d} steps (lr={d}, α={d}, rank={d})...\n", .{ steps, lr, 16, RANK });
+
+    var timer = try std.time.Timer.start();
+    for (0..steps) |step| {
+        var step_loss: f32 = 0;
+        for (train_input_ids, 0..) |_, seq_idx| {
+            rt.zeroGrad();
+            rt.resetArena();
+
+            const logits = model.forward(&rt, &train_input_ids[seq_idx]);
+            const loss = rt.crossEntropyLossWithIndices(logits, &train_target_ids[seq_idx]);
+            const loss_val = MetalContextReadScalar(&rt, loss);
+
+            rt.backward(loss);
+            rt.applyAdam(&adam, lr, 0.9, 0.999, 1e-8, 0.0);
+
+            step_loss += loss_val;
+        }
+        step_loss /= @floatFromInt(train_texts.len);
+        const elapsed = timer.read();
+        std.debug.print("  Step {d:>2}: loss = {d:.4}  ({d} ms)\n", .{ step, step_loss, elapsed / std.time.ns_per_ms });
+        timer.reset();
+    }
+
+    std.debug.print("\n  QLoRA demo complete.\n", .{});
+}
+
+fn MetalContextReadScalar(rt: *nn.unified.DiffMpsRuntime, t: nn.unified.DiffMpsTensor) f32 {
+    var buf: [1]f32 = undefined;
+    rt.copyToHost(t, &buf);
+    return buf[0];
 }

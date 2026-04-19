@@ -1615,4 +1615,26 @@ pub const DiffMpsRuntime = struct {
         // 4-5. Reverse traversal + reset visited
         diff_node.backwardPass(DiffMpsNode, &self.topo_buf, self.param_nodes);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // Optimizer step (UMA: compute.adamStep directly on MTLBuffer contents)
+    // ════════════════════════════════════════════════════════════════
+
+    pub fn applyAdam(
+        self: *DiffMpsRuntime,
+        adam: *compute.AdamState,
+        lr: f32,
+        beta1: f32,
+        beta2: f32,
+        eps: f32,
+        wd: f32,
+    ) void {
+        adam.step += 1;
+        for (self.param_nodes, 0..) |*node, i| {
+            const size = self.module.paramSize(.{ .index = i });
+            const p = bufPtr(node.data)[0..size];
+            const g = bufPtr(self.param_grad_bufs[i])[0..size];
+            compute.adamStep(p, g, adam.m[i], adam.v[i], lr, beta1, beta2, eps, wd, adam.step);
+        }
+    }
 };
