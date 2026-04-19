@@ -97,7 +97,7 @@ pub const DiffMpsRuntime = struct {
             .param_nodes = param_nodes,
             .param_grad_bufs = param_grad_bufs,
             .arena = std.heap.ArenaAllocator.init(allocator),
-            .arena_bufs = .{},
+            .arena_bufs = .empty,
             .topo_buf = .empty,
             .training = true,
         };

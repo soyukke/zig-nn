@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Timer = @import("../util/timer.zig").Timer;
 const gguf_mod = @import("../gguf/gguf.zig");
 const dequant_mod = @import("../gguf/dequant.zig");
 const thread_pool_mod = @import("../gguf/thread_pool.zig");
@@ -260,7 +261,7 @@ pub fn Gemma3(comptime C: type) type {
             const embed_scale = @sqrt(@as(f32, @floatFromInt(C.EMBED)));
             const p = &self.profile;
 
-            var timer = std.time.Timer.start() catch unreachable;
+            var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
             // Embedding: 各トークンを Q8_0 から逆量子化
@@ -432,7 +433,7 @@ pub fn Gemma3(comptime C: type) type {
             const embed_scale = @sqrt(@as(f32, @floatFromInt(C.EMBED)));
             const p = &self.profile;
 
-            var timer = std.time.Timer.start() catch unreachable;
+            var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
             // Embedding

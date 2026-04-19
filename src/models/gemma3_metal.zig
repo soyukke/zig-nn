@@ -4,6 +4,7 @@
 /// Apple Silicon の UMA を活用し、ゼロコピーバッファ共有を実現。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Timer = @import("../util/timer.zig").Timer;
 const gguf_mod = @import("../gguf/gguf.zig");
 const dequant_mod = @import("../gguf/dequant.zig");
 const gemma3_mod = @import("gemma3.zig");
@@ -169,7 +170,7 @@ pub fn Gemma3Metal(comptime C: type) type {
             const pos = self.kv_seq_len;
             if (pos >= C.CTX) return error.ContextFull;
 
-            var timer = std.time.Timer.start() catch unreachable;
+            var timer = Timer.start() catch unreachable;
 
             const cmd_buf = self.metal.newCommandBuffer();
             const fence = self.fence;

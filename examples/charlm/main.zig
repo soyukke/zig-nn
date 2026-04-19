@@ -15,8 +15,8 @@ const CausalSelfAttention = nn.unified.CausalSelfAttention;
 
 const is_cuda_available = builtin.os.tag == .linux;
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init.Minimal) !void {
+    var args = init.args.iterate();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
@@ -165,7 +165,7 @@ fn charLMDemo() !void {
     defer adam.deinit();
 
     const num_epochs = 200;
-    var timer = try std.time.Timer.start();
+    var timer = try nn.Timer.start();
 
     for (0..num_epochs) |epoch| {
         var epoch_loss: f32 = 0;
@@ -224,7 +224,7 @@ fn charLMDemoCuda() !void {
     defer adam.deinit();
 
     const num_epochs = 200;
-    var timer = try std.time.Timer.start();
+    var timer = try nn.Timer.start();
 
     for (0..num_epochs) |epoch| {
         var epoch_loss: f32 = 0;

@@ -3,6 +3,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const Timer = @import("../util/timer.zig").Timer;
 
 // プロファイリング制御
 pub var profiling_enabled: bool = true;
@@ -15,12 +16,12 @@ pub var saxpy_nanos: u64 = 0;
 pub var other_count: u64 = 0;
 pub var other_nanos: u64 = 0;
 
-inline fn timerStart() ?std.time.Timer {
+inline fn timerStart() ?Timer {
     if (!profiling_enabled) return null;
-    return std.time.Timer.start() catch null;
+    return Timer.start() catch null;
 }
 
-inline fn timerRead(timer: *?std.time.Timer) u64 {
+inline fn timerRead(timer: *?Timer) u64 {
     if (timer.*) |*t| return t.read();
     return 0;
 }
@@ -48,12 +49,21 @@ pub fn resetProfile() void {
 }
 
 // macOS: Accelerate framework (vDSP 関数用)
-const accelerate = if (builtin.os.tag == .macos)
-    @cImport({
-        @cInclude("Accelerate/Accelerate.h");
-    })
-else
-    struct {};
+// Zig 0.16 + Nix apple-sdk では Accelerate.h の cImport が vImage サブフレームワーク
+// ヘッダ解決に失敗するため、必要な vDSP シンボルだけを extern 宣言して利用する。
+const vDSP_Length = c_ulong;
+const vDSP_Stride = c_long;
+
+const accelerate = if (builtin.os.tag == .macos) struct {
+    pub extern "c" fn vDSP_vadd(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vsub(B: [*]const f32, IB: vDSP_Stride, A: [*]const f32, IA: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vmul(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vthres(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vsadd(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vsmul(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vma(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]const f32, IC: vDSP_Stride, D: [*]f32, ID: vDSP_Stride, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_mtrans(A: [*]const f32, IA: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, M: vDSP_Length, N: vDSP_Length) void;
+} else struct {};
 
 // CBLAS extern 宣言 (ヘッダファイル不要、リンク時に解決)
 // OpenBLAS が USE64BITINT でビルドされている場合 blasint = i64

@@ -72,22 +72,14 @@ pub fn Sequential(comptime layer_types: anytype) type {
 }
 
 fn LayersStruct(comptime layer_types: anytype) type {
-    var fields: [layer_types.len]std.builtin.Type.StructField = undefined;
-    for (0..layer_types.len) |i| {
-        fields[i] = .{
-            .name = std.fmt.comptimePrint("layer_{d}", .{i}),
-            .type = layer_types[i],
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(layer_types[i]),
-        };
+    const N = layer_types.len;
+    comptime var field_names: [N][:0]const u8 = undefined;
+    comptime var field_types: [N]type = undefined;
+    inline for (0..N) |i| {
+        field_names[i] = std.fmt.comptimePrint("layer_{d}", .{i});
+        field_types[i] = layer_types[i];
     }
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Struct(.auto, null, &field_names, &field_types, &@splat(.{}));
 }
 
 // ── Tests ──

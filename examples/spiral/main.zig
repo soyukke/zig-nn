@@ -8,8 +8,8 @@ const Trainer = nn.unified.Trainer;
 
 const is_cuda_available = builtin.os.tag == .linux;
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init.Minimal) !void {
+    var args = init.args.iterate();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
@@ -87,7 +87,7 @@ fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
     std.debug.print("  Data: {d} samples, {d} classes\n", .{ SPIRAL_TOTAL, SPIRAL_N_CLASSES });
 
     const num_epochs = 500;
-    var timer = try std.time.Timer.start();
+    var timer = try nn.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));

@@ -19,8 +19,8 @@ const DIFF_TIME_DIM = 64;
 const DIFF_T = 200;
 const DIFF_NUM_SAMPLES = 1024;
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init.Minimal) !void {
+    var args = init.args.iterate();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
@@ -146,7 +146,7 @@ fn diffusionDemo() !void {
     defer adam.deinit();
 
     const num_epochs = 1000;
-    var timer = std.time.Timer.start() catch unreachable;
+    var timer = nn.Timer.start() catch unreachable;
 
     for (0..num_epochs) |epoch| {
         rt.resetArena();
@@ -211,7 +211,7 @@ fn diffusionDemoCuda() !void {
     defer adam.deinit();
 
     const num_epochs = 1000;
-    var timer = std.time.Timer.start() catch unreachable;
+    var timer = nn.Timer.start() catch unreachable;
 
     for (0..num_epochs) |epoch| {
         rt.resetArena();

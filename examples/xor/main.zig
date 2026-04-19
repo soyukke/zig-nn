@@ -8,8 +8,8 @@ const Trainer = nn.unified.Trainer;
 
 const is_cuda_available = builtin.os.tag == .linux;
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init.Minimal) !void {
+    var args = init.args.iterate();
     _ = args.skip();
     const mode = args.next() orelse "cpu";
 
@@ -37,7 +37,7 @@ fn xorDemo(trainer: anytype, device_name: []const u8) !void {
     const targets = [_]f32{ 0, 1, 1, 0 };
 
     const num_epochs = 2000;
-    var timer = try std.time.Timer.start();
+    var timer = try nn.Timer.start();
     for (0..num_epochs) |epoch| {
         trainer.zeroGrad();
         const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));

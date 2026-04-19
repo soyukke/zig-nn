@@ -216,14 +216,14 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
 
         // ── Checkpoint ──
 
-        pub fn save(self: *@This(), path: []const u8) !void {
+        pub fn save(self: *@This(), io: std.Io, path: []const u8) !void {
             if (is_cuda) @compileError("save() is not yet supported for CUDA");
-            try self.rt.saveCheckpoint(&self.adam, path);
+            try self.rt.saveCheckpoint(io, &self.adam, path);
         }
 
-        pub fn load(self: *@This(), path: []const u8) !void {
+        pub fn load(self: *@This(), io: std.Io, path: []const u8) !void {
             if (is_cuda) @compileError("load() is not yet supported for CUDA");
-            try self.rt.loadCheckpoint(&self.adam, path);
+            try self.rt.loadCheckpoint(io, &self.adam, path);
         }
 
         // ── Learning rate ──

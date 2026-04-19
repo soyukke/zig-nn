@@ -11,15 +11,33 @@ pub fn build(b: *std.Build) void {
 
     const enable_cuda = b.option(bool, "cuda", "Enable CUDA GPU backend (requires CUDA toolkit)") orelse false;
 
+    const openblas_path = b.graph.environ_map.get("OPENBLAS_PATH");
+    const cuda_path = b.graph.environ_map.get("CUDA_PATH");
+    const cublas_path = b.graph.environ_map.get("CUBLAS_PATH");
+
+    // macOS SDK framework path (Nix apple-sdk の SDKROOT を優先し、無ければ Xcode を利用)
+    const macos_fw_path: ?[]const u8 = blk: {
+        if (b.graph.environ_map.get("SDKROOT")) |sdkroot| {
+            break :blk b.fmt("{s}/System/Library/Frameworks", .{sdkroot});
+        }
+        break :blk "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks";
+    };
+
+    const addMacosFrameworkPath = struct {
+        fn apply(m: *std.Build.Module, p: ?[]const u8) void {
+            if (p) |path| m.addFrameworkPath(.{ .cwd_relative = path });
+        }
+    }.apply;
+
     // Linux backend dependencies
     if (target.result.os.tag == .linux) {
         mod.linkSystemLibrary("c", .{});
 
         // OpenBLAS (CBLAS) for CPU backend
-        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
-            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
-            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
-        } else |_| {}
+        if (openblas_path) |p| {
+            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+            mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+        }
         mod.linkSystemLibrary("openblas", .{});
 
         // CUDA GPU backend (opt-in via -Dcuda=true)
@@ -27,16 +45,15 @@ pub fn build(b: *std.Build) void {
             // WSL2 driver library path (libcuda.so)
             mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
 
-            // Nix-managed CUDA paths from devShell
-            if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
-                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
-                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
-            } else |_| {}
+            if (cuda_path) |p| {
+                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+            }
 
-            if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
-                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
-                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
-            } else |_| {}
+            if (cublas_path) |p| {
+                mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+                mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+            }
 
             mod.linkSystemLibrary("cuda", .{});
             mod.linkSystemLibrary("cublas", .{});
@@ -45,8 +62,7 @@ pub fn build(b: *std.Build) void {
 
     // Metal GPU backend (macOS only)
     if (target.result.os.tag == .macos) {
-        const fw_path: std.Build.LazyPath = .{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks" };
-        mod.addFrameworkPath(fw_path);
+        addMacosFrameworkPath(mod, macos_fw_path);
         mod.linkFramework("Metal", .{});
         mod.linkFramework("Foundation", .{});
         mod.linkFramework("Accelerate", .{});
@@ -71,15 +87,14 @@ pub fn build(b: *std.Build) void {
     });
     if (target.result.os.tag == .linux) {
         diff_cpu_mod.linkSystemLibrary("c", .{});
-        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
-            diff_cpu_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
-            diff_cpu_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
-        } else |_| {}
+        if (openblas_path) |p| {
+            diff_cpu_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+            diff_cpu_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+        }
         diff_cpu_mod.linkSystemLibrary("openblas", .{});
     }
     if (target.result.os.tag == .macos) {
-        const fw = std.Build.LazyPath{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks" };
-        diff_cpu_mod.addFrameworkPath(fw);
+        addMacosFrameworkPath(diff_cpu_mod, macos_fw_path);
         diff_cpu_mod.linkFramework("Accelerate", .{});
     }
     const diff_cpu_tests = b.addTest(.{ .root_module = diff_cpu_mod });
@@ -94,8 +109,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
-        const fw = std.Build.LazyPath{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks" };
-        diff_mps_mod.addFrameworkPath(fw);
+        addMacosFrameworkPath(diff_mps_mod, macos_fw_path);
         diff_mps_mod.linkFramework("Metal", .{});
         diff_mps_mod.linkFramework("Foundation", .{});
         diff_mps_mod.linkFramework("Accelerate", .{});
@@ -115,20 +129,20 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         diff_cuda_mod.linkSystemLibrary("c", .{});
-        if (std.process.getEnvVarOwned(b.graph.arena, "OPENBLAS_PATH")) |openblas_path| {
-            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{openblas_path}) });
-            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{openblas_path}) });
-        } else |_| {}
+        if (openblas_path) |p| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+        }
         diff_cuda_mod.linkSystemLibrary("openblas", .{});
         diff_cuda_mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/wsl/lib" });
-        if (std.process.getEnvVarOwned(b.graph.arena, "CUDA_PATH")) |cuda_path| {
-            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cuda_path}) });
-            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cuda_path}) });
-        } else |_| {}
-        if (std.process.getEnvVarOwned(b.graph.arena, "CUBLAS_PATH")) |cublas_path| {
-            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{cublas_path}) });
-            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{cublas_path}) });
-        } else |_| {}
+        if (cuda_path) |p| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+        }
+        if (cublas_path) |p| {
+            diff_cuda_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{p}) });
+            diff_cuda_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/include", .{p}) });
+        }
         diff_cuda_mod.linkSystemLibrary("cuda", .{});
         diff_cuda_mod.linkSystemLibrary("cublas", .{});
         const diff_cuda_tests = b.addTest(.{ .root_module = diff_cuda_mod });
