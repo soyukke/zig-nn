@@ -40,6 +40,7 @@ pub const BatchIterator = @import("data/dataloader.zig").BatchIterator;
 pub const gpt2 = @import("models/gpt2.zig");
 pub const gemma3 = @import("models/gemma3.zig");
 pub const gemma3_metal = if (is_macos) @import("models/gemma3_metal.zig") else struct {};
+pub const gemma3_qlora = if (is_macos) @import("models/gemma3_qlora.zig") else struct {};
 
 // Unified NN layers + runtimes (CPU/CUDA/MPS backend-agnostic)
 pub const unified = struct {
