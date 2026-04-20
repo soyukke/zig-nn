@@ -4,6 +4,7 @@
 const std = @import("std");
 const cuda_driver = @import("cuda_driver.zig");
 const cuda_blas = @import("cuda_blas.zig");
+const log = @import("../log.zig").cuda;
 
 const CUresult = cuda_driver.CUresult;
 const CUdevice = cuda_driver.CUdevice;
@@ -112,7 +113,7 @@ pub const CudaContext = struct {
         var name_buf: [256]u8 = undefined;
         if (cuda_driver.cuDeviceGetName(&name_buf, 256, device) == CUDA_SUCCESS) {
             const name_slice = std.mem.sliceTo(&name_buf, 0);
-            std.debug.print("[CUDA] Device: {s}\n", .{name_slice});
+            log.info("device: {s}", .{name_slice});
         }
 
         var ctx: CUcontext = undefined;

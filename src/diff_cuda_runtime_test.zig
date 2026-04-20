@@ -5,6 +5,7 @@
 ///
 /// ビルド: zig build test-diff-cuda -Dcuda=true
 const std = @import("std");
+pub const std_options = @import("log.zig").std_options;
 const compute = @import("compute.zig");
 const Module = compute.Module;
 const diff_cuda = @import("diff_cuda_runtime.zig");

@@ -1,71 +1,75 @@
 const std = @import("std");
 const nn = @import("nn");
 
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 pub fn main(init: std.process.Init) !void {
     try gpt2Demo(init.io);
 }
 
 fn gpt2Demo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Demo 4: GPT-2 Text Generation (GGUF Loader) ===\n\n", .{});
+    log.info("=== Demo 4: GPT-2 Text Generation (GGUF Loader) ===", .{});
 
     const model_path = "models/gpt2.gguf";
 
     // 1. Parse GGUF file
-    std.debug.print("  Loading {s}...\n", .{model_path});
+    log.info("loading {s}...", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
-        std.debug.print("  Error: could not load {s}: {}\n", .{ model_path, err });
-        std.debug.print("  (Download GPT-2 GGUF model to models/ directory)\n", .{});
+        log.err("could not load {s}: {} (download GPT-2 GGUF model to models/)", .{ model_path, err });
         return;
     };
     defer gguf_file.deinit();
 
     // Print model info
     if (gguf_file.getMetadataString("general.architecture")) |arch| {
-        std.debug.print("  Architecture: {s}\n", .{arch});
+        log.info("architecture: {s}", .{arch});
     }
     if (gguf_file.getMetadataString("general.name")) |name| {
-        std.debug.print("  Model: {s}\n", .{name});
+        log.info("model: {s}", .{name});
     }
-    std.debug.print("  Tensors: {d}, Metadata: {d}\n", .{ gguf_file.tensors.len, gguf_file.metadata.len });
+    log.info("tensors: {d}, metadata: {d}", .{ gguf_file.tensors.len, gguf_file.metadata.len });
 
     // 2. Load tokenizer
-    std.debug.print("  Loading tokenizer...\n", .{});
+    log.info("loading tokenizer...", .{});
     var tokenizer = nn.bpe.BPETokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading tokenizer: {}\n", .{err});
+        log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
-    std.debug.print("  Vocab size: {d}\n", .{tokenizer.vocab_count});
+    log.info("vocab size: {d}", .{tokenizer.vocab_count});
 
     // 3. Load model weights
-    std.debug.print("  Loading weights...\n", .{});
+    log.info("loading weights...", .{});
     var model = nn.gpt2.GPT2(nn.gpt2.GPT2Small).init(&gguf_file, allocator) catch |err| {
-        std.debug.print("  Error loading weights: {}\n", .{err});
+        log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
-    std.debug.print("  Model loaded!\n\n", .{});
+    log.info("model loaded", .{});
 
     // 4. Generate text
     const prompt = "Hello, I am";
     const gen_tokens = 50;
 
-    std.debug.print("  Prompt: \"{s}\"\n", .{prompt});
-    std.debug.print("  Generating {d} tokens...\n\n  Output: \"", .{gen_tokens});
+    log.info("prompt: \"{s}\"", .{prompt});
+    log.info("generating {d} tokens...", .{gen_tokens});
+
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     // Encode prompt
     var tokens: std.ArrayListAligned(u32, null) = .empty;
     defer tokens.deinit(allocator);
     const prompt_ids = tokenizer.encode(prompt, allocator) catch |err| {
-        std.debug.print("  Error encoding: {}\n", .{err});
+        log.err("encoding: {}", .{err});
         return;
     };
     defer allocator.free(prompt_ids);
     for (prompt_ids) |id| try tokens.append(allocator, id);
 
-    // Print prompt
-    std.debug.print("{s}", .{prompt});
+    // Print prompt to stdout
+    stdout.print("{s}", .{prompt}) catch {};
 
     // Generate tokens with KV cache
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -84,7 +88,7 @@ fn gpt2Demo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const logits = model.prefill(prompt_ids, temp) catch |err| {
-            std.debug.print("\n  Error in prefill: {}\n", .{err});
+            log.err("in prefill: {}", .{err});
             return;
         };
 
@@ -106,7 +110,7 @@ fn gpt2Demo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         if (tokenizer.decode(&tok_slice, temp)) |decoded| {
-            std.debug.print("{s}", .{decoded});
+            stdout.print("{s}", .{decoded}) catch {};
         } else |_| {}
     }
 
@@ -117,7 +121,7 @@ fn gpt2Demo(io: std.Io) !void {
 
         const last_token = tokens.items[tokens.items.len - 1];
         const logits = model.decodeNext(last_token, temp) catch |err| {
-            std.debug.print("\n  Error in decodeNext: {}\n", .{err});
+            log.err("in decodeNext: {}", .{err});
             return;
         };
 
@@ -139,13 +143,13 @@ fn gpt2Demo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         const decoded = tokenizer.decode(&tok_slice, temp) catch continue;
-        std.debug.print("{s}", .{decoded});
+        stdout.print("{s}", .{decoded}) catch {};
     }
+    stdout.writeAll("\n") catch {};
 
     const elapsed_ns = timer.read();
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     const tokens_per_sec = @as(f64, @floatFromInt(gen_tokens)) / (elapsed_ms / 1000.0);
 
-    std.debug.print("\"\n\n", .{});
-    std.debug.print("  Generation: {d:.0}ms ({d:.1} tokens/sec)\n", .{ elapsed_ms, tokens_per_sec });
+    log.info("generation: {d:.0}ms ({d:.1} tokens/sec)", .{ elapsed_ms, tokens_per_sec });
 }

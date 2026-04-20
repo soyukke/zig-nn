@@ -49,6 +49,7 @@
 /// 実装例: diff_cpu_runtime_test.zig (CpuAdapter), diff_cuda_runtime_test.zig (CudaAdapter)
 const std = @import("std");
 const testing = std.testing;
+const log = @import("log.zig").gradcheck;
 
 pub fn GradientChecker(comptime Adapter: type) type {
     const Runtime = Adapter.Runtime;
@@ -137,7 +138,7 @@ pub fn GradientChecker(comptime Adapter: type) type {
                 const scale = @max(@abs(ana_grad[i]), @abs(num_grad[i]));
                 const abs_tol: f32 = 3e-3;
                 if (diff > @max(tol * scale, abs_tol)) {
-                    std.debug.print("Gradient mismatch at [{d}]: analytical={d:.6}, numerical={d:.6}, diff={d:.6}\n", .{ i, ana_grad[i], num_grad[i], diff });
+                    log.err("mismatch at [{d}]: analytical={d:.6}, numerical={d:.6}, diff={d:.6}", .{ i, ana_grad[i], num_grad[i], diff });
                     return error.TestExpectedApproxEqAbs;
                 }
             }

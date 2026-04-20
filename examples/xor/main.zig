@@ -6,6 +6,9 @@ const Linear = nn.unified.Linear;
 const ReLU = nn.unified.ReLU;
 const Trainer = nn.unified.Trainer;
 
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 const is_cuda_available = builtin.os.tag == .linux;
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -31,7 +34,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 const XorModel = Sequential(.{ Linear(2, 8), ReLU, Linear(8, 1) });
 
 fn xorDemo(trainer: anytype, device_name: []const u8) !void {
-    std.debug.print("=== XOR Training ({s}: MSE + Adam) ===\n\n", .{device_name});
+    log.info("=== XOR Training ({s}: MSE + Adam) ===", .{device_name});
 
     var inputs = [_]f32{ 0, 0, 0, 1, 1, 0, 1, 1 };
     const targets = [_]f32{ 0, 1, 1, 0 };
@@ -48,13 +51,12 @@ fn xorDemo(trainer: anytype, device_name: []const u8) !void {
 
         if (epoch % 400 == 0 or epoch == num_epochs - 1) {
             const loss_val = trainer.lossValue(loss);
-            std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss_val });
+            log.info("epoch {d:>4}: loss = {d:.6}", .{ epoch, loss_val });
         }
     }
     const elapsed_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
-
-    std.debug.print("\n  Predictions:\n", .{});
+    log.info("training time: {d}ms", .{elapsed_ms});
+    log.info("predictions:", .{});
     trainer.zeroGrad();
     const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
     const pred = trainer.reshape(output, &.{4});
@@ -69,6 +71,6 @@ fn printPredictions(pred: []const f32) void {
     for (xor_in, xor_tgt, 0..) |inp, tgt, i| {
         const p = pred[i];
         const mark: []const u8 = if (@abs(p - tgt) < 0.3) " OK" else " NG";
-        std.debug.print("    [{d}, {d}] -> {d:.4} (target: {d}){s}\n", .{ inp[0], inp[1], p, tgt, mark });
+        log.info("  [{d}, {d}] -> {d:.4} (target: {d}){s}", .{ inp[0], inp[1], p, tgt, mark });
     }
 }

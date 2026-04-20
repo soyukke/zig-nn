@@ -5,6 +5,8 @@ const gguf_mod = @import("../gguf/gguf.zig");
 const dequant_mod = @import("../gguf/dequant.zig");
 const thread_pool_mod = @import("../gguf/thread_pool.zig");
 const gpt2_mod = @import("gpt2.zig");
+const log_mod = @import("../log.zig");
+const log = log_mod.gemma3;
 
 // ============================================================
 // Gemma 3 1B Config
@@ -71,14 +73,20 @@ pub const ProfileStats = struct {
             self.rope_ns + self.attention_ns + self.elementwise_ns + self.logits_ns;
         const total_ms = @as(f64, @floatFromInt(total_ns)) / 1_000_000.0;
 
-        std.debug.print("\n  === Gemma3 Profile ({d} calls) ===\n", .{self.call_count});
-        for (&entries) |*e| {
-            const ms = @as(f64, @floatFromInt(e.ns)) / 1_000_000.0;
-            const pct = if (total_ns > 0) ms / total_ms * 100.0 else 0.0;
-            std.debug.print("    {s:<12}: {d:>8.1}ms  {d:>5.1}%\n", .{ e.name, ms, pct });
+        var maybe_artifact = log_mod.openProfileArtifact("gemma3") catch null;
+        if (maybe_artifact) |*artifact| {
+            defer artifact.close();
+            const w = artifact.file.deprecatedWriter();
+            w.print("=== Gemma3 Profile ({d} calls) ===\n", .{self.call_count}) catch return;
+            for (&entries) |*e| {
+                const ms = @as(f64, @floatFromInt(e.ns)) / 1_000_000.0;
+                const pct = if (total_ns > 0) ms / total_ms * 100.0 else 0.0;
+                w.print("  {s:<12}: {d:>8.1}ms  {d:>5.1}%\n", .{ e.name, ms, pct }) catch return;
+            }
+            w.print("  {s:->36}\n", .{""}) catch return;
+            w.print("  {s:<12}: {d:>8.1}ms  100.0%\n", .{ "total", total_ms }) catch return;
+            log.info("profile written: {s}", .{artifact.path});
         }
-        std.debug.print("    {s:->36}\n", .{""});
-        std.debug.print("    {s:<12}: {d:>8.1}ms  100.0%\n", .{ "total", total_ms });
     }
 };
 

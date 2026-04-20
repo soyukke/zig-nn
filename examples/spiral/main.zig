@@ -6,6 +6,9 @@ const Linear = nn.unified.Linear;
 const ReLU = nn.unified.ReLU;
 const Trainer = nn.unified.Trainer;
 
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 const is_cuda_available = builtin.os.tag == .linux;
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -78,13 +81,13 @@ fn argmax(comptime n: usize, data: []const f32) u32 {
 const SpiralModel = Sequential(.{ Linear(2, 32), ReLU, Linear(32, 32), ReLU, Linear(32, 3) });
 
 fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
-    std.debug.print("=== Spiral Classification ({s}: CrossEntropy + Adam) ===\n\n", .{device_name});
+    log.info("=== Spiral Classification ({s}: CrossEntropy + Adam) ===", .{device_name});
 
     var x_data: [SPIRAL_TOTAL * 2]f32 = undefined;
     var y_data: [SPIRAL_TOTAL]u32 = undefined;
     generateSpiralData(&x_data, &y_data);
 
-    std.debug.print("  Data: {d} samples, {d} classes\n", .{ SPIRAL_TOTAL, SPIRAL_N_CLASSES });
+    log.info("data: {d} samples, {d} classes", .{ SPIRAL_TOTAL, SPIRAL_N_CLASSES });
 
     const num_epochs = 500;
     var timer = try nn.Timer.start();
@@ -100,30 +103,30 @@ fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
             var logits_buf: [SPIRAL_TOTAL * 3]f32 = undefined;
             const logits_data = trainer.dataSlice(logits, &logits_buf);
             const acc = computeAccuracy(SPIRAL_TOTAL, 3, logits_data, &y_data);
-            std.debug.print("  Epoch {d:>3}: loss = {d:.4}, accuracy = {d:.1}%\n", .{
+            log.info("epoch {d:>3}: loss = {d:.4}, accuracy = {d:.1}%", .{
                 epoch, loss_val, acc * 100.0,
             });
         }
     }
     const elapsed_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
+    log.info("training time: {d}ms", .{elapsed_ms});
 
     trainer.zeroGrad();
     const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
     var logits_buf: [SPIRAL_TOTAL * 3]f32 = undefined;
     const logits_data = trainer.dataSlice(logits, &logits_buf);
     const final_acc = computeAccuracy(SPIRAL_TOTAL, 3, logits_data, &y_data);
-    std.debug.print("\n  Final accuracy: {d:.1}%\n", .{final_acc * 100.0});
+    log.info("final accuracy: {d:.1}%", .{final_acc * 100.0});
     printSamplePredictions(logits_data, &x_data, &y_data);
 }
 
 fn printSamplePredictions(logits_data: []const f32, x_data: []const f32, y_data: []const u32) void {
-    std.debug.print("\n  Sample predictions:\n", .{});
+    log.info("sample predictions:", .{});
     const show_indices = [_]usize{ 0, 25, 49, 50, 75, 99, 100, 125, 149 };
     for (show_indices) |idx| {
         const pred_class = argmax(3, logits_data[idx * 3 .. (idx + 1) * 3]);
         const correct: []const u8 = if (pred_class == y_data[idx]) "OK" else "NG";
-        std.debug.print("    [{d:>3}] ({d:>6.3}, {d:>6.3}) -> pred={d} target={d} {s}\n", .{
+        log.info("  [{d:>3}] ({d:>6.3}, {d:>6.3}) -> pred={d} target={d} {s}", .{
             idx, x_data[idx * 2], x_data[idx * 2 + 1], pred_class, y_data[idx], correct,
         });
     }

@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Timer = @import("../util/timer.zig").Timer;
+const log = @import("../log.zig").gemma3;
 const gguf_mod = @import("../gguf/gguf.zig");
 const dequant_mod = @import("../gguf/dequant.zig");
 const gemma3_mod = @import("gemma3.zig");
@@ -87,7 +88,7 @@ pub fn Gemma3Metal(comptime C: type) type {
 
         pub fn init(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
             var metal = MetalContext.init() catch |err| {
-                std.debug.print("Metal init failed: {}\n", .{err});
+                log.err("Metal init failed: {}", .{err});
                 return err;
             };
 

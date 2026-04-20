@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const nn = @import("nn");
+
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 const compute = nn.compute;
 const Module = compute.Module;
 const AdamState = compute.AdamState;
@@ -135,14 +139,14 @@ fn prepareCorpus(
         }
     }
 
-    std.debug.print("  Corpus: \"{s}...\" ({d} chars)\n", .{ corpus[0..base_text.len], corpus_len });
-    std.debug.print("  Training sequences: {d} (seq_len={d}, overlap=50%%)\n", .{ actual_num_seq, CHAR_SEQ_LEN });
+    log.info("corpus: \"{s}...\" ({d} chars)", .{ corpus[0..base_text.len], corpus_len });
+    log.info("training sequences: {d} (seq_len={d}, overlap=50%%)", .{ actual_num_seq, CHAR_SEQ_LEN });
     return actual_num_seq;
 }
 
 fn charLMDemo() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== CharLM (CPU: Transformer + Adam) ===\n\n", .{});
+    log.info("=== CharLM (CPU: Transformer + Adam) ===", .{});
 
     var all_input_ids: [128][CHAR_SEQ_LEN]u32 = undefined;
     var all_target_ids: [128][CHAR_SEQ_LEN]u32 = undefined;
@@ -157,7 +161,7 @@ fn charLMDemo() !void {
     rt.initParams();
 
     const total_params = module.totalParamElements();
-    std.debug.print("  Model: 1-layer Transformer, {d} params (~{d}KB)\n\n", .{ total_params, total_params * 4 / 1024 });
+    log.info("model: 1-layer Transformer, {d} params (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
 
     const sizes = try module.paramSizes(allocator);
     defer allocator.free(sizes);
@@ -185,19 +189,19 @@ fn charLMDemo() !void {
 
         if (epoch % 50 == 0 or epoch == num_epochs - 1) {
             const avg_loss = epoch_loss / @as(f32, @floatFromInt(actual_num_seq));
-            std.debug.print("  Epoch {d:>4}: loss = {d:.4}\n", .{ epoch, avg_loss });
+            log.info("epoch {d:>4}: loss = {d:.4}", .{ epoch, avg_loss });
         }
     }
 
     const elapsed_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
+    log.info("training time: {d}ms", .{elapsed_ms});
 
     generateText(&rt, model);
 }
 
 fn charLMDemoCuda() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== CharLM (CUDA: Transformer + Adam) ===\n\n", .{});
+    log.info("=== CharLM (CUDA: Transformer + Adam) ===", .{});
 
     var all_input_ids: [128][CHAR_SEQ_LEN]u32 = undefined;
     var all_target_ids: [128][CHAR_SEQ_LEN]u32 = undefined;
@@ -216,7 +220,7 @@ fn charLMDemoCuda() !void {
     rt.initParams();
 
     const total_params = module.totalParamElements();
-    std.debug.print("  Model: 1-layer Transformer, {d} params (~{d}KB)\n\n", .{ total_params, total_params * 4 / 1024 });
+    log.info("model: 1-layer Transformer, {d} params (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
 
     const sizes = try module.paramSizes(allocator);
     defer allocator.free(sizes);
@@ -244,18 +248,19 @@ fn charLMDemoCuda() !void {
 
         if (epoch % 50 == 0 or epoch == num_epochs - 1) {
             const avg_loss = epoch_loss / @as(f32, @floatFromInt(actual_num_seq));
-            std.debug.print("  Epoch {d:>4}: loss = {d:.4}\n", .{ epoch, avg_loss });
+            log.info("epoch {d:>4}: loss = {d:.4}", .{ epoch, avg_loss });
         }
     }
 
     const elapsed_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n", .{elapsed_ms});
+    log.info("training time: {d}ms", .{elapsed_ms});
 
     generateTextCuda(&rt, model);
 }
 
 fn generateText(rt: *DiffCpuRuntime, model: CharLMModel) void {
-    std.debug.print("\n  Generated text:\n    \"", .{});
+    log.info("generated text:", .{});
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     const seed = "hello world. hello world. hello";
     comptime std.debug.assert(seed.len <= CHAR_SEQ_LEN);
@@ -264,7 +269,7 @@ fn generateText(rt: *DiffCpuRuntime, model: CharLMModel) void {
     for (seed, 0..) |c, i| {
         gen_ctx[CHAR_SEQ_LEN - seed.len + i] = charEncode(c);
     }
-    for (seed) |c| std.debug.print("{c}", .{c});
+    for (seed) |c| stdout.print("{c}", .{c}) catch {};
 
     const gen_len = 60;
     for (0..gen_len) |_| {
@@ -272,15 +277,16 @@ fn generateText(rt: *DiffCpuRuntime, model: CharLMModel) void {
         const logits = model.forward(rt, &gen_ctx);
         const last_logits = logits.data[(CHAR_SEQ_LEN - 1) * CHAR_VOCAB_SIZE .. CHAR_SEQ_LEN * CHAR_VOCAB_SIZE];
         const pred = argmax(CHAR_VOCAB_SIZE, last_logits);
-        std.debug.print("{c}", .{charDecode(pred)});
+        stdout.print("{c}", .{charDecode(pred)}) catch {};
         for (0..CHAR_SEQ_LEN - 1) |i| gen_ctx[i] = gen_ctx[i + 1];
         gen_ctx[CHAR_SEQ_LEN - 1] = pred;
     }
-    std.debug.print("\"\n", .{});
+    stdout.writeAll("\n") catch {};
 }
 
 fn generateTextCuda(rt: *DiffCudaRuntime, model: CharLMModel) void {
-    std.debug.print("\n  Generated text:\n    \"", .{});
+    log.info("generated text:", .{});
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     const seed = "hello world. hello world. hello";
     comptime std.debug.assert(seed.len <= CHAR_SEQ_LEN);
@@ -289,7 +295,7 @@ fn generateTextCuda(rt: *DiffCudaRuntime, model: CharLMModel) void {
     for (seed, 0..) |c, i| {
         gen_ctx[CHAR_SEQ_LEN - seed.len + i] = charEncode(c);
     }
-    for (seed) |c| std.debug.print("{c}", .{c});
+    for (seed) |c| stdout.print("{c}", .{c}) catch {};
 
     const gen_len = 60;
     for (0..gen_len) |_| {
@@ -302,9 +308,9 @@ fn generateTextCuda(rt: *DiffCudaRuntime, model: CharLMModel) void {
         rt.copyToHost(logits, all_logits[0..total]);
         @memcpy(&last_logits, all_logits[(CHAR_SEQ_LEN - 1) * CHAR_VOCAB_SIZE .. CHAR_SEQ_LEN * CHAR_VOCAB_SIZE]);
         const pred = argmax(CHAR_VOCAB_SIZE, &last_logits);
-        std.debug.print("{c}", .{charDecode(pred)});
+        stdout.print("{c}", .{charDecode(pred)}) catch {};
         for (0..CHAR_SEQ_LEN - 1) |i| gen_ctx[i] = gen_ctx[i + 1];
         gen_ctx[CHAR_SEQ_LEN - 1] = pred;
     }
-    std.debug.print("\"\n", .{});
+    stdout.writeAll("\n") catch {};
 }

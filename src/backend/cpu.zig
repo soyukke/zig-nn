@@ -4,6 +4,8 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const Timer = @import("../util/timer.zig").Timer;
+const log_mod = @import("../log.zig");
+const log = log_mod.cpu;
 
 // プロファイリング制御
 pub var profiling_enabled: bool = true;
@@ -27,16 +29,21 @@ inline fn timerRead(timer: *?Timer) u64 {
 }
 
 pub fn printProfile() void {
-    const sgemm_ms = @as(f64, @floatFromInt(sgemm_nanos)) / 1_000_000.0;
-    const saxpy_ms = @as(f64, @floatFromInt(saxpy_nanos)) / 1_000_000.0;
-    const other_ms = @as(f64, @floatFromInt(other_nanos)) / 1_000_000.0;
-    std.debug.print("\n=== cpu.zig profile ===\n", .{});
-    std.debug.print("  sgemm: {d} calls, {d:.1}ms\n", .{ sgemm_count, sgemm_ms });
-    std.debug.print("  saxpy: {d} calls, {d:.1}ms\n", .{ saxpy_count, saxpy_ms });
-    std.debug.print("  other (add/sub/mul/relu/scale/bias/transpose): {d} calls, {d:.1}ms\n", .{ other_count, other_ms });
-    const total_blas_ms = sgemm_ms + saxpy_ms + other_ms;
-    std.debug.print("  --- total BLAS: {d:.1}ms ---\n", .{total_blas_ms});
-    std.debug.print("========================\n", .{});
+    var maybe_artifact = log_mod.openProfileArtifact("cpu") catch null;
+    if (maybe_artifact) |*artifact| {
+        defer artifact.close();
+        const sgemm_ms = @as(f64, @floatFromInt(sgemm_nanos)) / 1_000_000.0;
+        const saxpy_ms = @as(f64, @floatFromInt(saxpy_nanos)) / 1_000_000.0;
+        const other_ms = @as(f64, @floatFromInt(other_nanos)) / 1_000_000.0;
+        const total_blas_ms = sgemm_ms + saxpy_ms + other_ms;
+        const w = artifact.file.deprecatedWriter();
+        w.print("=== cpu.zig profile ===\n", .{}) catch return;
+        w.print("  sgemm: {d} calls, {d:.1}ms\n", .{ sgemm_count, sgemm_ms }) catch return;
+        w.print("  saxpy: {d} calls, {d:.1}ms\n", .{ saxpy_count, saxpy_ms }) catch return;
+        w.print("  other (add/sub/mul/relu/scale/bias/transpose): {d} calls, {d:.1}ms\n", .{ other_count, other_ms }) catch return;
+        w.print("  --- total BLAS: {d:.1}ms ---\n", .{total_blas_ms}) catch return;
+        log.info("profile written: {s}", .{artifact.path});
+    }
 }
 
 pub fn resetProfile() void {
