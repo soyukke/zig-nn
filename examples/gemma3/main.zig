@@ -70,8 +70,10 @@ fn gemma3Demo(io: std.Io) !void {
     const prompt = "The meaning of life is";
     const gen_tokens = 50;
 
-    std.debug.print("  Prompt: \"{s}\"\n", .{prompt});
-    std.debug.print("  Generating {d} tokens...\n\n  Output: \"", .{gen_tokens});
+    log.info("prompt: \"{s}\"", .{prompt});
+    log.info("generating {d} tokens...", .{gen_tokens});
+
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     // Encode prompt
     var tokens: std.ArrayListAligned(u32, null) = .empty;
@@ -83,8 +85,8 @@ fn gemma3Demo(io: std.Io) !void {
     defer allocator.free(prompt_ids);
     for (prompt_ids) |id| try tokens.append(allocator, id);
 
-    // Print prompt
-    std.debug.print("{s}", .{prompt});
+    // Print prompt to stdout
+    stdout.print("{s}", .{prompt}) catch {};
 
     // Generate tokens with KV cache
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -126,7 +128,7 @@ fn gemma3Demo(io: std.Io) !void {
         if (next_token != tokenizer.eos_id) {
             const tok_slice = [_]u32{next_token};
             if (tokenizer.decode(&tok_slice, temp)) |decoded| {
-                std.debug.print("{s}", .{decoded});
+                stdout.print("{s}", .{decoded}) catch {};
             } else |_| {}
         }
     }
@@ -137,8 +139,8 @@ fn gemma3Demo(io: std.Io) !void {
     if (first_gen_token == tokenizer.eos_id) {
         const elapsed_ns = timer.read();
         const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
-        std.debug.print("[EOS]\"\n\n", .{});
-        std.debug.print("  Generated 1 tokens in {d:.0}ms\n", .{elapsed_ms});
+        stdout.writeAll("\n") catch {};
+        log.info("generated 1 tokens in {d:.0}ms (EOS)", .{elapsed_ms});
         return;
     }
     for (1..gen_tokens) |_| {
@@ -171,15 +173,14 @@ fn gemma3Demo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         const decoded = tokenizer.decode(&tok_slice, temp) catch continue;
-        std.debug.print("{s}", .{decoded});
+        stdout.print("{s}", .{decoded}) catch {};
     }
+    stdout.writeAll("\n") catch {};
 
     const elapsed_ns = timer.read();
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     const tokens_per_sec = @as(f64, @floatFromInt(generated + 1)) / (elapsed_ms / 1000.0);
-
-    std.debug.print("\"\n\n", .{});
-    std.debug.print("  Generated {d} tokens in {d:.0}ms ({d:.1} tokens/sec)\n", .{ generated + 1, elapsed_ms, tokens_per_sec });
+    log.info("generated {d} tokens in {d:.0}ms ({d:.1} tokens/sec)", .{ generated + 1, elapsed_ms, tokens_per_sec });
     model.profile.print();
 }
 
@@ -226,8 +227,10 @@ fn gemma3MetalDemo(io: std.Io) !void {
     const prompt = "The meaning of life is";
     const gen_tokens = 20;
 
-    std.debug.print("  Prompt: \"{s}\"\n", .{prompt});
-    std.debug.print("  Generating {d} tokens...\n\n  Output: \"", .{gen_tokens});
+    log.info("prompt: \"{s}\"", .{prompt});
+    log.info("generating {d} tokens...", .{gen_tokens});
+
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     var tokens: std.ArrayListAligned(u32, null) = .empty;
     defer tokens.deinit(allocator);
@@ -238,7 +241,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
     defer allocator.free(prompt_ids);
     for (prompt_ids) |tok_id| try tokens.append(allocator, tok_id);
 
-    std.debug.print("{s}", .{prompt});
+    stdout.print("{s}", .{prompt}) catch {};
 
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
@@ -282,7 +285,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
         if (next_token != tokenizer.eos_id) {
             const tok_slice = [_]u32{next_token};
             if (tokenizer.decode(&tok_slice, temp)) |decoded| {
-                std.debug.print("{s}", .{decoded});
+                stdout.print("{s}", .{decoded}) catch {};
             } else |_| {}
         }
     }
@@ -294,8 +297,8 @@ fn gemma3MetalDemo(io: std.Io) !void {
     if (first_gen_token == tokenizer.eos_id) {
         const elapsed_ns = timer_gen.read();
         const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
-        std.debug.print("[EOS]\"\n\n", .{});
-        std.debug.print("  Generated 1 tokens in {d:.0}ms\n", .{elapsed_ms});
+        stdout.writeAll("\n") catch {};
+        log.info("generated 1 tokens in {d:.0}ms (EOS)", .{elapsed_ms});
         return;
     }
     var timer_decode = nn.Timer.start() catch unreachable;
@@ -340,8 +343,9 @@ fn gemma3MetalDemo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         const decoded = tokenizer.decode(&tok_slice, temp) catch continue;
-        std.debug.print("{s}", .{decoded});
+        stdout.print("{s}", .{decoded}) catch {};
     }
+    stdout.writeAll("\n") catch {};
 
     const decode_ns = timer_decode.read();
     const elapsed_ns = timer_gen.read();
@@ -351,9 +355,8 @@ fn gemma3MetalDemo(io: std.Io) !void {
     const tokens_per_sec = @as(f64, @floatFromInt(generated + 1)) / (elapsed_ms / 1000.0);
     const decode_tps = @as(f64, @floatFromInt(generated)) / (decode_ms / 1000.0);
 
-    std.debug.print("\"\n\n", .{});
-    std.debug.print("  Generated {d} tokens in {d:.0}ms ({d:.1} tokens/sec)\n", .{ generated + 1, elapsed_ms, tokens_per_sec });
-    std.debug.print("  Prefill: {d:.1}ms | Decode: {d} tokens in {d:.1}ms ({d:.1} tok/s)\n", .{ prefill_ms, generated, decode_ms, decode_tps });
+    log.info("generated {d} tokens in {d:.0}ms ({d:.1} tokens/sec)", .{ generated + 1, elapsed_ms, tokens_per_sec });
+    log.info("prefill: {d:.1}ms | decode: {d} tokens in {d:.1}ms ({d:.1} tok/s)", .{ prefill_ms, generated, decode_ms, decode_tps });
     model.profile.print();
 }
 

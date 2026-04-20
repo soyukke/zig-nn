@@ -53,8 +53,10 @@ fn gpt2Demo(io: std.Io) !void {
     const prompt = "Hello, I am";
     const gen_tokens = 50;
 
-    std.debug.print("  Prompt: \"{s}\"\n", .{prompt});
-    std.debug.print("  Generating {d} tokens...\n\n  Output: \"", .{gen_tokens});
+    log.info("prompt: \"{s}\"", .{prompt});
+    log.info("generating {d} tokens...", .{gen_tokens});
+
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     // Encode prompt
     var tokens: std.ArrayListAligned(u32, null) = .empty;
@@ -66,8 +68,8 @@ fn gpt2Demo(io: std.Io) !void {
     defer allocator.free(prompt_ids);
     for (prompt_ids) |id| try tokens.append(allocator, id);
 
-    // Print prompt
-    std.debug.print("{s}", .{prompt});
+    // Print prompt to stdout
+    stdout.print("{s}", .{prompt}) catch {};
 
     // Generate tokens with KV cache
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -108,7 +110,7 @@ fn gpt2Demo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         if (tokenizer.decode(&tok_slice, temp)) |decoded| {
-            std.debug.print("{s}", .{decoded});
+            stdout.print("{s}", .{decoded}) catch {};
         } else |_| {}
     }
 
@@ -141,13 +143,13 @@ fn gpt2Demo(io: std.Io) !void {
 
         const tok_slice = [_]u32{next_token};
         const decoded = tokenizer.decode(&tok_slice, temp) catch continue;
-        std.debug.print("{s}", .{decoded});
+        stdout.print("{s}", .{decoded}) catch {};
     }
+    stdout.writeAll("\n") catch {};
 
     const elapsed_ns = timer.read();
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     const tokens_per_sec = @as(f64, @floatFromInt(gen_tokens)) / (elapsed_ms / 1000.0);
 
-    std.debug.print("\"\n\n", .{});
-    std.debug.print("  Generation: {d:.0}ms ({d:.1} tokens/sec)\n", .{ elapsed_ms, tokens_per_sec });
+    log.info("generation: {d:.0}ms ({d:.1} tokens/sec)", .{ elapsed_ms, tokens_per_sec });
 }
