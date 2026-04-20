@@ -36,7 +36,7 @@ pub fn printProfile() void {
         const saxpy_ms = @as(f64, @floatFromInt(saxpy_nanos)) / 1_000_000.0;
         const other_ms = @as(f64, @floatFromInt(other_nanos)) / 1_000_000.0;
         const total_blas_ms = sgemm_ms + saxpy_ms + other_ms;
-        const w = artifact.file.deprecatedWriter();
+        const w = artifact.writer();
         w.print("=== cpu.zig profile ===\n", .{}) catch return;
         w.print("  sgemm: {d} calls, {d:.1}ms\n", .{ sgemm_count, sgemm_ms }) catch return;
         w.print("  saxpy: {d} calls, {d:.1}ms\n", .{ saxpy_count, saxpy_ms }) catch return;

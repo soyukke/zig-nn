@@ -201,7 +201,7 @@ pub const MetalContext = struct {
             var maybe_artifact = log_mod.openProfileArtifact("metal-gpu") catch null;
             if (maybe_artifact) |*artifact| {
                 defer artifact.close();
-                const w = artifact.file.deprecatedWriter();
+                const w = artifact.writer();
                 const total = self.totalNs();
                 const ms = std.time.ns_per_ms;
                 w.print("[GPU profile] total={d}ms\n", .{total / ms}) catch return;

@@ -16,6 +16,7 @@ const is_linux = builtin.os.tag == .linux;
 const compute = @import("compute.zig");
 const Module = compute.Module;
 const AdamState = compute.AdamState;
+const log = @import("log.zig").trainer;
 
 // CPU types (常に利用可)
 const diff_cpu = @import("diff_cpu_runtime.zig");
@@ -90,7 +91,7 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
             else
                 try AdamState.init(allocator, sizes);
 
-            return .{
+            const self: @This() = .{
                 .allocator = allocator,
                 .module = module,
                 .model = model,
@@ -98,6 +99,11 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
                 .adam = adam,
                 .config = config,
             };
+            const dev: []const u8 = if (is_cuda) "cuda" else "cpu";
+            log.info("init: model={s} device={s} params={d} elements={d} lr={d:.4}", .{
+                @typeName(ModelType), dev, self.paramCount(), self.totalParamElements(), config.lr,
+            });
+            return self;
         }
 
         pub fn deinit(self: *@This()) void {
@@ -219,11 +225,13 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
         pub fn save(self: *@This(), io: std.Io, path: []const u8) !void {
             if (is_cuda) @compileError("save() is not yet supported for CUDA");
             try self.rt.saveCheckpoint(io, &self.adam, path);
+            log.info("checkpoint saved: {s}", .{path});
         }
 
         pub fn load(self: *@This(), io: std.Io, path: []const u8) !void {
             if (is_cuda) @compileError("load() is not yet supported for CUDA");
             try self.rt.loadCheckpoint(io, &self.adam, path);
+            log.info("checkpoint loaded: {s}", .{path});
         }
 
         // ── Learning rate ──

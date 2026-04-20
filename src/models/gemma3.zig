@@ -76,7 +76,7 @@ pub const ProfileStats = struct {
         var maybe_artifact = log_mod.openProfileArtifact("gemma3") catch null;
         if (maybe_artifact) |*artifact| {
             defer artifact.close();
-            const w = artifact.file.deprecatedWriter();
+            const w = artifact.writer();
             w.print("=== Gemma3 Profile ({d} calls) ===\n", .{self.call_count}) catch return;
             for (&entries) |*e| {
                 const ms = @as(f64, @floatFromInt(e.ns)) / 1_000_000.0;
@@ -238,7 +238,7 @@ pub fn Gemma3(comptime C: type) type {
             const cpu_count = std.Thread.getCpuCount() catch 1;
             const n_threads = @max(1, @min(cpu_count, 8));
 
-            return .{
+            const self: Self = .{
                 .weights = try Gemma3Weights(C).loadFromGGUF(gguf_file, allocator),
                 .kv_cache = try KVCache.init(allocator),
                 .pool = try thread_pool_mod.ThreadPool.init(n_threads, allocator),
@@ -246,6 +246,10 @@ pub fn Gemma3(comptime C: type) type {
                 .profile = .{},
                 .allocator = allocator,
             };
+            log.info("ready: layers={d} embed={d} ctx={d} threads={d}", .{
+                C.LAYERS, C.EMBED, C.CTX, n_threads,
+            });
+            return self;
         }
 
         pub fn deinit(self: *Self) void {
@@ -263,6 +267,7 @@ pub fn Gemma3(comptime C: type) type {
             const seq_len = tokens.len;
             if (seq_len == 0) return error.EmptySequence;
             if (seq_len > C.CTX) return error.SequenceTooLong;
+            log.debug("prefill: tokens={d}", .{seq_len});
 
             self.kv_cache.reset();
             const w = &self.weights;
