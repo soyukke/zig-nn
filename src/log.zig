@@ -3,10 +3,25 @@
 //! 利用側 (executable / test root) は次を 1 行入れるだけで有効化できる:
 //!     pub const std_options = @import("nn").log.std_options;
 //!
-//! - レベルは comptime 既定 `.info`。env `NN_LOG_LEVEL=err|warn|info|debug` で
-//!   runtime に絞ることができる (debug を許可するには ReleaseFast 以外で起動)。
-//! - scoped helper は feature 単位で `nn_log.metal.info(...)` のように使う。
+//! ## レベル設計 (comptime × runtime の二重 gate)
+//! - `std_options.log_level = .debug` は **comptime** の上限。これを下げると
+//!   debug 文字列が release build から削除されてしまうので、ここでは最広域
+//!   `.debug` を許可しておく。
+//! - `runtime_level` (既定 `.info`) は実行時に表示する閾値。env
+//!   `NN_LOG_LEVEL=err|warn|info|debug` で絞れる。
+//! - 結果として「Release でも debug log を残しつつ、既定 console は静かで
+//!   env で開ける」という挙動になる。
+//!
+//! ## scope
+//! - `pub const log = nn.log.metal;` のように feature 単位で借りる。
 //! - フォーマットは `[level][scope] msg` で統一する。
+//! - env `NN_LOG_SCOPES=metal,cuda` で表示 scope を絞れる (allowlist)。
+//!   未指定なら全 scope を通す。`*` または `all` は全通過と等価。
+//!
+//! ## sink 分離
+//! - 通常 log → stderr (この module)
+//! - 生成テキスト → stdout (call site が `File.stdout()` を直接持つ)
+//! - profile dump → file (`openProfileArtifact("gemma3")` 等)
 
 const std = @import("std");
 
@@ -34,6 +49,13 @@ pub const gradcheck = std.log.scoped(.gradcheck);
 var initialized: bool = false;
 var runtime_level: std.log.Level = .info;
 
+const max_scopes = 16;
+const max_scope_name = 32;
+var scope_filter_buf: [max_scopes][max_scope_name]u8 = undefined;
+var scope_filter_lens: [max_scopes]usize = [_]usize{0} ** max_scopes;
+var scope_filter_count: usize = 0;
+var scope_filter_active: bool = false;
+
 fn parseLevel(s: []const u8) ?std.log.Level {
     if (std.ascii.eqlIgnoreCase(s, "err")) return .err;
     if (std.ascii.eqlIgnoreCase(s, "error")) return .err;
@@ -44,11 +66,43 @@ fn parseLevel(s: []const u8) ?std.log.Level {
     return null;
 }
 
+fn loadScopeFilter(spec: []const u8) void {
+    var it = std.mem.tokenizeScalar(u8, spec, ',');
+    while (it.next()) |raw| {
+        const trimmed = std.mem.trim(u8, raw, " \t");
+        if (trimmed.len == 0) continue;
+        if (std.mem.eql(u8, trimmed, "*") or std.ascii.eqlIgnoreCase(trimmed, "all")) {
+            scope_filter_active = false;
+            scope_filter_count = 0;
+            return;
+        }
+        if (scope_filter_count >= max_scopes) break;
+        if (trimmed.len > max_scope_name) continue;
+        @memcpy(scope_filter_buf[scope_filter_count][0..trimmed.len], trimmed);
+        scope_filter_lens[scope_filter_count] = trimmed.len;
+        scope_filter_count += 1;
+    }
+    if (scope_filter_count > 0) scope_filter_active = true;
+}
+
+fn scopeAllowed(name: []const u8) bool {
+    if (!scope_filter_active) return true;
+    for (0..scope_filter_count) |i| {
+        const len = scope_filter_lens[i];
+        if (std.ascii.eqlIgnoreCase(scope_filter_buf[i][0..len], name)) return true;
+    }
+    return false;
+}
+
 fn ensureInit() void {
     if (@atomicLoad(bool, &initialized, .acquire)) return;
     if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_LEVEL")) |buf| {
         defer std.heap.page_allocator.free(buf);
         if (parseLevel(buf)) |lv| runtime_level = lv;
+    } else |_| {}
+    if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_SCOPES")) |buf| {
+        defer std.heap.page_allocator.free(buf);
+        loadScopeFilter(buf);
     } else |_| {}
     @atomicStore(bool, &initialized, true, .release);
 }
@@ -72,6 +126,13 @@ pub const ProfileArtifact = struct {
     pub fn close(self: *ProfileArtifact) void {
         self.file.close();
         self.allocator.free(self.path);
+    }
+
+    /// `try writer.print(...)` で書き出す用のヘルパ。
+    /// `deprecatedWriter()` を直接触る call site を 1 箇所に閉じ込める。
+    /// 戻り値型は将来 stdlib API 移行に追従しやすいよう `@TypeOf` で導出する。
+    pub fn writer(self: *ProfileArtifact) @TypeOf(self.file.deprecatedWriter()) {
+        return self.file.deprecatedWriter();
     }
 };
 
@@ -117,5 +178,6 @@ fn nnLogFn(
 
     const lvl = comptime levelStr(level);
     const scp = comptime if (scope == .default) "nn" else @tagName(scope);
+    if (level != .err and level != .warn and !scopeAllowed(scp)) return;
     std.debug.print("[" ++ lvl ++ "][" ++ scp ++ "] " ++ format ++ "\n", args);
 }
