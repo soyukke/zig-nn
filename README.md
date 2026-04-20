@@ -57,6 +57,16 @@ mkdir -p models
 curl -L -o models/gpt2.gguf "https://huggingface.co/QuantFactory/gpt2-GGUF/resolve/main/gpt2.Q4_0.gguf"
 ```
 
+## Logging / Profiling
+
+`NN_LOG_LEVEL`, `NN_LOG_SCOPES`, `NN_PROFILE`, `NN_PROFILE_DIR` env vars
+control scoped logging and profile artifacts. See
+[docs/logging.md](docs/logging.md) for the full spec.
+
+```bash
+NN_LOG_LEVEL=debug NN_LOG_SCOPES=metal,cuda zig build gemma3
+```
+
 ## Benchmarks
 
 PyTorch comparison scripts are in `benchmarks/`:

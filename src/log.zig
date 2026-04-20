@@ -3,25 +3,14 @@
 //! 利用側 (executable / test root) は次を 1 行入れるだけで有効化できる:
 //!     pub const std_options = @import("nn").log.std_options;
 //!
-//! ## レベル設計 (comptime × runtime の二重 gate)
-//! - `std_options.log_level = .debug` は **comptime** の上限。これを下げると
-//!   debug 文字列が release build から削除されてしまうので、ここでは最広域
-//!   `.debug` を許可しておく。
-//! - `runtime_level` (既定 `.info`) は実行時に表示する閾値。env
-//!   `NN_LOG_LEVEL=err|warn|info|debug` で絞れる。
-//! - 結果として「Release でも debug log を残しつつ、既定 console は静かで
-//!   env で開ける」という挙動になる。
-//!
-//! ## scope
-//! - `pub const log = nn.log.metal;` のように feature 単位で借りる。
-//! - フォーマットは `[level][scope] msg` で統一する。
-//! - env `NN_LOG_SCOPES=metal,cuda` で表示 scope を絞れる (allowlist)。
-//!   未指定なら全 scope を通す。`*` または `all` は全通過と等価。
-//!
-//! ## sink 分離
-//! - 通常 log → stderr (この module)
+//! Sink / 環境変数 / scope の仕様は `docs/logging.md` を参照。
+//! 概要:
+//! - 通常ログ → stderr (この module), `NN_LOG_LEVEL` / `NN_LOG_SCOPES`
 //! - 生成テキスト → stdout (call site が `File.stdout()` を直接持つ)
-//! - profile dump → file (`openProfileArtifact("gemma3")` 等)
+//! - profile dump → file (`openProfileArtifact`), `NN_PROFILE` / `NN_PROFILE_DIR`
+//!
+//! comptime の `log_level` は `.debug` に固定してあるので (文字列を
+//! binary に残すため)、実行時の閾値は `NN_LOG_LEVEL` で絞る。
 
 const std = @import("std");
 
