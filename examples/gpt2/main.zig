@@ -10,12 +10,12 @@ pub fn main(init: std.process.Init) !void {
 
 fn gpt2Demo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Demo 4: GPT-2 Text Generation (GGUF Loader) ===\n\n", .{});
+    log.info("=== Demo 4: GPT-2 Text Generation (GGUF Loader) ===", .{});
 
     const model_path = "models/gpt2.gguf";
 
     // 1. Parse GGUF file
-    std.debug.print("  Loading {s}...\n", .{model_path});
+    log.info("loading {s}...", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         log.err("could not load {s}: {} (download GPT-2 GGUF model to models/)", .{ model_path, err });
         return;
@@ -24,30 +24,30 @@ fn gpt2Demo(io: std.Io) !void {
 
     // Print model info
     if (gguf_file.getMetadataString("general.architecture")) |arch| {
-        std.debug.print("  Architecture: {s}\n", .{arch});
+        log.info("architecture: {s}", .{arch});
     }
     if (gguf_file.getMetadataString("general.name")) |name| {
-        std.debug.print("  Model: {s}\n", .{name});
+        log.info("model: {s}", .{name});
     }
-    std.debug.print("  Tensors: {d}, Metadata: {d}\n", .{ gguf_file.tensors.len, gguf_file.metadata.len });
+    log.info("tensors: {d}, metadata: {d}", .{ gguf_file.tensors.len, gguf_file.metadata.len });
 
     // 2. Load tokenizer
-    std.debug.print("  Loading tokenizer...\n", .{});
+    log.info("loading tokenizer...", .{});
     var tokenizer = nn.bpe.BPETokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
-    std.debug.print("  Vocab size: {d}\n", .{tokenizer.vocab_count});
+    log.info("vocab size: {d}", .{tokenizer.vocab_count});
 
     // 3. Load model weights
-    std.debug.print("  Loading weights...\n", .{});
+    log.info("loading weights...", .{});
     var model = nn.gpt2.GPT2(nn.gpt2.GPT2Small).init(&gguf_file, allocator) catch |err| {
         log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
-    std.debug.print("  Model loaded!\n\n", .{});
+    log.info("model loaded", .{});
 
     // 4. Generate text
     const prompt = "Hello, I am";

@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const nn = @import("nn");
+
+pub const std_options = nn.log.std_options;
+const log = nn.log.example;
+
 const compute = nn.compute;
 const Module = compute.Module;
 const AdamState = compute.AdamState;
@@ -118,13 +122,13 @@ fn prepareBatch(
 
 fn diffusionDemo() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== DDPM Diffusion (CPU) ===\n\n", .{});
+    log.info("=== DDPM Diffusion (CPU) ===", .{});
 
     var prng = std.Random.DefaultPrng.init(12345);
     const rng = prng.random();
     var dataset: [DIFF_NUM_SAMPLES * 2]f32 = undefined;
     generateGaussianMixture(&dataset, rng);
-    std.debug.print("  Dataset: {d} points, 4 Gaussian clusters\n", .{DIFF_NUM_SAMPLES});
+    log.info("dataset: {d} points, 4 Gaussian clusters", .{DIFF_NUM_SAMPLES});
 
     const schedule = diffusion.NoiseSchedule(DIFF_T).initLinear(1e-4, 0.02);
 
@@ -137,8 +141,8 @@ fn diffusionDemo() !void {
     rt.initParams();
 
     const total_params = module.totalParamElements();
-    std.debug.print("  Model parameters: {d} (~{d}KB)\n", .{ total_params, total_params * 4 / 1024 });
-    std.debug.print("  Diffusion steps: T={d}, batch={d}\n\n", .{ DIFF_T, DIFF_BATCH });
+    log.info("model parameters: {d} (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
+    log.info("diffusion steps: T={d}, batch={d}", .{ DIFF_T, DIFF_BATCH });
 
     const sizes = try module.paramSizes(allocator);
     defer allocator.free(sizes);
@@ -167,25 +171,25 @@ fn diffusionDemo() !void {
         rt.applyAdam(&adam, 1e-3, 0.9, 0.999, 1e-8, 0);
 
         if (epoch % 500 == 0 or epoch == num_epochs - 1) {
-            std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss.data[0] });
+            log.info("epoch {d:>4}: loss = {d:.6}", .{ epoch, loss.data[0] });
         }
     }
 
     const train_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n\n", .{train_ms});
+    log.info("training time: {d}ms", .{train_ms});
 
     sampleAndPrint(&rt, model, rng, schedule);
 }
 
 fn diffusionDemoCuda() !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== DDPM Diffusion (CUDA) ===\n\n", .{});
+    log.info("=== DDPM Diffusion (CUDA) ===", .{});
 
     var prng = std.Random.DefaultPrng.init(12345);
     const rng = prng.random();
     var dataset: [DIFF_NUM_SAMPLES * 2]f32 = undefined;
     generateGaussianMixture(&dataset, rng);
-    std.debug.print("  Dataset: {d} points, 4 Gaussian clusters\n", .{DIFF_NUM_SAMPLES});
+    log.info("dataset: {d} points, 4 Gaussian clusters", .{DIFF_NUM_SAMPLES});
 
     const schedule = diffusion.NoiseSchedule(DIFF_T).initLinear(1e-4, 0.02);
 
@@ -202,8 +206,8 @@ fn diffusionDemoCuda() !void {
     rt.initParams();
 
     const total_params = module.totalParamElements();
-    std.debug.print("  Model parameters: {d} (~{d}KB)\n", .{ total_params, total_params * 4 / 1024 });
-    std.debug.print("  Diffusion steps: T={d}, batch={d}\n\n", .{ DIFF_T, DIFF_BATCH });
+    log.info("model parameters: {d} (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
+    log.info("diffusion steps: T={d}, batch={d}", .{ DIFF_T, DIFF_BATCH });
 
     const sizes = try module.paramSizes(allocator);
     defer allocator.free(sizes);
@@ -233,18 +237,18 @@ fn diffusionDemoCuda() !void {
 
         if (epoch % 500 == 0 or epoch == num_epochs - 1) {
             const loss_val = rt.copyScalarToHost(loss);
-            std.debug.print("  Epoch {d:>4}: loss = {d:.6}\n", .{ epoch, loss_val });
+            log.info("epoch {d:>4}: loss = {d:.6}", .{ epoch, loss_val });
         }
     }
 
     const train_ms = timer.read() / 1_000_000;
-    std.debug.print("\n  Training time: {d}ms\n\n", .{train_ms});
+    log.info("training time: {d}ms", .{train_ms});
 
     sampleAndPrintCuda(&rt, model, rng, schedule);
 }
 
 fn sampleAndPrint(rt: *DiffCpuRuntime, model: DdpmModel, rng: std.Random, schedule: anytype) void {
-    std.debug.print("  Sampling 64 points via DDPM reverse process...\n", .{});
+    log.info("sampling 64 points via DDPM reverse process...", .{});
     const N_GEN = 64;
     var x_gen: [N_GEN * 2]f32 = undefined;
     diffusion.boxMullerGaussian(rng, &x_gen);
@@ -282,7 +286,7 @@ fn sampleAndPrint(rt: *DiffCpuRuntime, model: DdpmModel, rng: std.Random, schedu
 }
 
 fn sampleAndPrintCuda(rt: *DiffCudaRuntime, model: DdpmModel, rng: std.Random, schedule: anytype) void {
-    std.debug.print("  Sampling 64 points via DDPM reverse process...\n", .{});
+    log.info("sampling 64 points via DDPM reverse process...", .{});
     const N_GEN = 64;
     var x_gen: [N_GEN * 2]f32 = undefined;
     diffusion.boxMullerGaussian(rng, &x_gen);
@@ -324,13 +328,12 @@ fn sampleAndPrintCuda(rt: *DiffCudaRuntime, model: DdpmModel, rng: std.Random, s
 
 fn printResults(x_gen: []const f32) void {
     const N_GEN = 64;
-    std.debug.print("\n  Generated samples (x, y):\n", .{});
+    log.debug("generated samples (x, y):", .{});
     for (0..N_GEN) |i| {
-        std.debug.print("    ({d:>7.3}, {d:>7.3})", .{ x_gen[i * 2], x_gen[i * 2 + 1] });
-        if ((i + 1) % 4 == 0) std.debug.print("\n", .{});
+        log.debug("  ({d:>7.3}, {d:>7.3})", .{ x_gen[i * 2], x_gen[i * 2 + 1] });
     }
 
-    std.debug.print("\n  Cluster analysis:\n", .{});
+    log.info("cluster analysis:", .{});
     const centers = [_][2]f32{ .{ 2.0, 0.0 }, .{ 0.0, 2.0 }, .{ -2.0, 0.0 }, .{ 0.0, -2.0 } };
     var cluster_counts = [_]usize{ 0, 0, 0, 0 };
     for (0..N_GEN) |i| {
@@ -348,6 +351,6 @@ fn printResults(x_gen: []const f32) void {
         cluster_counts[best_c] += 1;
     }
     for (centers, cluster_counts, 0..) |c, count, ci| {
-        std.debug.print("    Cluster {d} ({d:>5.1}, {d:>5.1}): {d} points\n", .{ ci, c[0], c[1], count });
+        log.info("  cluster {d} ({d:>5.1}, {d:>5.1}): {d} points", .{ ci, c[0], c[1], count });
     }
 }

@@ -17,7 +17,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, mode, "qlora")) {
         try gemma3QLoRADemo(init.io);
     } else {
-        std.debug.print("Usage: gemma3 [cpu|metal|qlora]\n", .{});
+        log.err("usage: gemma3 [cpu|metal|qlora]", .{});
     }
 }
 
@@ -27,12 +27,12 @@ pub fn main(init: std.process.Init) !void {
 
 fn gemma3Demo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Demo 5: Gemma 3 1B Text Generation (GGUF Loader) ===\n\n", .{});
+    log.info("=== Demo 5: Gemma 3 1B Text Generation (GGUF Loader) ===", .{});
 
     const model_path = "models/gemma3-1b.gguf";
 
     // 1. Parse GGUF file
-    std.debug.print("  Loading {s}...\n", .{model_path});
+    log.info("loading {s}...", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         log.err("could not load {s}: {} (download Gemma 3 1B GGUF model to models/)", .{ model_path, err });
         return;
@@ -41,30 +41,30 @@ fn gemma3Demo(io: std.Io) !void {
 
     // Print model info
     if (gguf_file.getMetadataString("general.architecture")) |arch| {
-        std.debug.print("  Architecture: {s}\n", .{arch});
+        log.info("architecture: {s}", .{arch});
     }
     if (gguf_file.getMetadataString("general.name")) |name| {
-        std.debug.print("  Model: {s}\n", .{name});
+        log.info("model: {s}", .{name});
     }
-    std.debug.print("  Tensors: {d}, Metadata: {d}\n", .{ gguf_file.tensors.len, gguf_file.metadata.len });
+    log.info("tensors: {d}, metadata: {d}", .{ gguf_file.tensors.len, gguf_file.metadata.len });
 
     // 2. Load tokenizer (SentencePiece for Gemma)
-    std.debug.print("  Loading tokenizer...\n", .{});
+    log.info("loading tokenizer...", .{});
     var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
     defer tokenizer.deinit();
-    std.debug.print("  Vocab size: {d}\n", .{tokenizer.vocab_count});
+    log.info("vocab size: {d}", .{tokenizer.vocab_count});
 
     // 3. Load model weights
-    std.debug.print("  Loading weights...\n", .{});
+    log.info("loading weights...", .{});
     var model = nn.gemma3.Gemma3(nn.gemma3.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
         log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
-    std.debug.print("  Model loaded!\n\n", .{});
+    log.info("model loaded", .{});
 
     // 4. Generate text
     const prompt = "The meaning of life is";
@@ -190,12 +190,12 @@ fn gemma3Demo(io: std.Io) !void {
 
 fn gemma3MetalDemo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Demo 5b: Gemma 3 1B Metal GPU Text Generation ===\n\n", .{});
+    log.info("=== Demo 5b: Gemma 3 1B Metal GPU Text Generation ===", .{});
 
     const model_path = "models/gemma3-1b.gguf";
 
     // 1. Parse GGUF file
-    std.debug.print("  Loading {s}...\n", .{model_path});
+    log.info("loading {s}...", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         log.err("could not load {s}: {}", .{ model_path, err });
         return;
@@ -203,11 +203,11 @@ fn gemma3MetalDemo(io: std.Io) !void {
     defer gguf_file.deinit();
 
     if (gguf_file.getMetadataString("general.name")) |name| {
-        std.debug.print("  Model: {s}\n", .{name});
+        log.info("model: {s}", .{name});
     }
 
     // 2. Load tokenizer
-    std.debug.print("  Loading tokenizer...\n", .{});
+    log.info("loading tokenizer...", .{});
     var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
@@ -215,13 +215,13 @@ fn gemma3MetalDemo(io: std.Io) !void {
     defer tokenizer.deinit();
 
     // 3. Load model with Metal
-    std.debug.print("  Loading weights (Metal GPU)...\n", .{});
+    log.info("loading weights (Metal GPU)...", .{});
     var model = nn.gemma3_metal.Gemma3Metal(nn.gemma3_metal.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
         log.err("loading model: {}", .{err});
         return;
     };
     defer model.deinit();
-    std.debug.print("  Model loaded!\n\n", .{});
+    log.info("model loaded", .{});
 
     // 4. Generate text
     const prompt = "The meaning of life is";
@@ -366,7 +366,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
 
 fn gemma3QLoRADemo(io: std.Io) !void {
     const allocator = std.heap.page_allocator;
-    std.debug.print("=== Demo 9: Gemma 3 1B QLoRA Fine-tuning (Metal GPU) ===\n\n", .{});
+    log.info("=== Demo 9: Gemma 3 1B QLoRA Fine-tuning (Metal GPU) ===", .{});
 
     const C = nn.gemma3_qlora.Gemma3_1B;
     const RANK = 8;
@@ -375,11 +375,11 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     // --- Metal context ---
     var mtl = try metal.MetalContext.init();
     defer mtl.deinit();
-    std.debug.print("  Metal device initialized.\n", .{});
+    log.info("metal device initialized", .{});
 
     // --- GGUF ---
     const model_path = "models/gemma3-1b.gguf";
-    std.debug.print("  Loading {s}...\n", .{model_path});
+    log.info("loading {s}...", .{model_path});
     var gguf_file = nn.gguf.parse(allocator, io, model_path) catch |err| {
         log.err("could not load model: {} (place gemma3-1b.gguf in models/)", .{err});
         return;
@@ -393,7 +393,7 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     defer tokenizer.deinit();
 
     // --- Module + model + runtime ---
-    std.debug.print("  Initializing QLoRA model (rank={d})...\n", .{RANK});
+    log.info("initializing QLoRA model (rank={d})...", .{RANK});
     const QLoRAModel = nn.gemma3_qlora.Gemma3QLoRA(C, RANK);
 
     var module = nn.unified.Module.init(allocator);
@@ -412,7 +412,7 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     defer model.deinit();
 
     const total_params = module.totalParamElements();
-    std.debug.print("  Trainable params: {d} ({d} handles)\n", .{ total_params, module.paramCount() });
+    log.info("trainable params: {d} ({d} handles)", .{ total_params, module.paramCount() });
 
     // --- Adam (GPU-resident grad buffers already allocated by rt) ---
     const sizes = try module.paramSizes(allocator);
@@ -441,7 +441,7 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     // --- Training loop ---
     const steps: usize = 5;
     const lr: f32 = 1e-4;
-    std.debug.print("  Training {d} steps (lr={d}, α={d}, rank={d})...\n", .{ steps, lr, 16, RANK });
+    log.info("training {d} steps (lr={d}, α={d}, rank={d})...", .{ steps, lr, 16, RANK });
 
     var timer = try nn.Timer.start();
     for (0..steps) |step| {
@@ -461,11 +461,11 @@ fn gemma3QLoRADemo(io: std.Io) !void {
         }
         step_loss /= @floatFromInt(train_texts.len);
         const elapsed = timer.read();
-        std.debug.print("  Step {d:>2}: loss = {d:.4}  ({d} ms)\n", .{ step, step_loss, elapsed / std.time.ns_per_ms });
+        log.info("step {d:>2}: loss = {d:.4}  ({d} ms)", .{ step, step_loss, elapsed / std.time.ns_per_ms });
         timer.reset();
     }
 
-    std.debug.print("\n  QLoRA demo complete.\n", .{});
+    log.info("QLoRA demo complete", .{});
 }
 
 fn MetalContextReadScalar(rt: *nn.unified.DiffMpsRuntime, t: nn.unified.DiffMpsTensor) f32 {
