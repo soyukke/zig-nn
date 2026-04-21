@@ -26,7 +26,7 @@ const gemma3_mod = @import("gemma3.zig");
 const metal = @import("../backend/metal.zig");
 const MetalContext = metal.MetalContext;
 const id = metal.id;
-const diff_mps = @import("../diff_mps_runtime.zig");
+const diff_mps = @import("../diff/mps_runtime.zig");
 const DiffMpsRuntime = diff_mps.DiffMpsRuntime;
 const DiffMpsTensor = diff_mps.DiffMpsTensor;
 

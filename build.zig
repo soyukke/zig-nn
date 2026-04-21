@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) void {
 
     // Standalone test for diff_cpu_runtime only
     const diff_cpu_mod = b.addModule("diff_cpu_test", .{
-        .root_source_file = b.path("src/diff_cpu_runtime_test.zig"),
+        .root_source_file = b.path("src/test_diff_cpu.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) void {
     // Standalone test for diff_mps_runtime (macOS only)
     if (target.result.os.tag == .macos) {
         const diff_mps_mod = b.addModule("diff_mps_test", .{
-            .root_source_file = b.path("src/diff_mps_runtime_test.zig"),
+            .root_source_file = b.path("src/test_diff_mps.zig"),
             .target = target,
             .optimize = optimize,
         });
@@ -124,7 +124,7 @@ pub fn build(b: *std.Build) void {
     // Standalone test for diff_cuda_runtime (requires -Dcuda=true)
     if (enable_cuda and target.result.os.tag == .linux) {
         const diff_cuda_mod = b.addModule("diff_cuda_test", .{
-            .root_source_file = b.path("src/diff_cuda_runtime_test.zig"),
+            .root_source_file = b.path("src/test_diff_cuda.zig"),
             .target = target,
             .optimize = optimize,
         });

@@ -19,7 +19,7 @@ const AdamState = compute.AdamState;
 const log = @import("log.zig").trainer;
 
 // CPU types (常に利用可)
-const diff_cpu = @import("diff_cpu_runtime.zig");
+const diff_cpu = @import("diff/cpu_runtime.zig");
 const DiffCpuRuntime = diff_cpu.DiffCpuRuntime;
 const DiffTensor = diff_cpu.DiffTensor;
 
@@ -28,7 +28,7 @@ const cuda_mod = if (is_linux) @import("backend/cuda.zig") else struct {
     pub const CudaContext = void;
 };
 const CudaContext = cuda_mod.CudaContext;
-const diff_cuda = if (is_linux) @import("diff_cuda_runtime.zig") else struct {
+const diff_cuda = if (is_linux) @import("diff/cuda_runtime.zig") else struct {
     pub const DiffCudaRuntime = void;
     pub const DiffCudaTensor = void;
     pub const GpuAdamState = void;

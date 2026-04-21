@@ -1,4 +1,4 @@
-/// diff_cpu_runtime.zig: 微分可能 CPU ランタイム
+/// diff/cpu_runtime.zig: 微分可能 CPU ランタイム
 ///
 /// CpuRuntime と同じ duck-typed ops インターフェースを実装しつつ、
 /// forward 時に計算グラフを構築し backward() で自動微分する。
@@ -6,13 +6,13 @@
 /// 受け取れば、同じ forward コードで CPU training が可能。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compute = @import("compute.zig");
+const compute = @import("../compute.zig");
 const Module = compute.Module;
 const ParamHandle = compute.ParamHandle;
 const AdamState = compute.AdamState;
-const cpu_backend = @import("backend/cpu.zig");
-const kernels = @import("runtime_kernels.zig");
-const diff_node = @import("diff_node.zig");
+const cpu_backend = @import("../backend/cpu.zig");
+const kernels = @import("../runtime_kernels.zig");
+const diff_node = @import("node.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -1867,7 +1867,7 @@ pub const DiffCpuRuntime = struct {
 
     /// MpsRuntime のパラメータデータを CPU にロード
     pub fn loadFromMps(self: *DiffCpuRuntime, mps: anytype) void {
-        const metal_mod = @import("backend/metal.zig");
+        const metal_mod = @import("../backend/metal.zig");
         const MetalContext = metal_mod.MetalContext;
         for (0..self.module.paramCount()) |i| {
             const size = self.module.paramSize(.{ .index = i });
@@ -2409,5 +2409,5 @@ pub const DiffCpuRuntime = struct {
 };
 
 test {
-    _ = @import("diff_cpu_runtime_test.zig");
+    _ = @import("cpu_runtime_test.zig");
 }

@@ -1,4 +1,4 @@
-/// diff_cuda_runtime.zig: 微分可能 CUDA ランタイム
+/// diff/cuda_runtime.zig: 微分可能 CUDA ランタイム
 ///
 /// DiffCpuRuntime と同じ duck-typed ops インターフェースを GPU (CUDA) 上で提供し、
 /// forward 時に計算グラフを構築し backward() で GPU 上で自動微分する。
@@ -6,17 +6,17 @@
 /// 受け取れば、同じ forward コードで GPU training が可能。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compute = @import("compute.zig");
+const compute = @import("../compute.zig");
 const Module = compute.Module;
 const ParamHandle = compute.ParamHandle;
-const cuda = @import("backend/cuda.zig");
+const cuda = @import("../backend/cuda.zig");
 const CudaContext = cuda.CudaContext;
 const CUdeviceptr = cuda.CUdeviceptr;
 const CUfunction = cuda.CUfunction;
 const CUBLAS_OP_N = cuda.CUBLAS_OP_N;
 const CUBLAS_OP_T = cuda.CUBLAS_OP_T;
-const ops = @import("cuda_ops.zig");
-const diff_node = @import("diff_node.zig");
+const ops = @import("../cuda_ops.zig");
+const diff_node = @import("node.zig");
 
 pub const MAX_NDIM = ops.MAX_NDIM;
 

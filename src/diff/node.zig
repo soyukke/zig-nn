@@ -1,8 +1,8 @@
-/// diff_node.zig: バックエンド非依存の計算グラフノード型
+/// diff/node.zig: バックエンド非依存の計算グラフノード型
 ///
 /// DiffCpuRuntime と DiffCudaRuntime で共通の計算グラフノードを提供する。
 /// DataPtr を comptime パラメータ化し、CPU ([]f32) と CUDA (CUdeviceptr) で共有。
-const runtime_kernels = @import("runtime_kernels.zig");
+const runtime_kernels = @import("../runtime_kernels.zig");
 
 pub const CPU_MAX_NDIM = runtime_kernels.MAX_NDIM;
 

@@ -1,4 +1,4 @@
-/// diff_mps_runtime.zig: 微分可能 Metal (MPS/UMA) ランタイム
+/// diff/mps_runtime.zig: 微分可能 Metal (MPS/UMA) ランタイム
 ///
 /// DiffCpuRuntime / DiffCudaRuntime と同じ duck-typed ops インターフェースを
 /// Metal GPU 上で提供する。Apple Silicon の UMA (Unified Memory Architecture) を活用し、
@@ -8,14 +8,14 @@
 /// ビルド: zig build test-diff-mps (macOS only)
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compute = @import("compute.zig");
+const compute = @import("../compute.zig");
 const Module = compute.Module;
 const ParamHandle = compute.ParamHandle;
-const metal = @import("backend/metal.zig");
+const metal = @import("../backend/metal.zig");
 const MetalContext = metal.MetalContext;
 const id = metal.id;
-const kernels = @import("runtime_kernels.zig");
-const diff_node = @import("diff_node.zig");
+const kernels = @import("../runtime_kernels.zig");
+const diff_node = @import("node.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 

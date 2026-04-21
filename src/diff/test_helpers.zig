@@ -49,7 +49,7 @@
 /// 実装例: diff_cpu_runtime_test.zig (CpuAdapter), diff_cuda_runtime_test.zig (CudaAdapter)
 const std = @import("std");
 const testing = std.testing;
-const log = @import("log.zig").gradcheck;
+const log = @import("../log.zig").gradcheck;
 
 pub fn GradientChecker(comptime Adapter: type) type {
     const Runtime = Adapter.Runtime;
