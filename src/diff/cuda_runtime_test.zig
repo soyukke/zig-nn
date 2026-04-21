@@ -1,19 +1,19 @@
-/// diff_cuda_runtime_test.zig: DiffCudaRuntime の数値勾配テスト
+/// diff/cuda_runtime_test.zig: DiffCudaRuntime の数値勾配テスト
 ///
-/// 共通テスト基盤 (diff_runtime_test_helpers.zig) を CUDA Adapter 経由で使用する。
+/// 共通テスト基盤 (test_helpers.zig) を CUDA Adapter 経由で使用する。
 /// GPU 上で forward/backward を実行し、結果を CPU にコピーして数値勾配と比較する。
 ///
 /// ビルド: zig build test-diff-cuda -Dcuda=true
 const std = @import("std");
-pub const std_options = @import("log.zig").std_options;
-const compute = @import("compute.zig");
+pub const std_options = @import("../log.zig").std_options;
+const compute = @import("../compute.zig");
 const Module = compute.Module;
-const diff_cuda = @import("diff_cuda_runtime.zig");
+const diff_cuda = @import("cuda_runtime.zig");
 const DiffCudaRuntime = diff_cuda.DiffCudaRuntime;
 const DiffCudaTensor = diff_cuda.DiffCudaTensor;
-const cuda = @import("backend/cuda.zig");
+const cuda = @import("../backend/cuda.zig");
 const CudaContext = cuda.CudaContext;
-const helpers = @import("diff_runtime_test_helpers.zig");
+const helpers = @import("test_helpers.zig");
 
 const testing = std.testing;
 

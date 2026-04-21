@@ -86,7 +86,7 @@ fn LayersStruct(comptime layer_types: anytype) type {
 
 const testing = std.testing;
 const compute = @import("../compute.zig");
-const DiffCpuRuntime = @import("../diff_cpu_runtime.zig").DiffCpuRuntime;
+const DiffCpuRuntime = @import("../diff/cpu_runtime.zig").DiffCpuRuntime;
 const Linear_ = @import("graph_linear.zig").Linear;
 
 test "Sequential: Linear + ReLU + Linear forward+backward" {

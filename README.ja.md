@@ -57,6 +57,16 @@ mkdir -p models
 curl -L -o models/gpt2.gguf "https://huggingface.co/QuantFactory/gpt2-GGUF/resolve/main/gpt2.Q4_0.gguf"
 ```
 
+## ログ / プロファイル
+
+`NN_LOG_LEVEL`, `NN_LOG_SCOPES`, `NN_PROFILE`, `NN_PROFILE_DIR` の
+環境変数で scoped logger と profile artifact を制御します。詳細は
+[docs/logging.md](docs/logging.md) を参照してください。
+
+```bash
+NN_LOG_LEVEL=debug NN_LOG_SCOPES=metal,cuda zig build gemma3
+```
+
 ## ベンチマーク
 
 PyTorch との比較スクリプトは `benchmarks/` にあります:

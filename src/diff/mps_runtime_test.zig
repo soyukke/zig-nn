@@ -1,19 +1,19 @@
-/// diff_mps_runtime_test.zig: DiffMpsRuntime の数値勾配テスト
+/// diff/mps_runtime_test.zig: DiffMpsRuntime の数値勾配テスト
 ///
-/// 共通テスト基盤 (diff_runtime_test_helpers.zig) を MPS Adapter 経由で使用する。
+/// 共通テスト基盤 (test_helpers.zig) を MPS Adapter 経由で使用する。
 /// Metal compute カーネルの forward 正当性を数値勾配チェックで検証する。
 ///
 /// ビルド: zig build test-diff-mps (macOS only)
 const std = @import("std");
-pub const std_options = @import("log.zig").stdOptionsAtLevel(.warn);
-const compute = @import("compute.zig");
+pub const std_options = @import("../log.zig").stdOptionsAtLevel(.warn);
+const compute = @import("../compute.zig");
 const Module = compute.Module;
-const diff_mps = @import("diff_mps_runtime.zig");
+const diff_mps = @import("mps_runtime.zig");
 const DiffMpsRuntime = diff_mps.DiffMpsRuntime;
 const DiffMpsTensor = diff_mps.DiffMpsTensor;
-const metal = @import("backend/metal.zig");
+const metal = @import("../backend/metal.zig");
 const MetalContext = metal.MetalContext;
-const helpers = @import("diff_runtime_test_helpers.zig");
+const helpers = @import("test_helpers.zig");
 
 const testing = std.testing;
 

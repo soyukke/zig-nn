@@ -28,7 +28,7 @@ pub const cuda = if (is_linux) @import("backend/cuda.zig") else struct {};
 
 // Shared runtime infrastructure
 pub const compute = @import("compute.zig");
-pub const diff_node = @import("diff_node.zig");
+pub const diff_node = @import("diff/node.zig");
 pub const runtime_kernels = @import("runtime_kernels.zig");
 
 // GGUF / tokenizer / data utilities
@@ -85,13 +85,13 @@ pub const unified = struct {
     // Trainer / Runtimes
     pub const Device = @import("trainer.zig").Device;
     pub const Trainer = @import("trainer.zig").Trainer;
-    pub const DiffCpuRuntime = @import("diff_cpu_runtime.zig").DiffCpuRuntime;
-    pub const DiffTensor = @import("diff_cpu_runtime.zig").DiffTensor;
-    pub const DiffMpsRuntime = if (is_macos) @import("diff_mps_runtime.zig").DiffMpsRuntime else struct {};
-    pub const DiffMpsTensor = if (is_macos) @import("diff_mps_runtime.zig").DiffMpsTensor else struct {};
-    pub const DiffCudaRuntime = if (is_linux) @import("diff_cuda_runtime.zig").DiffCudaRuntime else struct {};
-    pub const DiffCudaTensor = if (is_linux) @import("diff_cuda_runtime.zig").DiffCudaTensor else struct {};
-    pub const GpuAdamState = if (is_linux) @import("diff_cuda_runtime.zig").GpuAdamState else struct {};
+    pub const DiffCpuRuntime = @import("diff/cpu_runtime.zig").DiffCpuRuntime;
+    pub const DiffTensor = @import("diff/cpu_runtime.zig").DiffTensor;
+    pub const DiffMpsRuntime = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsRuntime else struct {};
+    pub const DiffMpsTensor = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsTensor else struct {};
+    pub const DiffCudaRuntime = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaRuntime else struct {};
+    pub const DiffCudaTensor = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaTensor else struct {};
+    pub const GpuAdamState = if (is_linux) @import("diff/cuda_runtime.zig").GpuAdamState else struct {};
 };
 
 // Diffusion utilities (pure helpers, used by examples/diffusion and seqdiffuseq)
