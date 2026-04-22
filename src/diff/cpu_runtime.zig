@@ -13,6 +13,7 @@ const AdamState = compute.AdamState;
 const cpu_backend = @import("../backend/cpu.zig");
 const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
+const unary = @import("common/unary.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -149,21 +150,33 @@ pub const DiffCpuRuntime = struct {
 
     /// context 不要の単純 unary op のボイラープレートを吸収する。
     /// fwd は comptime 関数ポインタなので確実にインライン展開される。
-    fn unaryOp(
-        self: *DiffCpuRuntime,
-        x: DiffTensor,
-        comptime fwd: fn ([]const f32, []f32) void,
-        bwd: *const fn (*DiffNode) void,
-    ) DiffTensor {
+    /// Pointwise unary op driver. 数式は diff/common/unary.zig に集約。
+    /// comptime Kind で forward/backward の関数ポインタを特殊化する。
+    fn unaryKind(self: *DiffCpuRuntime, comptime kind: unary.Kind, x: DiffTensor) DiffTensor {
         const total = x.totalElements();
         const out = self.allocData(total);
-        fwd(x.data[0..total], out[0..total]);
+        for (0..total) |i| out[i] = kind.fwd(x.data[i]);
         const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = bwd;
+            node.backward_fn = &UnaryBackward(kind).apply;
         }
         return node;
+    }
+
+    fn UnaryBackward(comptime kind: unary.Kind) type {
+        return struct {
+            fn apply(self_node: *DiffNode) void {
+                const pa = self_node.parents[0].?;
+                const total = self_node.totalElements();
+                const go = self_node.grad.?;
+                if (pa.grad) |ga| {
+                    for (0..total) |i| {
+                        ga[i] += go[i] * kind.deriv(pa.data[i], self_node.data[i]);
+                    }
+                }
+            }
+        };
     }
 
     // ── Param access ──
@@ -199,36 +212,11 @@ pub const DiffCpuRuntime = struct {
     // ── Unary ops ──
 
     pub fn negative(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.negativeForward, &backwardNegative);
-    }
-
-    fn backwardNegative(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        const ga = pa.grad.?;
-        for (0..total) |i| ga[i] -= go[i];
+        return self.unaryKind(unary.Negative, x);
     }
 
     pub fn gelu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.geluForward, &backwardGelu);
-    }
-
-    fn backwardGelu(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        const ga = pa.grad.?;
-        const sqrt_2_over_pi: f32 = 0.7978845608028654;
-        for (0..total) |i| {
-            const v = pa.data[i];
-            const inner = sqrt_2_over_pi * (v + 0.044715 * v * v * v);
-            const tanh_val = std.math.tanh(inner);
-            const sech2 = 1.0 - tanh_val * tanh_val;
-            const inner_deriv = sqrt_2_over_pi * (1.0 + 3.0 * 0.044715 * v * v);
-            // d/dx gelu(x) = 0.5 * (1 + tanh) + 0.5 * x * sech^2 * inner'
-            ga[i] += go[i] * (0.5 * (1.0 + tanh_val) + 0.5 * v * sech2 * inner_deriv);
-        }
+        return self.unaryKind(unary.Gelu, x);
     }
 
     pub fn silu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
@@ -271,103 +259,25 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn square(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.squareForward, &backwardSquare);
-    }
-
-    fn backwardSquare(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| {
-                ga[i] += go[i] * 2.0 * pa.data[i];
-            }
-        }
+        return self.unaryKind(unary.Square, x);
     }
 
     // ── exp / log / abs / sqrt / clamp ──
 
-    /// exp(x) — d/dx exp(x) = exp(x) = out
     pub fn exp(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.expForward, &backwardExp);
+        return self.unaryKind(unary.Exp, x);
     }
 
-    fn backwardExp(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i] * self_node.data[i]; // out = exp(x)
-        }
-    }
-
-    /// log(x) — d/dx log(x) = 1/x
     pub fn log(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = @log(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardLog;
-        }
-        return node;
+        return self.unaryKind(unary.Log, x);
     }
 
-    fn backwardLog(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i] / pa.data[i];
-        }
-    }
-
-    /// abs(x) — d/dx |x| = sign(x)
     pub fn abs(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = @abs(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardAbs;
-        }
-        return node;
+        return self.unaryKind(unary.Abs, x);
     }
 
-    fn backwardAbs(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| {
-                const sign: f32 = if (pa.data[i] > 0) 1.0 else if (pa.data[i] < 0) -1.0 else 0.0;
-                ga[i] += go[i] * sign;
-            }
-        }
-    }
-
-    /// sqrt(x) — d/dx sqrt(x) = 0.5 / sqrt(x)
     pub fn sqrt(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = @sqrt(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardSqrt;
-        }
-        return node;
-    }
-
-    fn backwardSqrt(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i] * 0.5 / self_node.data[i]; // 0.5 / sqrt(x)
-        }
+        return self.unaryKind(unary.Sqrt, x);
     }
 
     /// clamp(x, min, max) — gradient passes through if min <= x <= max
@@ -430,35 +340,11 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn tanh_(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.tanhForward, &backwardTanh);
-    }
-
-    fn backwardTanh(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| {
-                const y = self_node.data[i]; // tanh output
-                ga[i] += go[i] * (1.0 - y * y);
-            }
-        }
+        return self.unaryKind(unary.Tanh, x);
     }
 
     pub fn sigmoid(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.sigmoidForward, &backwardSigmoid);
-    }
-
-    fn backwardSigmoid(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| {
-                const y = self_node.data[i]; // sigmoid output
-                ga[i] += go[i] * y * (1.0 - y);
-            }
-        }
+        return self.unaryKind(unary.Sigmoid, x);
     }
 
     // ── Binary ops ──
@@ -1399,18 +1285,7 @@ pub const DiffCpuRuntime = struct {
     // ── ReLU ──
 
     pub fn relu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryOp(x, kernels.reluForward, &backwardRelu);
-    }
-
-    fn backwardRelu(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| {
-                if (pa.data[i] > 0) ga[i] += go[i];
-            }
-        }
+        return self.unaryKind(unary.Relu, x);
     }
 
     // ── Dropout ──
