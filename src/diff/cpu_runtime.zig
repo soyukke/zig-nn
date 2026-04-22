@@ -17,6 +17,7 @@ const unary = @import("common/unary.zig");
 const binary = @import("common/binary.zig");
 const reduce = @import("common/reduce.zig");
 const softmax_common = @import("common/softmax.zig");
+const matmul_common = @import("common/matmul.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -445,6 +446,13 @@ pub const DiffCpuRuntime = struct {
         @panic("matmul: unsupported shape combination (expected 2D or 3D)");
     }
 
+    // ── Matmul backward (数式は diff/common/matmul.zig に集約) ──
+    //
+    //   ga = go @ b^T    (PyTorch derivatives.yaml: self: grad.mm(mat2.t()))
+    //   gb = a^T @ go    (                         mat2: self.t().mm(grad))
+    //
+    // 3D batched / 2D @ 3D (a 共有) も同じ公式を batch 毎に適用するだけ。
+
     fn backwardMatmul2D(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
@@ -452,15 +460,16 @@ pub const DiffCpuRuntime = struct {
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[1];
-
-        // dA += go @ B^T
-        if (pa.grad) |ga| {
-            cpu_backend.matmulTransBAccum(f32, go.ptr, pb.data.ptr, ga.ptr, M, N, K);
-        }
-        // dB += A^T @ go
-        if (pb.grad) |gb| {
-            cpu_backend.matmulTransAAccum(f32, pa.data.ptr, go.ptr, gb.ptr, K, M, N);
-        }
+        matmul_common.backward2D(
+            go.ptr,
+            pa.data.ptr,
+            pb.data.ptr,
+            if (pa.grad) |g| g.ptr else null,
+            if (pb.grad) |g| g.ptr else null,
+            M,
+            K,
+            N,
+        );
     }
 
     fn backwardMatmul3D(self_node: *DiffNode) void {
@@ -471,31 +480,17 @@ pub const DiffCpuRuntime = struct {
         const M = pa.shape[1];
         const K = pa.shape[2];
         const N = pb.shape[2];
-
-        for (0..B) |batch| {
-            if (pa.grad) |ga| {
-                cpu_backend.matmulTransBAccum(
-                    f32,
-                    go[batch * M * N ..].ptr,
-                    pb.data[batch * K * N ..].ptr,
-                    ga[batch * M * K ..].ptr,
-                    M,
-                    N,
-                    K,
-                );
-            }
-            if (pb.grad) |gb| {
-                cpu_backend.matmulTransAAccum(
-                    f32,
-                    pa.data[batch * M * K ..].ptr,
-                    go[batch * M * N ..].ptr,
-                    gb[batch * K * N ..].ptr,
-                    K,
-                    M,
-                    N,
-                );
-            }
-        }
+        matmul_common.backward3D(
+            go.ptr,
+            pa.data.ptr,
+            pb.data.ptr,
+            if (pa.grad) |g| g.ptr else null,
+            if (pb.grad) |g| g.ptr else null,
+            B,
+            M,
+            K,
+            N,
+        );
     }
 
     fn backwardMatmul2D3D(self_node: *DiffNode) void {
@@ -506,35 +501,17 @@ pub const DiffCpuRuntime = struct {
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[2];
-
-        // dA (2D) += sum_b go[b] @ B[b]^T
-        if (pa.grad) |ga| {
-            for (0..B) |batch| {
-                cpu_backend.matmulTransBAccum(
-                    f32,
-                    go[batch * M * N ..].ptr,
-                    pb.data[batch * K * N ..].ptr,
-                    ga.ptr,
-                    M,
-                    N,
-                    K,
-                );
-            }
-        }
-        // dB[b] (3D) += A^T @ go[b]
-        if (pb.grad) |gb| {
-            for (0..B) |batch| {
-                cpu_backend.matmulTransAAccum(
-                    f32,
-                    pa.data.ptr,
-                    go[batch * M * N ..].ptr,
-                    gb[batch * K * N ..].ptr,
-                    K,
-                    M,
-                    N,
-                );
-            }
-        }
+        matmul_common.backward2Dx3D(
+            go.ptr,
+            pa.data.ptr,
+            pb.data.ptr,
+            if (pa.grad) |g| g.ptr else null,
+            if (pb.grad) |g| g.ptr else null,
+            B,
+            M,
+            K,
+            N,
+        );
     }
 
     // ── Shape ops ──
