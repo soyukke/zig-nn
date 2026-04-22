@@ -7,8 +7,7 @@
 ///
 /// `nn.unified.*` が唯一の公開 API。
 /// `DiffCpuRuntime` / `DiffCudaRuntime` / `DiffMpsRuntime` の duck-typed ops を
-/// `Trainer(Model, .cpu|.cuda)` で統一的に利用できる。
-
+/// `trainer(Model, .cpu|.cuda)` で統一的に利用できる。
 const builtin = @import("builtin");
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -18,9 +17,9 @@ pub const log = @import("log.zig");
 pub const std_options = log.std_options;
 
 // Backend primitives
-pub const backend = @import("backend/backend.zig");
-pub const Backend = backend.Backend;
-pub const BackendType = backend.BackendType;
+const backend_mod = @import("backend/backend.zig");
+pub const backend = backend_mod.backend;
+pub const BackendType = backend_mod.BackendType;
 pub const cpu = @import("backend/cpu.zig");
 pub const simd = @import("backend/simd.zig");
 pub const metal = if (is_macos) @import("backend/metal.zig") else struct {};
@@ -52,46 +51,67 @@ pub const unified = struct {
     pub const ParamHandle = compute.ParamHandle;
     pub const ParamInit = compute.ParamInit;
     pub const AdamState = compute.AdamState;
-    pub const adamStep = compute.adamStep;
-    pub const cosineAnnealingLR = compute.cosineAnnealingLR;
-    pub const linearWarmupLR = compute.linearWarmupLR;
-    pub const warmupCosineDecayLR = compute.warmupCosineDecayLR;
-    pub const saveCheckpoint = compute.saveCheckpoint;
-    pub const loadCheckpoint = compute.loadCheckpoint;
+    pub const adam_step = compute.adam_step;
+    pub const cosine_annealing_lr = compute.cosine_annealing_lr;
+    pub const linear_warmup_lr = compute.linear_warmup_lr;
+    pub const warmup_cosine_decay_lr = compute.warmup_cosine_decay_lr;
+    pub const save_checkpoint = compute.save_checkpoint;
+    pub const load_checkpoint = compute.load_checkpoint;
 
     // Layers
-    pub const Linear = @import("nn/graph_linear.zig").Linear;
-    pub const LayerNorm = @import("nn/graph_norm.zig").LayerNorm;
-    pub const SelfAttention = @import("nn/graph_attention.zig").SelfAttention;
-    pub const MultiHeadSelfAttention = @import("nn/graph_attention.zig").MultiHeadSelfAttention;
-    pub const CausalSelfAttention = @import("nn/graph_attention.zig").CausalSelfAttention;
-    pub const MultiHeadCausalSelfAttention = @import("nn/graph_attention.zig").MultiHeadCausalSelfAttention;
-    pub const CrossAttention = @import("nn/graph_attention.zig").CrossAttention;
-    pub const MultiHeadCrossAttention = @import("nn/graph_attention.zig").MultiHeadCrossAttention;
-    pub const DynamicCausalSelfAttention = @import("nn/graph_attention.zig").DynamicCausalSelfAttention;
-    pub const TransformerEncoderLayer = @import("nn/graph_transformer.zig").TransformerEncoderLayer;
-    pub const TransformerDecoderLayer = @import("nn/graph_transformer.zig").TransformerDecoderLayer;
-    pub const Embedding = @import("nn/graph_embedding.zig").Embedding;
-    pub const Dropout = @import("nn/graph_dropout.zig").Dropout;
-    pub const Sequential = @import("nn/graph_sequential.zig").Sequential;
+    pub const linear = @import("nn/graph_linear.zig").linear;
+    pub const layer_norm = @import("nn/graph_norm.zig").layer_norm;
+    pub const self_attention = @import("nn/graph_attention.zig").self_attention;
+    pub const multi_head_self_attention =
+        @import("nn/graph_attention.zig").multi_head_self_attention;
+    pub const causal_self_attention = @import("nn/graph_attention.zig").causal_self_attention;
+    pub const multi_head_causal_self_attention =
+        @import("nn/graph_attention.zig").multi_head_causal_self_attention;
+    pub const cross_attention = @import("nn/graph_attention.zig").cross_attention;
+    pub const multi_head_cross_attention =
+        @import("nn/graph_attention.zig").multi_head_cross_attention;
+    pub const dynamic_causal_self_attention =
+        @import("nn/graph_attention.zig").dynamic_causal_self_attention;
+    pub const transformer_encoder_layer =
+        @import("nn/graph_transformer.zig").transformer_encoder_layer;
+    pub const transformer_decoder_layer =
+        @import("nn/graph_transformer.zig").transformer_decoder_layer;
+    pub const embedding = @import("nn/graph_embedding.zig").embedding;
+    pub const dropout = @import("nn/graph_dropout.zig").dropout;
+    pub const sequential = @import("nn/graph_sequential.zig").sequential;
     pub const ReLU = @import("nn/graph_sequential.zig").ReLU;
     pub const GELU = @import("nn/graph_sequential.zig").GELU;
     pub const SiLU = @import("nn/graph_sequential.zig").SiLU;
     pub const Sigmoid = @import("nn/graph_sequential.zig").Sigmoid;
     pub const Tanh = @import("nn/graph_sequential.zig").Tanh;
-    pub const Conv2d = @import("nn/graph_conv2d.zig").Conv2d;
-    pub const MaxPool2d = @import("nn/graph_conv2d.zig").MaxPool2d;
+    pub const conv2d = @import("nn/graph_conv2d.zig").conv2d;
+    pub const max_pool2d = @import("nn/graph_conv2d.zig").max_pool2d;
 
     // Trainer / Runtimes
     pub const Device = @import("trainer.zig").Device;
-    pub const Trainer = @import("trainer.zig").Trainer;
+    pub const trainer = @import("trainer.zig").trainer;
     pub const DiffCpuRuntime = @import("diff/cpu_runtime.zig").DiffCpuRuntime;
     pub const DiffTensor = @import("diff/cpu_runtime.zig").DiffTensor;
-    pub const DiffMpsRuntime = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsRuntime else struct {};
-    pub const DiffMpsTensor = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsTensor else struct {};
-    pub const DiffCudaRuntime = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaRuntime else struct {};
-    pub const DiffCudaTensor = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaTensor else struct {};
-    pub const GpuAdamState = if (is_linux) @import("diff/cuda_runtime.zig").GpuAdamState else struct {};
+    pub const DiffMpsRuntime = if (is_macos)
+        @import("diff/mps_runtime.zig").DiffMpsRuntime
+    else
+        struct {};
+    pub const DiffMpsTensor = if (is_macos)
+        @import("diff/mps_runtime.zig").DiffMpsTensor
+    else
+        struct {};
+    pub const DiffCudaRuntime = if (is_linux)
+        @import("diff/cuda_runtime.zig").DiffCudaRuntime
+    else
+        struct {};
+    pub const DiffCudaTensor = if (is_linux)
+        @import("diff/cuda_runtime.zig").DiffCudaTensor
+    else
+        struct {};
+    pub const GpuAdamState = if (is_linux)
+        @import("diff/cuda_runtime.zig").GpuAdamState
+    else
+        struct {};
 };
 
 // Diffusion utilities (pure helpers, used by examples/diffusion and seqdiffuseq)
@@ -99,7 +119,7 @@ pub const diffusion = @import("nn/diffusion.zig");
 
 // Timer shim (std.time.Timer が Zig 0.16 で削除されたため)
 pub const Timer = @import("util/timer.zig").Timer;
-pub const nowNanos = @import("util/timer.zig").nowNanos;
+pub const now_nanos = @import("util/timer.zig").now_nanos;
 
 test {
     @import("std").testing.refAllDecls(@This());

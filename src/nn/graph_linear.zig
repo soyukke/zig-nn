@@ -7,15 +7,15 @@ const compute = @import("../compute.zig");
 const Module = compute.Module;
 const ParamHandle = compute.ParamHandle;
 
-pub fn Linear(comptime in_dim: usize, comptime out_dim: usize) type {
+pub fn linear(comptime in_dim: usize, comptime out_dim: usize) type {
     return struct {
         w: ParamHandle,
         b: ParamHandle,
 
         pub fn init(module: anytype) @This() {
             return .{
-                .w = module.addParam(&.{ in_dim, out_dim }, .xavier),
-                .b = module.addParam(&.{out_dim}, .zeros),
+                .w = module.add_param(&.{ in_dim, out_dim }, .xavier),
+                .b = module.add_param(&.{out_dim}, .zeros),
             };
         }
 
@@ -26,4 +26,4 @@ pub fn Linear(comptime in_dim: usize, comptime out_dim: usize) type {
 }
 
 /// Backward-compatible alias
-pub const GraphLinear = Linear;
+pub const GraphLinear = linear;

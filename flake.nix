@@ -64,6 +64,7 @@
             zig_0_16
             pythonEnv
             pkgs.git
+            pkgs.just
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.apple-sdk_15
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [

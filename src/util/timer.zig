@@ -6,26 +6,26 @@ pub const Timer = struct {
     start_ns: u64,
 
     pub fn start() error{TimerUnsupported}!Timer {
-        return .{ .start_ns = nowNanos() };
+        return .{ .start_ns = now_nanos() };
     }
 
     pub fn read(self: *Timer) u64 {
-        return nowNanos() -% self.start_ns;
+        return now_nanos() -% self.start_ns;
     }
 
     pub fn lap(self: *Timer) u64 {
-        const now = nowNanos();
+        const now = now_nanos();
         const elapsed = now -% self.start_ns;
         self.start_ns = now;
         return elapsed;
     }
 
     pub fn reset(self: *Timer) void {
-        self.start_ns = nowNanos();
+        self.start_ns = now_nanos();
     }
 };
 
-pub fn nowNanos() u64 {
+pub fn now_nanos() u64 {
     if (builtin.os.tag == .windows) {
         return 0;
     }

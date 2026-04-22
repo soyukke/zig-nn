@@ -4,7 +4,7 @@
 /// ゼロオーバーヘッド。
 ///
 /// Usage:
-///   const Model = Sequential(.{ Linear_(128, 64), ReLU, Linear_(64, 10) });
+///   const Model = sequential(.{ Linear_(128, 64), ReLU, Linear_(64, 10) });
 ///   const model = Model.init(&module);
 ///   const out = model.forward(&rt, input);
 const std = @import("std");
@@ -37,15 +37,15 @@ pub const Sigmoid = struct {
 
 pub const Tanh = struct {
     pub fn forward(_: @This(), ctx: anytype, x: anytype) @TypeOf(x) {
-        return ctx.tanh_(x);
+        return ctx.tanh(x);
     }
 };
 
 // ── Sequential ──
 
-pub fn Sequential(comptime layer_types: anytype) type {
+pub fn sequential(comptime layer_types: anytype) type {
     return struct {
-        layers: LayersStruct(layer_types),
+        layers: layers_struct(layer_types),
 
         pub fn init(module: anytype) @This() {
             var result: @This() = undefined;
@@ -71,7 +71,7 @@ pub fn Sequential(comptime layer_types: anytype) type {
     };
 }
 
-fn LayersStruct(comptime layer_types: anytype) type {
+fn layers_struct(comptime layer_types: anytype) type {
     const N = layer_types.len;
     comptime var field_names: [N][:0]const u8 = undefined;
     comptime var field_types: [N]type = undefined;
@@ -87,10 +87,10 @@ fn LayersStruct(comptime layer_types: anytype) type {
 const testing = std.testing;
 const compute = @import("../compute.zig");
 const DiffCpuRuntime = @import("../diff/cpu_runtime.zig").DiffCpuRuntime;
-const Linear_ = @import("graph_linear.zig").Linear;
+const Linear_ = @import("graph_linear.zig").linear;
 
 test "Sequential: Linear + ReLU + Linear forward+backward" {
-    const Model = Sequential(.{
+    const Model = sequential(.{
         Linear_(3, 4),
         ReLU,
         Linear_(4, 2),
@@ -98,15 +98,17 @@ test "Sequential: Linear + ReLU + Linear forward+backward" {
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
-    rt.initParams();
+
+    rt.init_params();
 
     // Input [2, 3]
     var input_data = [_]f32{ 1, 2, 3, 4, 5, 6 };
-    const input = rt.makeNode(&input_data, &.{ 2, 3 }, true);
+    const input = rt.make_node(&input_data, &.{ 2, 3 }, true);
 
     const out = model.forward(&rt, input);
     // Output should be [2, 2]
@@ -114,12 +116,12 @@ test "Sequential: Linear + ReLU + Linear forward+backward" {
     try testing.expectEqual(@as(usize, 2), out.shape[1]);
 
     // Backward
-    const loss = rt.reductionSum(rt.reductionSum(out, -1), 0);
+    const loss = rt.reduction_sum(rt.reduction_sum(out, -1), 0);
     rt.backward(loss);
 
     // Verify param gradients are non-zero
-    for (0..module.paramCount()) |i| {
-        const grad = rt.paramGrad(i);
+    for (0..module.param_count()) |i| {
+        const grad = rt.param_grad(i);
         var norm: f32 = 0;
         for (grad) |g| norm += g * g;
         try testing.expect(norm > 0);
@@ -127,34 +129,37 @@ test "Sequential: Linear + ReLU + Linear forward+backward" {
 }
 
 test "Sequential: single layer" {
-    const Model = Sequential(.{Linear_(4, 2)});
+    const Model = sequential(.{Linear_(4, 2)});
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
-    rt.initParams();
+
+    rt.init_params();
 
     var data = [_]f32{ 1, 2, 3, 4 };
-    const input = rt.makeNode(&data, &.{ 1, 4 }, true);
+    const input = rt.make_node(&data, &.{ 1, 4 }, true);
     const out = model.forward(&rt, input);
     try testing.expectEqual(@as(usize, 2), out.shape[1]);
 }
 
 test "Sequential: activations only" {
-    const Model = Sequential(.{ GELU, Tanh });
+    const Model = sequential(.{ GELU, Tanh });
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
     var data = [_]f32{ -1.0, 0.0, 0.5, 1.0 };
-    const input = rt.makeNode(&data, &.{4}, true);
+    const input = rt.make_node(&data, &.{4}, true);
     const out = model.forward(&rt, input);
 
     // tanh(gelu(x))

@@ -23,17 +23,17 @@ fn gpt2Demo(io: std.Io) !void {
     defer gguf_file.deinit();
 
     // Print model info
-    if (gguf_file.getMetadataString("general.architecture")) |arch| {
+    if (gguf_file.get_metadata_string("general.architecture")) |arch| {
         log.info("architecture: {s}", .{arch});
     }
-    if (gguf_file.getMetadataString("general.name")) |name| {
+    if (gguf_file.get_metadata_string("general.name")) |name| {
         log.info("model: {s}", .{name});
     }
     log.info("tensors: {d}, metadata: {d}", .{ gguf_file.tensors.len, gguf_file.metadata.len });
 
     // 2. Load tokenizer
     log.info("loading tokenizer...", .{});
-    var tokenizer = nn.bpe.BPETokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
+    var tokenizer = nn.bpe.BPETokenizer.init_from_gguf(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
@@ -42,7 +42,7 @@ fn gpt2Demo(io: std.Io) !void {
 
     // 3. Load model weights
     log.info("loading weights...", .{});
-    var model = nn.gpt2.GPT2(nn.gpt2.GPT2Small).init(&gguf_file, allocator) catch |err| {
+    var model = nn.gpt2.gpt2(nn.gpt2.GPT2Small).init(&gguf_file, allocator) catch |err| {
         log.err("loading weights: {}", .{err});
         return;
     };
@@ -75,10 +75,10 @@ fn gpt2Demo(io: std.Io) !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
+    var prng = std.Random.DefaultPrng.init(nn.now_nanos());
     const rng = prng.random();
 
-    model.resetCache();
+    model.reset_cache();
 
     var timer = nn.Timer.start() catch unreachable;
 
@@ -105,7 +105,7 @@ fn gpt2Demo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gpt2.sampleTopK(logits, 40, 0.9, rng);
+        const next_token = nn.gpt2.sample_top_k(logits, 40, 0.9, rng);
         try tokens.append(allocator, next_token);
 
         const tok_slice = [_]u32{next_token};
@@ -120,7 +120,7 @@ fn gpt2Demo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const last_token = tokens.items[tokens.items.len - 1];
-        const logits = model.decodeNext(last_token, temp) catch |err| {
+        const logits = model.decode_next(last_token, temp) catch |err| {
             log.err("in decodeNext: {}", .{err});
             return;
         };
@@ -138,7 +138,7 @@ fn gpt2Demo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gpt2.sampleTopK(logits, 40, 0.9, rng);
+        const next_token = nn.gpt2.sample_top_k(logits, 40, 0.9, rng);
         try tokens.append(allocator, next_token);
 
         const tok_slice = [_]u32{next_token};

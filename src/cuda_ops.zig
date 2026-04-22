@@ -10,11 +10,11 @@ const CUfunction = cuda.CUfunction;
 pub const MAX_NDIM = 8;
 pub const BLOCK_SIZE: c_uint = 256;
 
-pub fn gridFor(n: usize) c_uint {
+pub fn grid_for(n: usize) c_uint {
     return @intCast((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
 }
 
-pub fn nextPow2(v: c_uint) c_uint {
+pub fn next_pow2(v: c_uint) c_uint {
     if (v == 0) return 1;
     var x = v - 1;
     x |= x >> 1;
@@ -25,7 +25,7 @@ pub fn nextPow2(v: c_uint) c_uint {
     return x + 1;
 }
 
-pub fn initShapeArray(shape_slice: []const usize) [MAX_NDIM]usize {
+pub fn init_shape_array(shape_slice: []const usize) [MAX_NDIM]usize {
     var arr: [MAX_NDIM]usize = .{0} ** MAX_NDIM;
     for (shape_slice, 0..) |s, i| arr[i] = s;
     return arr;
@@ -33,7 +33,7 @@ pub fn initShapeArray(shape_slice: []const usize) [MAX_NDIM]usize {
 
 /// Dispatch broadcast binary op (add_broadcast / mul_broadcast pattern).
 /// Launches func(out, larger, smaller, larger_total, smaller_total).
-pub fn dispatchBroadcastBinop(
+pub fn dispatch_broadcast_binop(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -51,9 +51,9 @@ pub fn dispatchBroadcastBinop(
         @ptrCast(&a_i),
         @ptrCast(&b_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(larger_total), 1, 1 },
+        .{ grid_for(larger_total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -62,7 +62,7 @@ pub fn dispatchBroadcastBinop(
 
 /// Dispatch elementwise unary op (gelu_kernel / silu_kernel pattern).
 /// Launches func(out, x, n).
-pub fn dispatchElementwise(
+pub fn dispatch_elementwise(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -75,9 +75,9 @@ pub fn dispatchElementwise(
         @ptrCast(@constCast(&x_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -85,14 +85,14 @@ pub fn dispatchElementwise(
 }
 
 /// Dispatch in-place softmax: func(data, rows, cols) with shared memory.
-pub fn dispatchSoftmax(
+pub fn dispatch_softmax(
     ctx: *CudaContext,
     func: CUfunction,
     data_dptr: CUdeviceptr,
     rows: usize,
     cols: usize,
 ) void {
-    const block_pow2 = nextPow2(@intCast(@min(cols, 1024)));
+    const block_pow2 = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var params = [_]?*anyopaque{
@@ -100,7 +100,7 @@ pub fn dispatchSoftmax(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_pow2, 1, 1 },
@@ -110,7 +110,7 @@ pub fn dispatchSoftmax(
 }
 
 /// Dispatch layernorm: func(out, x, gamma, beta, rows, cols, eps) with shared memory.
-pub fn dispatchLayerNorm(
+pub fn dispatch_layer_norm(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -121,7 +121,7 @@ pub fn dispatchLayerNorm(
     cols: usize,
     eps: f32,
 ) void {
-    const block_dim = nextPow2(@intCast(@min(cols, 1024)));
+    const block_dim = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var eps_v: f32 = eps;
@@ -134,7 +134,7 @@ pub fn dispatchLayerNorm(
         @ptrCast(&cols_i),
         @ptrCast(&eps_v),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_dim, 1, 1 },
@@ -144,7 +144,7 @@ pub fn dispatchLayerNorm(
 }
 
 /// Dispatch 2D transpose: func(out, x, rows, cols).
-pub fn dispatchTranspose2d(
+pub fn dispatch_transpose2d(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -160,9 +160,9 @@ pub fn dispatchTranspose2d(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(rows * cols), 1, 1 },
+        .{ grid_for(rows * cols), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -170,7 +170,7 @@ pub fn dispatchTranspose2d(
 }
 
 /// Dispatch AdaLN modulation: func(out, norm, scale, beta, B, S, D).
-pub fn dispatchAdaLN(
+pub fn dispatch_ada_ln(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -194,9 +194,9 @@ pub fn dispatchAdaLN(
         @ptrCast(&s_i),
         @ptrCast(&d_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(total), 1, 1 },
+        .{ grid_for(total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -204,7 +204,7 @@ pub fn dispatchAdaLN(
 }
 
 /// Dispatch gather: func(out, table, indices, num_indices, embed_dim).
-pub fn dispatchGather(
+pub fn dispatch_gather(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -223,9 +223,9 @@ pub fn dispatchGather(
         @ptrCast(&n_i),
         @ptrCast(&ed_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(total), 1, 1 },
+        .{ grid_for(total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -233,7 +233,7 @@ pub fn dispatchGather(
 }
 
 /// Dispatch scale: func(out, x, scale, n).
-pub fn dispatchScale(
+pub fn dispatch_scale(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -249,9 +249,9 @@ pub fn dispatchScale(
         @ptrCast(&s),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -265,7 +265,7 @@ pub fn dispatchScale(
 /// Backward elementwise (3-input): func(ga, go, cache, n).
 /// Used for gelu/relu/log/square/abs backward where cache is x (input),
 /// and for sigmoid/tanh/exp/sqrt backward where cache is out (output).
-pub fn dispatchBackwardElementwise3(
+pub fn dispatch_backward_elementwise3(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -280,9 +280,9 @@ pub fn dispatchBackwardElementwise3(
         @ptrCast(@constCast(&cache_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -290,7 +290,7 @@ pub fn dispatchBackwardElementwise3(
 }
 
 /// SiLU backward: func(ga, go, x, sig_cache, n).
-pub fn dispatchSiluBackward(
+pub fn dispatch_silu_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -307,9 +307,9 @@ pub fn dispatchSiluBackward(
         @ptrCast(@constCast(&sig_cache_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -317,7 +317,7 @@ pub fn dispatchSiluBackward(
 }
 
 /// Clamp backward: func(ga, go, x, min_val, max_val, n).
-pub fn dispatchClampBackward(
+pub fn dispatch_clamp_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -338,9 +338,9 @@ pub fn dispatchClampBackward(
         @ptrCast(&mx),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -348,7 +348,7 @@ pub fn dispatchClampBackward(
 }
 
 /// Dropout backward: func(ga, go, mask, n).
-pub fn dispatchDropoutBackward(
+pub fn dispatch_dropout_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -363,9 +363,9 @@ pub fn dispatchDropoutBackward(
         @ptrCast(@constCast(&mask_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -373,7 +373,7 @@ pub fn dispatchDropoutBackward(
 }
 
 /// Mul backward same-shape: func(ga, gb, go, a, b, n).
-pub fn dispatchMulBackwardSame(
+pub fn dispatch_mul_backward_same(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -392,9 +392,9 @@ pub fn dispatchMulBackwardSame(
         @ptrCast(@constCast(&b_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -402,7 +402,7 @@ pub fn dispatchMulBackwardSame(
 }
 
 /// Mul backward broadcast (ga or gb): func(g, go, other, a_total, b_total).
-pub fn dispatchMulBackwardBroadcast(
+pub fn dispatch_mul_backward_broadcast(
     ctx: *CudaContext,
     func: CUfunction,
     g_dptr: CUdeviceptr,
@@ -421,9 +421,9 @@ pub fn dispatchMulBackwardBroadcast(
         @ptrCast(&b_i),
     };
     // Grid over the larger (a_total) for ga, over b_total for gb reduction
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(a_total), 1, 1 },
+        .{ grid_for(a_total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -431,7 +431,7 @@ pub fn dispatchMulBackwardBroadcast(
 }
 
 /// Reduce add/sub to broadcast: func(gb, go, out_total, b_total).
-pub fn dispatchReduceToBroadcast(
+pub fn dispatch_reduce_to_broadcast(
     ctx: *CudaContext,
     func: CUfunction,
     gb_dptr: CUdeviceptr,
@@ -447,9 +447,9 @@ pub fn dispatchReduceToBroadcast(
         @ptrCast(&a_i),
         @ptrCast(&b_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(b_total), 1, 1 },
+        .{ grid_for(b_total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -457,7 +457,7 @@ pub fn dispatchReduceToBroadcast(
 }
 
 /// Div backward: func(ga, gb, go, a, b, n).
-pub fn dispatchDivBackward(
+pub fn dispatch_div_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -476,9 +476,9 @@ pub fn dispatchDivBackward(
         @ptrCast(@constCast(&b_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -486,7 +486,7 @@ pub fn dispatchDivBackward(
 }
 
 /// Softmax backward: func(ga, go, s, rows, cols) with shared memory.
-pub fn dispatchSoftmaxBackward(
+pub fn dispatch_softmax_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -495,7 +495,7 @@ pub fn dispatchSoftmaxBackward(
     rows: usize,
     cols: usize,
 ) void {
-    const block_pow2 = nextPow2(@intCast(@min(cols, 1024)));
+    const block_pow2 = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var params = [_]?*anyopaque{
@@ -505,7 +505,7 @@ pub fn dispatchSoftmaxBackward(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_pow2, 1, 1 },
@@ -515,7 +515,7 @@ pub fn dispatchSoftmaxBackward(
 }
 
 /// Softmax out-of-place forward: func(out, x, rows, cols) with shared memory.
-pub fn dispatchSoftmaxOut(
+pub fn dispatch_softmax_out(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -523,7 +523,7 @@ pub fn dispatchSoftmaxOut(
     rows: usize,
     cols: usize,
 ) void {
-    const block_pow2 = nextPow2(@intCast(@min(cols, 1024)));
+    const block_pow2 = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var params = [_]?*anyopaque{
@@ -532,7 +532,7 @@ pub fn dispatchSoftmaxOut(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_pow2, 1, 1 },
@@ -542,7 +542,7 @@ pub fn dispatchSoftmaxOut(
 }
 
 /// LayerNorm forward with cache: func(out, x_norm, inv_stds, x, gamma, beta, rows, cols, eps).
-pub fn dispatchLayerNormFwd(
+pub fn dispatch_layer_norm_fwd(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -555,7 +555,7 @@ pub fn dispatchLayerNormFwd(
     cols: usize,
     eps: f32,
 ) void {
-    const block_dim = nextPow2(@intCast(@min(cols, 1024)));
+    const block_dim = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var eps_v: f32 = eps;
@@ -570,7 +570,7 @@ pub fn dispatchLayerNormFwd(
         @ptrCast(&cols_i),
         @ptrCast(&eps_v),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_dim, 1, 1 },
@@ -580,7 +580,7 @@ pub fn dispatchLayerNormFwd(
 }
 
 /// LayerNorm backward dx: func(gx, go, gamma, x_norm, inv_stds, rows, cols).
-pub fn dispatchLayerNormBackwardDx(
+pub fn dispatch_layer_norm_backward_dx(
     ctx: *CudaContext,
     func: CUfunction,
     gx_dptr: CUdeviceptr,
@@ -591,7 +591,7 @@ pub fn dispatchLayerNormBackwardDx(
     rows: usize,
     cols: usize,
 ) void {
-    const block_dim = nextPow2(@intCast(@min(cols, 1024)));
+    const block_dim = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var params = [_]?*anyopaque{
@@ -603,7 +603,7 @@ pub fn dispatchLayerNormBackwardDx(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_dim, 1, 1 },
@@ -613,7 +613,7 @@ pub fn dispatchLayerNormBackwardDx(
 }
 
 /// LayerNorm backward dgamma/dbeta: func(ggamma, gbeta, go, x_norm, rows, cols).
-pub fn dispatchLayerNormBackwardDgDb(
+pub fn dispatch_layer_norm_backward_dg_db(
     ctx: *CudaContext,
     func: CUfunction,
     ggamma_dptr: CUdeviceptr,
@@ -633,9 +633,9 @@ pub fn dispatchLayerNormBackwardDgDb(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(cols), 1, 1 },
+        .{ grid_for(cols), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -643,7 +643,7 @@ pub fn dispatchLayerNormBackwardDgDb(
 }
 
 /// Scatter-add (gather backward): func(ga_table, go, indices, num_indices, embed_dim).
-pub fn dispatchScatterAdd(
+pub fn dispatch_scatter_add(
     ctx: *CudaContext,
     func: CUfunction,
     ga_table_dptr: CUdeviceptr,
@@ -662,9 +662,9 @@ pub fn dispatchScatterAdd(
         @ptrCast(&n_i),
         @ptrCast(&ed_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(total), 1, 1 },
+        .{ grid_for(total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -674,7 +674,7 @@ pub fn dispatchScatterAdd(
 // ── Loss function dispatch ──
 
 /// Cross-entropy forward: func(out_loss, softmax_cache, logits, indices, batch, num_classes).
-pub fn dispatchCrossEntropyForward(
+pub fn dispatch_cross_entropy_forward(
     ctx: *CudaContext,
     func: CUfunction,
     out_loss_dptr: CUdeviceptr,
@@ -694,7 +694,7 @@ pub fn dispatchCrossEntropyForward(
         @ptrCast(&b_i),
         @ptrCast(&c_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(batch), 1, 1 },
         .{ 1, 1, 1 },
@@ -704,7 +704,7 @@ pub fn dispatchCrossEntropyForward(
 }
 
 /// Cross-entropy backward: func(ga, go, softmax_cache, indices, batch, num_classes).
-pub fn dispatchCrossEntropyBackward(
+pub fn dispatch_cross_entropy_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -725,9 +725,9 @@ pub fn dispatchCrossEntropyBackward(
         @ptrCast(&b_i),
         @ptrCast(&c_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(total), 1, 1 },
+        .{ grid_for(total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -735,7 +735,7 @@ pub fn dispatchCrossEntropyBackward(
 }
 
 /// MSE/BCE forward: func(out_loss, pred/logits, target, n).
-pub fn dispatchLossForward(
+pub fn dispatch_loss_forward(
     ctx: *CudaContext,
     func: CUfunction,
     out_loss_dptr: CUdeviceptr,
@@ -750,8 +750,8 @@ pub fn dispatchLossForward(
         @ptrCast(@constCast(&target_dptr)),
         @ptrCast(&n_i),
     };
-    const block_size: c_uint = nextPow2(@intCast(@min(n, 1024)));
-    ctx.launchKernel(
+    const block_size: c_uint = next_pow2(@intCast(@min(n, 1024)));
+    ctx.launch_kernel(
         func,
         .{ 1, 1, 1 },
         .{ block_size, 1, 1 },
@@ -761,7 +761,7 @@ pub fn dispatchLossForward(
 }
 
 /// MSE/BCE backward: func(ga, go, pred/logits, target, n).
-pub fn dispatchLossBackward(
+pub fn dispatch_loss_backward(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -778,9 +778,9 @@ pub fn dispatchLossBackward(
         @ptrCast(@constCast(&target_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -790,7 +790,7 @@ pub fn dispatchLossBackward(
 // ── Utility dispatch ──
 
 /// Fill: func(dst, val, n).
-pub fn dispatchFill(
+pub fn dispatch_fill(
     ctx: *CudaContext,
     func: CUfunction,
     dst_dptr: CUdeviceptr,
@@ -804,9 +804,9 @@ pub fn dispatchFill(
         @ptrCast(&v),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -814,7 +814,7 @@ pub fn dispatchFill(
 }
 
 /// Accumulate gradients: func(dst, src, n).
-pub fn dispatchAccumGrad(
+pub fn dispatch_accum_grad(
     ctx: *CudaContext,
     func: CUfunction,
     dst_dptr: CUdeviceptr,
@@ -827,9 +827,9 @@ pub fn dispatchAccumGrad(
         @ptrCast(@constCast(&src_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -837,7 +837,7 @@ pub fn dispatchAccumGrad(
 }
 
 /// SiLU forward with sigmoid cache: func(out, sig_cache, x, n).
-pub fn dispatchSiluFwdCache(
+pub fn dispatch_silu_fwd_cache(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -852,9 +852,9 @@ pub fn dispatchSiluFwdCache(
         @ptrCast(@constCast(&x_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -862,7 +862,7 @@ pub fn dispatchSiluFwdCache(
 }
 
 /// Fused Add+SiLU forward with cache: func(out, sig_cache, a, b, a_total, b_total).
-pub fn dispatchAddSiluFwdCache(
+pub fn dispatch_add_silu_fwd_cache(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -882,9 +882,9 @@ pub fn dispatchAddSiluFwdCache(
         @ptrCast(&a_i),
         @ptrCast(&b_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(a_total), 1, 1 },
+        .{ grid_for(a_total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -892,7 +892,7 @@ pub fn dispatchAddSiluFwdCache(
 }
 
 /// Fused Add+SiLU backward (same-size): func(ga, gb, go, sig_cache, a, b, n).
-pub fn dispatchAddSiluBackwardSame(
+pub fn dispatch_add_silu_backward_same(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -913,9 +913,9 @@ pub fn dispatchAddSiluBackwardSame(
         @ptrCast(@constCast(&b_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -923,7 +923,7 @@ pub fn dispatchAddSiluBackwardSame(
 }
 
 /// Fused Add+SiLU backward (broadcast b): func(ga, gb, go, sig_cache, a, b, a_total, b_total).
-pub fn dispatchAddSiluBackwardBcast(
+pub fn dispatch_add_silu_backward_bcast(
     ctx: *CudaContext,
     func: CUfunction,
     ga_dptr: CUdeviceptr,
@@ -947,9 +947,9 @@ pub fn dispatchAddSiluBackwardBcast(
         @ptrCast(&a_i),
         @ptrCast(&b_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(a_total), 1, 1 },
+        .{ grid_for(a_total), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -957,7 +957,7 @@ pub fn dispatchAddSiluBackwardBcast(
 }
 
 /// Dropout forward: func(out, mask, x, seed, rate, inv_keep, n).
-pub fn dispatchDropout(
+pub fn dispatch_dropout(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -981,9 +981,9 @@ pub fn dispatchDropout(
         @ptrCast(&inv_v),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -993,7 +993,7 @@ pub fn dispatchDropout(
 // ── Reduction dispatch ──
 
 /// Reduction sum rows: func(out, x, rows, cols).
-pub fn dispatchReductionSumRows(
+pub fn dispatch_reduction_sum_rows(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -1001,7 +1001,7 @@ pub fn dispatchReductionSumRows(
     rows: usize,
     cols: usize,
 ) void {
-    const block_pow2 = nextPow2(@intCast(@min(cols, 1024)));
+    const block_pow2 = next_pow2(@intCast(@min(cols, 1024)));
     var rows_i: c_int = @intCast(rows);
     var cols_i: c_int = @intCast(cols);
     var params = [_]?*anyopaque{
@@ -1010,7 +1010,7 @@ pub fn dispatchReductionSumRows(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ @intCast(rows), 1, 1 },
         .{ block_pow2, 1, 1 },
@@ -1020,7 +1020,7 @@ pub fn dispatchReductionSumRows(
 }
 
 /// Reduction sum cols: func(out, x, rows, cols).
-pub fn dispatchReductionSumCols(
+pub fn dispatch_reduction_sum_cols(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -1036,9 +1036,9 @@ pub fn dispatchReductionSumCols(
         @ptrCast(&rows_i),
         @ptrCast(&cols_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(cols), 1, 1 },
+        .{ grid_for(cols), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -1046,7 +1046,7 @@ pub fn dispatchReductionSumCols(
 }
 
 /// Reduction sum 1D: func(out, x, n).
-pub fn dispatchReductionSum1d(
+pub fn dispatch_reduction_sum1d(
     ctx: *CudaContext,
     func: CUfunction,
     out_dptr: CUdeviceptr,
@@ -1059,11 +1059,11 @@ pub fn dispatchReductionSum1d(
         @ptrCast(@constCast(&x_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ 1, 1, 1 },
-        .{ nextPow2(@intCast(@min(n, 1024))), 1, 1 },
-        nextPow2(@intCast(@min(n, 1024))) * @sizeOf(f32),
+        .{ next_pow2(@intCast(@min(n, 1024))), 1, 1 },
+        next_pow2(@intCast(@min(n, 1024))) * @sizeOf(f32),
         &params,
     ) catch unreachable;
 }
@@ -1071,7 +1071,7 @@ pub fn dispatchReductionSum1d(
 // ── Optimizer dispatch ──
 
 /// Adam step: func(param, grad, m, v, lr, beta1, beta2, eps, wd, bc1, bc2, n).
-pub fn dispatchAdamStep(
+pub fn dispatch_adam_step(
     ctx: *CudaContext,
     func: CUfunction,
     param_dptr: CUdeviceptr,
@@ -1109,9 +1109,9 @@ pub fn dispatchAdamStep(
         @ptrCast(&bc2_v),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,
@@ -1119,7 +1119,7 @@ pub fn dispatchAdamStep(
 }
 
 /// Norm squared partial sums: func(partial_sums, data, n).
-pub fn dispatchNormSq(
+pub fn dispatch_norm_sq(
     ctx: *CudaContext,
     func: CUfunction,
     partial_sums_dptr: CUdeviceptr,
@@ -1127,13 +1127,13 @@ pub fn dispatchNormSq(
     n: usize,
 ) void {
     var n_i: c_int = @intCast(n);
-    const grid = gridFor(n);
+    const grid = grid_for(n);
     var params = [_]?*anyopaque{
         @ptrCast(@constCast(&partial_sums_dptr)),
         @ptrCast(@constCast(&data_dptr)),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
         .{ grid, 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
@@ -1143,7 +1143,7 @@ pub fn dispatchNormSq(
 }
 
 /// Scale gradients: func(grad, scale, n).
-pub fn dispatchScaleGrad(
+pub fn dispatch_scale_grad(
     ctx: *CudaContext,
     func: CUfunction,
     grad_dptr: CUdeviceptr,
@@ -1157,9 +1157,9 @@ pub fn dispatchScaleGrad(
         @ptrCast(&s),
         @ptrCast(&n_i),
     };
-    ctx.launchKernel(
+    ctx.launch_kernel(
         func,
-        .{ gridFor(n), 1, 1 },
+        .{ grid_for(n), 1, 1 },
         .{ BLOCK_SIZE, 1, 1 },
         0,
         &params,

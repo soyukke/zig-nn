@@ -4,31 +4,37 @@
 /// anytype ctx で LayerNorm + Attention + FF (GELU) を実行。
 const compute = @import("../compute.zig");
 const Module = compute.Module;
-const Linear = @import("graph_linear.zig").Linear;
-const LayerNorm = @import("graph_norm.zig").LayerNorm;
+const linear = @import("graph_linear.zig").linear;
+const layer_norm = @import("graph_norm.zig").layer_norm;
 const graph_attention = @import("graph_attention.zig");
 
 /// Pre-norm Transformer Encoder Layer
 /// LayerNorm → SelfAttention → Residual → LayerNorm → FF (GELU) → Residual
-pub fn TransformerEncoderLayer(comptime d_model: usize, comptime ff_dim: usize) type {
+pub fn transformer_encoder_layer(comptime d_model: usize, comptime ff_dim: usize) type {
     return struct {
-        ln1: LayerNorm(d_model),
-        self_attn: graph_attention.SelfAttention(d_model),
-        ln2: LayerNorm(d_model),
-        ff1: Linear(d_model, ff_dim),
-        ff2: Linear(ff_dim, d_model),
+        ln1: layer_norm(d_model),
+        self_attn: graph_attention.self_attention(d_model),
+        ln2: layer_norm(d_model),
+        ff1: linear(d_model, ff_dim),
+        ff2: linear(ff_dim, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .ln1 = LayerNorm(d_model).init(module),
-                .self_attn = graph_attention.SelfAttention(d_model).init(module),
-                .ln2 = LayerNorm(d_model).init(module),
-                .ff1 = Linear(d_model, ff_dim).init(module),
-                .ff2 = Linear(ff_dim, d_model).init(module),
+                .ln1 = layer_norm(d_model).init(module),
+                .self_attn = graph_attention.self_attention(d_model).init(module),
+                .ln2 = layer_norm(d_model).init(module),
+                .ff1 = linear(d_model, ff_dim).init(module),
+                .ff2 = linear(ff_dim, d_model).init(module),
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, input: anytype, batch_size: usize, seq_len: usize) @TypeOf(input) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            batch_size: usize,
+            seq_len: usize,
+        ) @TypeOf(input) {
             // Pre-norm self-attention + residual
             const ln1 = self.ln1.forward(ctx, input);
             const attn = self.self_attn.forward(ctx, ln1, batch_size, seq_len);
@@ -43,26 +49,31 @@ pub fn TransformerEncoderLayer(comptime d_model: usize, comptime ff_dim: usize) 
 }
 
 /// Pre-norm Transformer Decoder Layer
-/// LayerNorm → CausalSelfAttention → Residual → LayerNorm → CrossAttention → Residual → LayerNorm → FF (GELU) → Residual
-pub fn TransformerDecoderLayer(comptime d_model: usize, comptime ff_dim: usize, comptime tgt_len: usize) type {
+/// LayerNorm → CausalSelfAttention → Residual → LayerNorm → CrossAttention → Residual
+///   → LayerNorm → FF (GELU) → Residual
+pub fn transformer_decoder_layer(
+    comptime d_model: usize,
+    comptime ff_dim: usize,
+    comptime tgt_len: usize,
+) type {
     return struct {
-        ln1: LayerNorm(d_model),
-        self_attn: graph_attention.CausalSelfAttention(d_model, tgt_len),
-        ln2: LayerNorm(d_model),
-        cross_attn: graph_attention.CrossAttention(d_model),
-        ln3: LayerNorm(d_model),
-        ff1: Linear(d_model, ff_dim),
-        ff2: Linear(ff_dim, d_model),
+        ln1: layer_norm(d_model),
+        self_attn: graph_attention.causal_self_attention(d_model, tgt_len),
+        ln2: layer_norm(d_model),
+        cross_attn: graph_attention.cross_attention(d_model),
+        ln3: layer_norm(d_model),
+        ff1: linear(d_model, ff_dim),
+        ff2: linear(ff_dim, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .ln1 = LayerNorm(d_model).init(module),
-                .self_attn = graph_attention.CausalSelfAttention(d_model, tgt_len).init(module),
-                .ln2 = LayerNorm(d_model).init(module),
-                .cross_attn = graph_attention.CrossAttention(d_model).init(module),
-                .ln3 = LayerNorm(d_model).init(module),
-                .ff1 = Linear(d_model, ff_dim).init(module),
-                .ff2 = Linear(ff_dim, d_model).init(module),
+                .ln1 = layer_norm(d_model).init(module),
+                .self_attn = graph_attention.causal_self_attention(d_model, tgt_len).init(module),
+                .ln2 = layer_norm(d_model).init(module),
+                .cross_attn = graph_attention.cross_attention(d_model).init(module),
+                .ln3 = layer_norm(d_model).init(module),
+                .ff1 = linear(d_model, ff_dim).init(module),
+                .ff2 = linear(ff_dim, d_model).init(module),
             };
         }
 
@@ -93,5 +104,5 @@ pub fn TransformerDecoderLayer(comptime d_model: usize, comptime ff_dim: usize, 
 }
 
 /// Backward-compatible aliases
-pub const GraphTransformerEncoderLayer = TransformerEncoderLayer;
-pub const GraphTransformerDecoderLayer = TransformerDecoderLayer;
+pub const GraphTransformerEncoderLayer = transformer_encoder_layer;
+pub const GraphTransformerDecoderLayer = transformer_decoder_layer;

@@ -33,7 +33,11 @@ pub extern "c" fn cuMemcpyDtoH_v2(dst: *anyopaque, src: CUdeviceptr, size: usize
 pub extern "c" fn cuMemcpyDtoD_v2(dst: CUdeviceptr, src: CUdeviceptr, size: usize) CUresult;
 pub extern "c" fn cuModuleLoadData(module: *CUmodule, image: *const anyopaque) CUresult;
 pub extern "c" fn cuModuleUnload(module: CUmodule) CUresult;
-pub extern "c" fn cuModuleGetFunction(func: *CUfunction, module: CUmodule, name: [*:0]const u8) CUresult;
+pub extern "c" fn cuModuleGetFunction(
+    func: *CUfunction,
+    module: CUmodule,
+    name: [*:0]const u8,
+) CUresult;
 pub extern "c" fn cuLaunchKernel(
     f: CUfunction,
     gridDimX: c_uint,
@@ -48,4 +52,9 @@ pub extern "c" fn cuLaunchKernel(
     extra: ?[*]?*anyopaque,
 ) CUresult;
 pub extern "c" fn cuMemsetD32_v2(dstDevice: CUdeviceptr, ui: c_uint, N: usize) CUresult;
-pub extern "c" fn cuMemsetD32Async(dstDevice: CUdeviceptr, ui: c_uint, N: usize, stream: ?CUstream) CUresult;
+pub extern "c" fn cuMemsetD32Async(
+    dstDevice: CUdeviceptr,
+    ui: c_uint,
+    N: usize,
+    stream: ?CUstream,
+) CUresult;

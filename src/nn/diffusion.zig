@@ -4,7 +4,7 @@ const math = std.math;
 /// DDPM Noise Schedule (linear beta schedule)
 ///
 /// Precomputes: betas, alphas, alpha_bars, sqrt_alpha_bars, sqrt_one_minus_alpha_bars
-pub fn NoiseSchedule(comptime T: usize) type {
+pub fn noise_schedule(comptime T: usize) type {
     return struct {
         const Self = @This();
 
@@ -14,7 +14,7 @@ pub fn NoiseSchedule(comptime T: usize) type {
         sqrt_alpha_bars: [T]f32,
         sqrt_one_minus_alpha_bars: [T]f32,
 
-        pub fn initLinear(beta_start: f32, beta_end: f32) Self {
+        pub fn init_linear(beta_start: f32, beta_end: f32) Self {
             var self: Self = undefined;
             var alpha_bar: f32 = 1.0;
             for (0..T) |t| {
@@ -31,7 +31,7 @@ pub fn NoiseSchedule(comptime T: usize) type {
 
         /// Sqrt schedule: ᾱ_t = 1 - √((t+1)/T + s) where s is a small offset
         /// Seq-to-seq diffusion で使用されるスケジュール
-        pub fn initSqrt(s: f32) Self {
+        pub fn init_sqrt(s: f32) Self {
             var self: Self = undefined;
             const ft: f32 = @floatFromInt(T);
 
@@ -57,7 +57,7 @@ pub fn NoiseSchedule(comptime T: usize) type {
 
         /// Cosine schedule: ᾱ_t = cos²(((t/T + s) / (1+s)) * π/2)
         /// "Improved Denoising Diffusion Probabilistic Models" (Nichol & Dhariwal)
-        pub fn initCosine(s: f32) Self {
+        pub fn init_cosine(s: f32) Self {
             var self: Self = undefined;
             const ft: f32 = @floatFromInt(T);
 
@@ -85,7 +85,7 @@ pub fn NoiseSchedule(comptime T: usize) type {
         /// μ(x_t, x_0_pred, t) = (√ᾱ_{t-1} * β_t / (1-ᾱ_t)) * x_0_pred
         ///                      + (√α_t * (1-ᾱ_{t-1}) / (1-ᾱ_t)) * x_t
         /// Posterior variance: β̃_t = β_t * (1-ᾱ_{t-1}) / (1-ᾱ_t)
-        pub fn posteriorSample(
+        pub fn posterior_sample(
             self: *const Self,
             x_t: []const f32,
             x_0_pred: []const f32,
@@ -122,7 +122,7 @@ pub fn NoiseSchedule(comptime T: usize) type {
 /// Sinusoidal positional embedding for timestep
 /// out[0..dim/2] = sin(t / 10000^(2i/dim))
 /// out[dim/2..dim] = cos(t / 10000^(2i/dim))
-pub fn sinusoidalEmbedding(comptime dim: usize, timestep: usize, out: []f32) void {
+pub fn sinusoidal_embedding(comptime dim: usize, timestep: usize, out: []f32) void {
     const half = dim / 2;
     const t: f32 = @floatFromInt(timestep);
     for (0..half) |i| {
@@ -135,7 +135,7 @@ pub fn sinusoidalEmbedding(comptime dim: usize, timestep: usize, out: []f32) voi
 }
 
 /// Forward diffusion: x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon
-pub fn forwardDiffusion(
+pub fn forward_diffusion(
     x0: []const f32,
     epsilon: []const f32,
     x_t: []f32,
@@ -149,7 +149,7 @@ pub fn forwardDiffusion(
 
 /// DDPM reverse sampling step:
 /// x_{t-1} = (1/sqrt(alpha_t)) * (x_t - beta_t/sqrt(1-alpha_bar_t) * eps_pred) + sqrt(beta_t) * z
-pub fn ddpmSampleStep(
+pub fn ddpm_sample_step(
     x_t: []const f32,
     eps_pred: []const f32,
     x_out: []f32,
@@ -172,7 +172,7 @@ pub fn ddpmSampleStep(
 }
 
 /// Box-Muller transform: generate standard normal samples from uniform random
-pub fn boxMullerGaussian(rng: std.Random, out: []f32) void {
+pub fn box_muller_gaussian(rng: std.Random, out: []f32) void {
     var i: usize = 0;
     while (i + 1 < out.len) : (i += 2) {
         const uniform1 = rng.float(f32) * 0.99998 + 0.00001; // avoid log(0)
@@ -192,7 +192,7 @@ pub fn boxMullerGaussian(rng: std.Random, out: []f32) void {
 }
 
 test "noise schedule linear" {
-    const schedule = NoiseSchedule(10).initLinear(1e-4, 0.02);
+    const schedule = noise_schedule(10).init_linear(1e-4, 0.02);
     // beta_0 = 1e-4, beta_9 = 0.02
     try std.testing.expectApproxEqAbs(@as(f32, 1e-4), schedule.betas[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.02), schedule.betas[9], 1e-6);
@@ -210,7 +210,7 @@ test "noise schedule linear" {
 
 test "sinusoidal embedding" {
     var emb: [8]f32 = undefined;
-    sinusoidalEmbedding(8, 0, &emb);
+    sinusoidal_embedding(8, 0, &emb);
     // sin(0) = 0 for all frequencies
     for (0..4) |i| {
         try std.testing.expectApproxEqAbs(@as(f32, 0.0), emb[i], 1e-6);
@@ -225,14 +225,14 @@ test "forward diffusion" {
     const x0 = [_]f32{ 1.0, 2.0 };
     const eps = [_]f32{ 0.5, -0.5 };
     var x_t: [2]f32 = undefined;
-    forwardDiffusion(&x0, &eps, &x_t, 0.9, 0.4359); // approximate values
+    forward_diffusion(&x0, &eps, &x_t, 0.9, 0.4359); // approximate values
     // x_t = 0.9 * x0 + 0.4359 * eps
     try std.testing.expectApproxEqAbs(@as(f32, 0.9 * 1.0 + 0.4359 * 0.5), x_t[0], 1e-3);
     try std.testing.expectApproxEqAbs(@as(f32, 0.9 * 2.0 + 0.4359 * (-0.5)), x_t[1], 1e-3);
 }
 
 test "noise schedule sqrt" {
-    const schedule = NoiseSchedule(100).initSqrt(0.0001);
+    const schedule = noise_schedule(100).init_sqrt(0.0001);
     // alpha_bar should be decreasing
     for (1..100) |t| {
         try std.testing.expect(schedule.alpha_bars[t] <= schedule.alpha_bars[t - 1]);
@@ -245,7 +245,7 @@ test "noise schedule sqrt" {
 }
 
 test "noise schedule cosine" {
-    const schedule = NoiseSchedule(100).initCosine(0.008);
+    const schedule = noise_schedule(100).init_cosine(0.008);
     // alpha_bar should be decreasing
     for (1..100) |t| {
         try std.testing.expect(schedule.alpha_bars[t] <= schedule.alpha_bars[t - 1]);
@@ -256,21 +256,21 @@ test "noise schedule cosine" {
 }
 
 test "posterior sample" {
-    const schedule = NoiseSchedule(100).initCosine(0.008);
+    const schedule = noise_schedule(100).init_cosine(0.008);
     const x_t = [_]f32{ 1.0, 0.5 };
     const x_0_pred = [_]f32{ 0.8, 0.3 };
     const noise = [_]f32{ 0.0, 0.0 }; // zero noise for deterministic test
     var x_out: [2]f32 = undefined;
 
     // t=50: should produce values between x_t and x_0_pred
-    schedule.posteriorSample(&x_t, &x_0_pred, &x_out, &noise, 50);
+    schedule.posterior_sample(&x_t, &x_0_pred, &x_out, &noise, 50);
     for (0..2) |i| {
         try std.testing.expect(!std.math.isNan(x_out[i]));
         try std.testing.expect(!std.math.isInf(x_out[i]));
     }
 
     // t=0: should return x_0_pred
-    schedule.posteriorSample(&x_t, &x_0_pred, &x_out, &noise, 0);
+    schedule.posterior_sample(&x_t, &x_0_pred, &x_out, &noise, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 0.8), x_out[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.3), x_out[1], 1e-6);
 }
@@ -279,7 +279,7 @@ test "box muller gaussian" {
     var prng = std.Random.DefaultPrng.init(42);
     const rng = prng.random();
     var samples: [1000]f32 = undefined;
-    boxMullerGaussian(rng, &samples);
+    box_muller_gaussian(rng, &samples);
 
     // Check mean ≈ 0 and std ≈ 1
     var sum: f32 = 0;

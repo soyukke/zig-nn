@@ -6,7 +6,7 @@ const runtime_kernels = @import("../runtime_kernels.zig");
 
 pub const CPU_MAX_NDIM = runtime_kernels.MAX_NDIM;
 
-pub fn DiffNodeGeneric(comptime DataPtr: type, comptime max_ndim: usize) type {
+pub fn diff_node_generic(comptime DataPtr: type, comptime max_ndim: usize) type {
     return struct {
         const Self = @This();
 
@@ -22,18 +22,18 @@ pub fn DiffNodeGeneric(comptime DataPtr: type, comptime max_ndim: usize) type {
         is_param: bool,
         param_index: ?usize,
 
-        pub fn totalElements(self: *const Self) usize {
+        pub fn total_elements(self: *const Self) usize {
             var size: usize = 1;
             for (0..self.ndim) |i| size *= self.shape[i];
             return size;
         }
 
-        pub fn lastDim(self: *const Self) usize {
+        pub fn last_dim(self: *const Self) usize {
             return self.shape[self.ndim - 1];
         }
 
-        pub fn numRows(self: *const Self) usize {
-            return self.totalElements() / self.lastDim();
+        pub fn num_rows(self: *const Self) usize {
+            return self.total_elements() / self.last_dim();
         }
     };
 }
@@ -44,13 +44,18 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 /// トポロジカルソート (DFS) — バックエンド非依存
-pub fn topoSort(comptime Node: type, node: *Node, buf: *std.ArrayListUnmanaged(*Node), allocator: Allocator) void {
+pub fn topo_sort(
+    comptime Node: type,
+    node: *Node,
+    buf: *std.ArrayListUnmanaged(*Node),
+    allocator: Allocator,
+) void {
     if (node.visited) return;
     node.visited = true;
 
     for (&node.parents) |maybe_parent| {
         if (maybe_parent) |parent| {
-            topoSort(Node, parent, buf, allocator);
+            topo_sort(Node, parent, buf, allocator);
         }
     }
 
@@ -60,7 +65,11 @@ pub fn topoSort(comptime Node: type, node: *Node, buf: *std.ArrayListUnmanaged(*
 /// 逆伝播のステップ 2,4,5 を共通化。
 /// ステップ 1 (loss 勾配初期化) と 3 (中間ノードの勾配確保) はバックエンド依存のため
 /// 呼び出し側で行う。
-pub fn backwardPass(comptime Node: type, topo_buf: *std.ArrayListUnmanaged(*Node), param_nodes: []Node) void {
+pub fn backward_pass(
+    comptime Node: type,
+    topo_buf: *std.ArrayListUnmanaged(*Node),
+    param_nodes: []Node,
+) void {
     // 4. Reverse traversal: call backward_fn
     var idx = topo_buf.items.len;
     while (idx > 0) {
@@ -85,7 +94,7 @@ pub fn backwardPass(comptime Node: type, topo_buf: *std.ArrayListUnmanaged(*Node
 const testing = std.testing;
 
 test "DiffNodeGeneric: CPU型 ([]f32) のインスタンス化と基本メソッド" {
-    const CpuNode = DiffNodeGeneric([]f32, 4);
+    const CpuNode = diff_node_generic([]f32, 4);
     var node: CpuNode = .{
         .data = &.{},
         .shape = .{ 2, 3, 4, 1 },
@@ -99,14 +108,14 @@ test "DiffNodeGeneric: CPU型 ([]f32) のインスタンス化と基本メソッ
         .is_param = false,
         .param_index = null,
     };
-    try testing.expectEqual(@as(usize, 24), node.totalElements());
-    try testing.expectEqual(@as(usize, 4), node.lastDim());
-    try testing.expectEqual(@as(usize, 6), node.numRows());
+    try testing.expectEqual(@as(usize, 24), node.total_elements());
+    try testing.expectEqual(@as(usize, 4), node.last_dim());
+    try testing.expectEqual(@as(usize, 6), node.num_rows());
 }
 
 test "DiffNodeGeneric: CUDA型 (u64) のインスタンス化と基本メソッド" {
     // CUdeviceptr は実質 u64
-    const GpuNode = DiffNodeGeneric(u64, 4);
+    const GpuNode = diff_node_generic(u64, 4);
     var node: GpuNode = .{
         .data = 0,
         .shape = .{ 5, 10, 1, 1 },
@@ -120,13 +129,13 @@ test "DiffNodeGeneric: CUDA型 (u64) のインスタンス化と基本メソッ�
         .is_param = true,
         .param_index = 42,
     };
-    try testing.expectEqual(@as(usize, 50), node.totalElements());
-    try testing.expectEqual(@as(usize, 10), node.lastDim());
-    try testing.expectEqual(@as(usize, 5), node.numRows());
+    try testing.expectEqual(@as(usize, 50), node.total_elements());
+    try testing.expectEqual(@as(usize, 10), node.last_dim());
+    try testing.expectEqual(@as(usize, 5), node.num_rows());
 }
 
 test "DiffNodeGeneric: backward_fn と parents の接続" {
-    const CpuNode = DiffNodeGeneric([]f32, 4);
+    const CpuNode = diff_node_generic([]f32, 4);
 
     var parent_node: CpuNode = .{
         .data = &.{},
@@ -170,7 +179,7 @@ test "DiffNodeGeneric: backward_fn と parents の接続" {
 }
 
 test "DiffNodeGeneric: 1次元 shape" {
-    const Node = DiffNodeGeneric([]f32, 4);
+    const Node = diff_node_generic([]f32, 4);
     var node: Node = .{
         .data = &.{},
         .shape = .{ 7, 1, 1, 1 },
@@ -184,13 +193,13 @@ test "DiffNodeGeneric: 1次元 shape" {
         .is_param = false,
         .param_index = null,
     };
-    try testing.expectEqual(@as(usize, 7), node.totalElements());
-    try testing.expectEqual(@as(usize, 7), node.lastDim());
-    try testing.expectEqual(@as(usize, 1), node.numRows());
+    try testing.expectEqual(@as(usize, 7), node.total_elements());
+    try testing.expectEqual(@as(usize, 7), node.last_dim());
+    try testing.expectEqual(@as(usize, 1), node.num_rows());
 }
 
 test "DiffNodeGeneric: 4次元 shape" {
-    const Node = DiffNodeGeneric(u64, 4);
+    const Node = diff_node_generic(u64, 4);
     var node: Node = .{
         .data = 0,
         .shape = .{ 2, 3, 4, 5 },
@@ -204,14 +213,14 @@ test "DiffNodeGeneric: 4次元 shape" {
         .is_param = false,
         .param_index = null,
     };
-    try testing.expectEqual(@as(usize, 120), node.totalElements());
-    try testing.expectEqual(@as(usize, 5), node.lastDim());
-    try testing.expectEqual(@as(usize, 24), node.numRows());
+    try testing.expectEqual(@as(usize, 120), node.total_elements());
+    try testing.expectEqual(@as(usize, 5), node.last_dim());
+    try testing.expectEqual(@as(usize, 24), node.num_rows());
 }
 
 // ── topoSort / backwardPass tests ──
 
-fn makeTestNode(comptime Node: type, rg: bool) Node {
+fn make_test_node(comptime Node: type, rg: bool) Node {
     return .{
         .data = &.{},
         .shape = .{ 1, 1, 1, 1 },
@@ -228,17 +237,17 @@ fn makeTestNode(comptime Node: type, rg: bool) Node {
 }
 
 test "topoSort: 線形グラフ (A → B → C) の順序" {
-    const Node = DiffNodeGeneric([]f32, 4);
-    var a = makeTestNode(Node, true);
-    var b = makeTestNode(Node, true);
+    const Node = diff_node_generic([]f32, 4);
+    var a = make_test_node(Node, true);
+    var b = make_test_node(Node, true);
     b.parents[0] = &a;
-    var c = makeTestNode(Node, true);
+    var c = make_test_node(Node, true);
     c.parents[0] = &b;
 
     var buf: std.ArrayListUnmanaged(*Node) = .empty;
     defer buf.deinit(testing.allocator);
 
-    topoSort(Node, &c, &buf, testing.allocator);
+    topo_sort(Node, &c, &buf, testing.allocator);
 
     // トポロジカル順: a, b, c
     try testing.expectEqual(@as(usize, 3), buf.items.len);
@@ -248,20 +257,20 @@ test "topoSort: 線形グラフ (A → B → C) の順序" {
 }
 
 test "topoSort: ダイヤモンドグラフ (A → B, A → C, B+C → D)" {
-    const Node = DiffNodeGeneric([]f32, 4);
-    var a = makeTestNode(Node, true);
-    var b = makeTestNode(Node, true);
+    const Node = diff_node_generic([]f32, 4);
+    var a = make_test_node(Node, true);
+    var b = make_test_node(Node, true);
     b.parents[0] = &a;
-    var c = makeTestNode(Node, true);
+    var c = make_test_node(Node, true);
     c.parents[0] = &a;
-    var d = makeTestNode(Node, true);
+    var d = make_test_node(Node, true);
     d.parents[0] = &b;
     d.parents[1] = &c;
 
     var buf: std.ArrayListUnmanaged(*Node) = .empty;
     defer buf.deinit(testing.allocator);
 
-    topoSort(Node, &d, &buf, testing.allocator);
+    topo_sort(Node, &d, &buf, testing.allocator);
 
     // A は 1回だけ出現する
     try testing.expectEqual(@as(usize, 4), buf.items.len);
@@ -271,22 +280,22 @@ test "topoSort: ダイヤモンドグラフ (A → B, A → C, B+C → D)" {
 }
 
 test "topoSort: visited フラグが設定される" {
-    const Node = DiffNodeGeneric([]f32, 4);
-    var a = makeTestNode(Node, true);
-    var b = makeTestNode(Node, true);
+    const Node = diff_node_generic([]f32, 4);
+    var a = make_test_node(Node, true);
+    var b = make_test_node(Node, true);
     b.parents[0] = &a;
 
     var buf: std.ArrayListUnmanaged(*Node) = .empty;
     defer buf.deinit(testing.allocator);
 
-    topoSort(Node, &b, &buf, testing.allocator);
+    topo_sort(Node, &b, &buf, testing.allocator);
 
     try testing.expect(a.visited);
     try testing.expect(b.visited);
 }
 
 test "backwardPass: backward_fn の逆順呼び出しと visited リセット" {
-    const Node = DiffNodeGeneric([]f32, 4);
+    const Node = diff_node_generic([]f32, 4);
 
     // 呼び出し順を記録するためのカウンター
     var call_order: [3]usize = .{ 0, 0, 0 };
@@ -312,9 +321,9 @@ test "backwardPass: backward_fn の逆順呼び出しと visited リセット" {
     var ctx2 = Ctx{ .order = &call_order, .count = &call_count, .index = 2 };
 
     var nodes: [3]Node = .{
-        makeTestNode(Node, true),
-        makeTestNode(Node, true),
-        makeTestNode(Node, true),
+        make_test_node(Node, true),
+        make_test_node(Node, true),
+        make_test_node(Node, true),
     };
     nodes[0].backward_fn = bwd;
     nodes[0].context = @ptrCast(&ctx0);
@@ -329,12 +338,13 @@ test "backwardPass: backward_fn の逆順呼び出しと visited リセット" {
     // topo_buf = [0, 1, 2] — backwardPass は逆順 (2, 1, 0) で呼ぶ
     var buf: std.ArrayListUnmanaged(*Node) = .empty;
     defer buf.deinit(testing.allocator);
+
     buf.append(testing.allocator, &nodes[0]) catch unreachable;
     buf.append(testing.allocator, &nodes[1]) catch unreachable;
     buf.append(testing.allocator, &nodes[2]) catch unreachable;
 
     var param_nodes: [0]Node = .{};
-    backwardPass(Node, &buf, &param_nodes);
+    backward_pass(Node, &buf, &param_nodes);
 
     // 逆順: 2, 1, 0
     try testing.expectEqual(@as(usize, 2), call_order[0]);
@@ -348,8 +358,8 @@ test "backwardPass: backward_fn の逆順呼び出しと visited リセット" {
 }
 
 test "backwardPass: param_nodes の visited もリセットされる" {
-    const Node = DiffNodeGeneric([]f32, 4);
-    var param = makeTestNode(Node, true);
+    const Node = diff_node_generic([]f32, 4);
+    var param = make_test_node(Node, true);
     param.is_param = true;
     param.visited = true;
 
@@ -357,7 +367,7 @@ test "backwardPass: param_nodes の visited もリセットされる" {
     defer buf.deinit(testing.allocator);
 
     var param_nodes = [_]Node{param};
-    backwardPass(Node, &buf, &param_nodes);
+    backward_pass(Node, &buf, &param_nodes);
 
     try testing.expect(!param_nodes[0].visited);
 }

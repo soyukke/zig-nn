@@ -29,8 +29,8 @@ pub const SentencePieceTokenizer = struct {
     allocator: Allocator,
 
     /// GGUF メタデータから SentencePiece トークナイザーを構築
-    pub fn initFromGGUF(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
-        const vocab_strings = try gguf_file.getArrayStrings("tokenizer.ggml.tokens", allocator);
+    pub fn init_from_gguf(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
+        const vocab_strings = try gguf_file.get_array_strings("tokenizer.ggml.tokens", allocator);
         defer allocator.free(vocab_strings);
 
         const vocab_count = vocab_strings.len;
@@ -48,13 +48,22 @@ pub const SentencePieceTokenizer = struct {
         }
 
         // Special token IDs
-        const bos_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.bos_token_id")) |v| v else 2;
-        const eos_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.eos_token_id")) |v| v else 1;
-        const unk_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.unknown_token_id")) |v| v else 3;
+        const bos_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.bos_token_id")) |v|
+            v
+        else
+            2;
+        const eos_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.eos_token_id")) |v|
+            v
+        else
+            1;
+        const unk_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.unknown_token_id")) |v|
+            v
+        else
+            3;
 
         // Check add_bos metadata
         var add_bos = true;
-        if (gguf_file.getMetadata("tokenizer.ggml.add_bos_token")) |val| {
+        if (gguf_file.get_metadata("tokenizer.ggml.add_bos_token")) |val| {
             switch (val) {
                 .bool_ => |b| add_bos = b,
                 else => {},
@@ -73,6 +82,64 @@ pub const SentencePieceTokenizer = struct {
         };
     }
 
+    // SentencePiece: 先頭にスペースを追加
+    // "▁" (U+2581) = 0xE2 0x96 0x81 in UTF-8
+    const SP_PREFIX = "\xe2\x96\x81";
+
+    const Match = struct { len: usize, id: u32 };
+
+    /// 先頭に "▁" を付与した最長一致を試みる
+    fn match_with_sp_prefix(self: *const Self, text: []const u8, pos: usize) Match {
+        var best: Match = .{ .len = 0, .id = self.unk_id };
+        var try_len: usize = @min(text.len - pos, 64);
+        while (try_len > 0) : (try_len -= 1) {
+            const candidate_len = SP_PREFIX.len + try_len;
+            if (candidate_len > 128) continue;
+            var buf: [128]u8 = undefined;
+            @memcpy(buf[0..SP_PREFIX.len], SP_PREFIX);
+            @memcpy(buf[SP_PREFIX.len..][0..try_len], text[pos..][0..try_len]);
+
+            if (self.token_map.get(buf[0..candidate_len])) |id| {
+                if (try_len > best.len) best = .{ .len = try_len, .id = id };
+                break;
+            }
+        }
+        return best;
+    }
+
+    /// prefix 無しの最長一致を試みる (現状の best を更新する形で返す)
+    fn match_plain(self: *const Self, text: []const u8, pos: usize, current: Match) Match {
+        var best = current;
+        var try_len: usize = @min(text.len - pos, 64);
+        while (try_len > 0) : (try_len -= 1) {
+            if (self.token_map.get(text[pos..][0..try_len])) |id| {
+                if (try_len > best.len) best = .{ .len = try_len, .id = id };
+                break;
+            }
+        }
+        return best;
+    }
+
+    /// 1 バイトのフォールバック (<0xNN> または unk) をトークン列に追記
+    fn append_byte_fallback(
+        self: *const Self,
+        byte: u8,
+        tokens: *std.ArrayListAligned(u32, null),
+        allocator: Allocator,
+    ) !void {
+        var hex_buf: [6]u8 = undefined;
+        const hex_str = std.fmt.bufPrint(
+            &hex_buf,
+            "<0x{X:0>2}>",
+            .{byte},
+        ) catch unreachable;
+        if (self.token_map.get(hex_str)) |id| {
+            try tokens.append(allocator, id);
+        } else {
+            try tokens.append(allocator, self.unk_id);
+        }
+    }
+
     /// テキストをトークン列にエンコード (Greedy longest match)
     pub fn encode(self: *const Self, text: []const u8, allocator: Allocator) ![]u32 {
         var tokens: std.ArrayListAligned(u32, null) = .empty;
@@ -83,67 +150,21 @@ pub const SentencePieceTokenizer = struct {
             try tokens.append(allocator, self.bos_id);
         }
 
-        // SentencePiece: 先頭にスペースを追加
-        // "▁" (U+2581) = 0xE2 0x96 0x81 in UTF-8
-        const SP_PREFIX = "\xe2\x96\x81";
-
         var pos: usize = 0;
         var is_word_start = true;
 
         while (pos < text.len) {
-            var best_len: usize = 0;
-            var best_id: u32 = self.unk_id;
+            var best: Match = .{ .len = 0, .id = self.unk_id };
+            if (is_word_start) best = self.match_with_sp_prefix(text, pos);
+            best = self.match_plain(text, pos, best);
 
-            // Try longest match with word-start prefix
-            if (is_word_start) {
-                var try_len: usize = @min(text.len - pos, 64);
-                while (try_len > 0) : (try_len -= 1) {
-                    // Build "▁" + text[pos..pos+try_len]
-                    const candidate_len = SP_PREFIX.len + try_len;
-                    if (candidate_len > 128) continue;
-                    var buf: [128]u8 = undefined;
-                    @memcpy(buf[0..SP_PREFIX.len], SP_PREFIX);
-                    @memcpy(buf[SP_PREFIX.len..][0..try_len], text[pos..][0..try_len]);
-
-                    if (self.token_map.get(buf[0..candidate_len])) |id| {
-                        if (try_len > best_len) {
-                            best_len = try_len;
-                            best_id = id;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            // Try longest match without prefix
-            {
-                var try_len: usize = @min(text.len - pos, 64);
-                while (try_len > 0) : (try_len -= 1) {
-                    if (self.token_map.get(text[pos..][0..try_len])) |id| {
-                        if (try_len > best_len) {
-                            best_len = try_len;
-                            best_id = id;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (best_len == 0) {
-                // Byte fallback: <0xNN>
-                const byte = text[pos];
-                var hex_buf: [6]u8 = undefined;
-                const hex_str = std.fmt.bufPrint(&hex_buf, "<0x{X:0>2}>", .{byte}) catch unreachable;
-                if (self.token_map.get(hex_str)) |id| {
-                    try tokens.append(allocator, id);
-                } else {
-                    try tokens.append(allocator, self.unk_id);
-                }
+            if (best.len == 0) {
+                try self.append_byte_fallback(text[pos], &tokens, allocator);
                 pos += 1;
                 is_word_start = false;
             } else {
-                try tokens.append(allocator, best_id);
-                pos += best_len;
+                try tokens.append(allocator, best.id);
+                pos += best.len;
                 // After a space, next token is word start
                 is_word_start = (pos > 0 and text[pos - 1] == ' ');
             }
@@ -163,7 +184,9 @@ pub const SentencePieceTokenizer = struct {
                 // "▁" → " " (space)
                 var i: usize = 0;
                 while (i < tok.len) {
-                    if (i + 2 < tok.len and tok[i] == 0xE2 and tok[i + 1] == 0x96 and tok[i + 2] == 0x81) {
+                    if (i + 2 < tok.len and
+                        tok[i] == 0xE2 and tok[i + 1] == 0x96 and tok[i + 2] == 0x81)
+                    {
                         try result.append(allocator, ' ');
                         i += 3;
                     } else if (tok.len >= 5 and tok[0] == '<' and tok[1] == '0' and tok[2] == 'x') {

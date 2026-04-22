@@ -1,11 +1,10 @@
 /// SIMDバックエンド。
 /// Zigの@Vectorを使い、ARM NEON / x86 AVX を自動選択する。
 /// std.simd.suggestVectorLength で最適なベクトル幅を取得。
-
 const std = @import("std");
 
 /// SIMD演算のベクトル長を取得。SIMDが利用できない場合はスカラーfallback。
-fn vecLen(comptime T: type) usize {
+fn vec_len(comptime T: type) usize {
     return std.simd.suggestVectorLength(T) orelse 1;
 }
 
@@ -14,8 +13,16 @@ fn vecLen(comptime T: type) usize {
 ///
 /// Aの各行に対し、Bの列方向をSIMDでvec_len個ずつ処理する。
 /// A[i,p]をsplatし、B[p, j..j+vec_len]とベクトル積を取り累積する。
-pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
-    const vl = comptime vecLen(T);
+pub fn matmul(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
+    const vl = comptime vec_len(T);
 
     if (vl == 1) {
         // SIMD利用不可: スカラーfallback
@@ -50,7 +57,7 @@ pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize,
 
 /// element-wise add: c[i] = a[i] + b[i]
 pub fn add(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -68,7 +75,7 @@ pub fn add(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// element-wise sub: c[i] = a[i] - b[i]
 pub fn sub(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -86,7 +93,7 @@ pub fn sub(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// element-wise mul: c[i] = a[i] * b[i]
 pub fn mul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -104,7 +111,7 @@ pub fn mul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// ReLU: c[i] = max(0, a[i])
 pub fn relu(comptime T: type, a: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -122,7 +129,7 @@ pub fn relu(comptime T: type, a: [*]const T, c: [*]T, len: usize) void {
 
 /// scale: c[i] = a[i] * scalar
 pub fn scale(comptime T: type, a: [*]const T, scalar: T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -146,7 +153,11 @@ const cpu = @import("cpu.zig");
 
 test "simd matmul matches cpu" {
     const a = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-    const b = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
+    const b = [_]f32{
+        1,  2,  3,  4,  5,  6,  7,  8,
+        9,  10, 11, 12, 13, 14, 15, 16,
+        17, 18, 19, 20, 21, 22, 23, 24,
+    };
     var c_cpu: [18]f32 = undefined;
     var c_simd: [18]f32 = undefined;
 

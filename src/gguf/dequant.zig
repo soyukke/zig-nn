@@ -20,7 +20,7 @@ pub const GGMLType = enum(u32) {
 };
 
 /// 量子化型ごとのブロックサイズ（要素数）
-pub fn blockSize(t: GGMLType) usize {
+pub fn block_size(t: GGMLType) usize {
     return switch (t) {
         .f32, .f16 => 1,
         .q4_0, .q4_1, .q5_0, .q5_1, .q8_0, .q8_1 => 32,
@@ -29,7 +29,7 @@ pub fn blockSize(t: GGMLType) usize {
 }
 
 /// 1ブロックあたりのバイト数
-pub fn bytesPerBlock(t: GGMLType) usize {
+pub fn bytes_per_block(t: GGMLType) usize {
     return switch (t) {
         .f32 => 4,
         .f16 => 2,
@@ -53,11 +53,11 @@ pub const Q4_1_BPB: usize = 20;
 pub const Q8_0_BPB: usize = 34;
 
 /// num_elements 分のテンソルデータに必要なバイト数
-pub fn tensorBytes(t: GGMLType, num_elements: usize) usize {
-    const bs = blockSize(t);
+pub fn tensor_bytes(t: GGMLType, num_elements: usize) usize {
+    const bs = block_size(t);
     if (bs == 0) return 0;
     const num_blocks = num_elements / bs;
-    return num_blocks * bytesPerBlock(t);
+    return num_blocks * bytes_per_block(t);
 }
 
 // ============================================================
@@ -65,7 +65,7 @@ pub fn tensorBytes(t: GGMLType, num_elements: usize) usize {
 // ============================================================
 
 /// F32: バイト列をそのまま f32 として読み出し
-pub fn dequantizeF32(src: []const u8, dst: []f32) void {
+pub fn dequantize_f32(src: []const u8, dst: []f32) void {
     const count = dst.len;
     for (0..count) |i| {
         dst[i] = @bitCast(src[i * 4 ..][0..4].*);
@@ -73,7 +73,7 @@ pub fn dequantizeF32(src: []const u8, dst: []f32) void {
 }
 
 /// F16 → F32 変換
-pub fn dequantizeF16(src: []const u8, dst: []f32) void {
+pub fn dequantize_f16(src: []const u8, dst: []f32) void {
     const count = dst.len;
     for (0..count) |i| {
         const bits: u16 = @bitCast(src[i * 2 ..][0..2].*);
@@ -85,7 +85,7 @@ pub fn dequantizeF16(src: []const u8, dst: []f32) void {
 /// Q4_0 ブロック逆量子化
 /// ブロック: f16 scale (2 bytes) + 16 bytes (32 x 4bit nibbles)
 /// 復元: (nibble - 8) * scale
-pub fn dequantizeQ4_0(src: []const u8, dst: []f32, num_elements: usize) void {
+pub fn dequantize_q4_0(src: []const u8, dst: []f32, num_elements: usize) void {
     const num_blocks = num_elements / BLOCK_SIZE;
 
     for (0..num_blocks) |bi| {
@@ -107,7 +107,7 @@ pub fn dequantizeQ4_0(src: []const u8, dst: []f32, num_elements: usize) void {
 /// Q8_0 ブロック逆量子化
 /// ブロック: f16 scale (2 bytes) + 32 bytes (int8 x 32)
 /// 復元: q * scale
-pub fn dequantizeQ8_0(src: []const u8, dst: []f32, num_elements: usize) void {
+pub fn dequantize_q8_0(src: []const u8, dst: []f32, num_elements: usize) void {
     const num_blocks = num_elements / BLOCK_SIZE;
 
     for (0..num_blocks) |bi| {
@@ -130,7 +130,7 @@ pub fn dequantizeQ8_0(src: []const u8, dst: []f32, num_elements: usize) void {
 /// weight_row: Q4_0 エンコード済みの 1 行分 (in_dim 要素 = in_dim/32 ブロック)
 /// input: f32 ベクトル (in_dim 要素)
 /// in_dim: 入力次元（32 の倍数であること）
-pub fn dotQ4_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
+pub fn dot_q4_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
     const vl = comptime std.simd.suggestVectorLength(f32) orelse 4;
     const num_blocks = in_dim / BLOCK_SIZE;
     var sum: f32 = 0;
@@ -167,11 +167,17 @@ pub fn dotQ4_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 /// weight: Q4_0 エンコード済み行列 (out_dim 行 × in_dim 列)
 /// input: f32 ベクトル (in_dim 要素)
 /// output: f32 出力 (out_dim 要素)
-pub fn matmulQ4_0_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
-    const row_bytes = tensorBytes(.q4_0, in_dim);
+pub fn matmul_q4_0_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
+    const row_bytes = tensor_bytes(.q4_0, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
-        output[j] = dotQ4_0_f32(row, input, in_dim);
+        output[j] = dot_q4_0_f32(row, input, in_dim);
     }
 }
 
@@ -182,7 +188,7 @@ pub fn matmulQ4_0_f32(weight: []const u8, input: []const f32, output: []f32, out
 /// Q4_1 ブロック逆量子化
 /// ブロック: f16 scale (2 bytes) + f16 min (2 bytes) + 16 bytes (32 x 4bit nibbles)
 /// 復元: nibble * scale + min
-pub fn dequantizeQ4_1(src: []const u8, dst: []f32, num_elements: usize) void {
+pub fn dequantize_q4_1(src: []const u8, dst: []f32, num_elements: usize) void {
     const num_blocks = num_elements / BLOCK_SIZE;
 
     for (0..num_blocks) |bi| {
@@ -201,7 +207,7 @@ pub fn dequantizeQ4_1(src: []const u8, dst: []f32, num_elements: usize) void {
 }
 
 /// Q4_1 行 × f32 ベクトルのドット積 (SIMD)
-pub fn dotQ4_1_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
+pub fn dot_q4_1_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
     const vl = comptime std.simd.suggestVectorLength(f32) orelse 4;
     const num_blocks = in_dim / BLOCK_SIZE;
     var sum: f32 = 0;
@@ -237,11 +243,17 @@ pub fn dotQ4_1_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 }
 
 /// Q4_1 行列 × f32 ベクトル → f32 出力ベクトル
-pub fn matmulQ4_1_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
-    const row_bytes = tensorBytes(.q4_1, in_dim);
+pub fn matmul_q4_1_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
+    const row_bytes = tensor_bytes(.q4_1, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
-        output[j] = dotQ4_1_f32(row, input, in_dim);
+        output[j] = dot_q4_1_f32(row, input, in_dim);
     }
 }
 
@@ -250,7 +262,7 @@ pub fn matmulQ4_1_f32(weight: []const u8, input: []const f32, output: []f32, out
 // ============================================================
 
 /// Q8_0 行 × f32 ベクトルのドット積 (SIMD)
-pub fn dotQ8_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
+pub fn dot_q8_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f32 {
     const vl = comptime std.simd.suggestVectorLength(f32) orelse 4;
     const num_blocks = in_dim / BLOCK_SIZE;
     var sum: f32 = 0;
@@ -282,11 +294,17 @@ pub fn dotQ8_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 }
 
 /// Q8_0 行列 × f32 ベクトル → f32 出力ベクトル
-pub fn matmulQ8_0_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
-    const row_bytes = tensorBytes(.q8_0, in_dim);
+pub fn matmul_q8_0_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
+    const row_bytes = tensor_bytes(.q8_0, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
-        output[j] = dotQ8_0_f32(row, input, in_dim);
+        output[j] = dot_q8_0_f32(row, input, in_dim);
     }
 }
 
@@ -299,7 +317,7 @@ const MAX_THREADS = 16;
 pub const QuantType = enum { q4_0, q4_1, q8_0 };
 
 /// matmul の部分行チャンク (レガシー matmulParallel 用)
-fn matmulChunkF32(
+fn matmul_chunk_f32(
     weight: []const u8,
     input: []const f32,
     output: []f32,
@@ -312,15 +330,15 @@ fn matmulChunkF32(
     for (row_start..row_end) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
         output[j] = switch (quant_type) {
-            .q4_0 => dotQ4_0_f32(row, input, in_dim),
-            .q4_1 => dotQ4_1_f32(row, input, in_dim),
-            .q8_0 => dotQ8_0_f32(row, input, in_dim),
+            .q4_0 => dot_q4_0_f32(row, input, in_dim),
+            .q4_1 => dot_q4_1_f32(row, input, in_dim),
+            .q8_0 => dot_q8_0_f32(row, input, in_dim),
         };
     }
 }
 
 /// マルチスレッド matmul (レガシー: spawn/join 方式、GPT-2 後方互換): out_dim の行ループを複数スレッドで分割
-pub fn matmulParallel(
+pub fn matmul_parallel(
     weight: []const u8,
     input: []const f32,
     output: []f32,
@@ -330,16 +348,16 @@ pub fn matmulParallel(
     n_threads: usize,
 ) void {
     const row_bytes: usize = switch (quant_type) {
-        .q4_0 => tensorBytes(.q4_0, in_dim),
-        .q4_1 => tensorBytes(.q4_1, in_dim),
-        .q8_0 => tensorBytes(.q8_0, in_dim),
+        .q4_0 => tensor_bytes(.q4_0, in_dim),
+        .q4_1 => tensor_bytes(.q4_1, in_dim),
+        .q8_0 => tensor_bytes(.q8_0, in_dim),
     };
 
     // スレッドあたり最低 256 行を確保 (spawn オーバーヘッド対策)
     const effective_threads = @max(1, @min(@min(n_threads, MAX_THREADS), out_dim / 256));
 
     if (effective_threads <= 1) {
-        matmulChunkF32(weight, input, output, 0, out_dim, row_bytes, in_dim, quant_type);
+        matmul_chunk_f32(weight, input, output, 0, out_dim, row_bytes, in_dim, quant_type);
         return;
     }
 
@@ -350,15 +368,18 @@ pub fn matmulParallel(
     // ワーカースレッドを起動 (2番目以降のチャンク)
     for (1..effective_threads) |t| {
         const start = t * rows_per_thread;
-        const end = if (t == effective_threads - 1) out_dim else (t + 1) * rows_per_thread;
-        threads[t - 1] = std.Thread.spawn(.{}, matmulChunkF32, .{
+        const end = if (t == effective_threads - 1)
+            out_dim
+        else
+            (t + 1) * rows_per_thread;
+        threads[t - 1] = std.Thread.spawn(.{}, matmul_chunk_f32, .{
             weight, input, output, start, end, row_bytes, in_dim, quant_type,
         }) catch break;
         spawned += 1;
     }
 
     // メインスレッドが最初のチャンクを処理
-    matmulChunkF32(weight, input, output, 0, rows_per_thread, row_bytes, in_dim, quant_type);
+    matmul_chunk_f32(weight, input, output, 0, rows_per_thread, row_bytes, in_dim, quant_type);
 
     // 全スレッドを join
     for (0..spawned) |t| {
@@ -368,18 +389,32 @@ pub fn matmulParallel(
     // spawn に失敗したスレッドの分をメインスレッドで補完
     if (spawned < effective_threads - 1) {
         const remaining_start = (spawned + 1) * rows_per_thread;
-        matmulChunkF32(weight, input, output, remaining_start, out_dim, row_bytes, in_dim, quant_type);
+        matmul_chunk_f32(
+            weight,
+            input,
+            output,
+            remaining_start,
+            out_dim,
+            row_bytes,
+            in_dim,
+            quant_type,
+        );
     }
 }
 
 /// 型に応じた統合逆量子化関数
-pub fn dequantize(type_: GGMLType, src: []const u8, dst: []f32, num_elements: usize) !void {
+pub fn dequantize(
+    type_: GGMLType,
+    src: []const u8,
+    dst: []f32,
+    num_elements: usize,
+) !void {
     switch (type_) {
-        .f32 => dequantizeF32(src, dst),
-        .f16 => dequantizeF16(src, dst),
-        .q4_0 => dequantizeQ4_0(src, dst, num_elements),
-        .q4_1 => dequantizeQ4_1(src, dst, num_elements),
-        .q8_0 => dequantizeQ8_0(src, dst, num_elements),
+        .f32 => dequantize_f32(src, dst),
+        .f16 => dequantize_f16(src, dst),
+        .q4_0 => dequantize_q4_0(src, dst, num_elements),
+        .q4_1 => dequantize_q4_1(src, dst, num_elements),
+        .q8_0 => dequantize_q8_0(src, dst, num_elements),
         else => return error.UnsupportedQuantType,
     }
 }
@@ -390,9 +425,11 @@ pub fn dequantize(type_: GGMLType, src: []const u8, dst: []f32, num_elements: us
 
 test "dequantize F32" {
     // f32 values: 1.0, -2.5, 3.14
-    const src = std.mem.toBytes(@as(f32, 1.0)) ++ std.mem.toBytes(@as(f32, -2.5)) ++ std.mem.toBytes(@as(f32, 3.14));
+    const src = std.mem.toBytes(@as(f32, 1.0)) ++
+        std.mem.toBytes(@as(f32, -2.5)) ++
+        std.mem.toBytes(@as(f32, 3.14));
     var dst: [3]f32 = undefined;
-    dequantizeF32(&src, &dst);
+    dequantize_f32(&src, &dst);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), dst[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, -2.5), dst[1], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 3.14), dst[2], 0.01);
@@ -401,9 +438,10 @@ test "dequantize F32" {
 test "dequantize F16" {
     const val1: f16 = 1.0;
     const val2: f16 = -0.5;
-    const src = std.mem.toBytes(@as(u16, @bitCast(val1))) ++ std.mem.toBytes(@as(u16, @bitCast(val2)));
+    const src = std.mem.toBytes(@as(u16, @bitCast(val1))) ++
+        std.mem.toBytes(@as(u16, @bitCast(val2)));
     var dst: [2]f32 = undefined;
-    dequantizeF16(&src, &dst);
+    dequantize_f16(&src, &dst);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), dst[0], 1e-3);
     try std.testing.expectApproxEqAbs(@as(f32, -0.5), dst[1], 1e-3);
 }
@@ -420,7 +458,7 @@ test "dequantize Q4_0 basic" {
     @memset(block[2..18], 0x88);
 
     var dst: [32]f32 = undefined;
-    dequantizeQ4_0(&block, &dst, 32);
+    dequantize_q4_0(&block, &dst, 32);
     // (8 - 8) * 1.0 = 0
     for (&dst) |v| {
         try std.testing.expectApproxEqAbs(@as(f32, 0.0), v, 1e-6);
@@ -438,7 +476,7 @@ test "dequantize Q4_0 non-zero" {
     @memset(block[3..18], 0x88); // rest are zero
 
     var dst: [32]f32 = undefined;
-    dequantizeQ4_0(&block, &dst, 32);
+    dequantize_q4_0(&block, &dst, 32);
     // dst[0] = (15-8) * 2.0 = 14.0
     try std.testing.expectApproxEqAbs(@as(f32, 14.0), dst[0], 0.01);
     // dst[16] = (0-8) * 2.0 = -16.0
@@ -457,7 +495,7 @@ test "dequantize Q8_0 basic" {
     @memset(block[4..34], 0);
 
     var dst: [32]f32 = undefined;
-    dequantizeQ8_0(&block, &dst, 32);
+    dequantize_q8_0(&block, &dst, 32);
     // 4 * 0.5 = 2.0
     try std.testing.expectApproxEqAbs(@as(f32, 2.0), dst[0], 0.01);
     // -3 * 0.5 = -1.5
@@ -479,7 +517,7 @@ test "dotQ4_0_f32 basic" {
     @memset(&input, 1.0);
 
     // Each element is (9-8)*1.0 = 1.0, dot with 1.0 = 32 * 1.0 = 32.0
-    const result = dotQ4_0_f32(&block, &input, 32);
+    const result = dot_q4_0_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(@as(f32, 32.0), result, 0.01);
 }
 
@@ -494,7 +532,7 @@ test "dotQ4_0_f32 matches dequantize" {
 
     // Dequantize for reference
     var dequantized: [32]f32 = undefined;
-    dequantizeQ4_0(&block, &dequantized, 32);
+    dequantize_q4_0(&block, &dequantized, 32);
 
     // input = all 1.0
     var input: [32]f32 = undefined;
@@ -504,7 +542,7 @@ test "dotQ4_0_f32 matches dequantize" {
     var expected: f32 = 0;
     for (dequantized) |v| expected += v;
 
-    const result = dotQ4_0_f32(&block, &input, 32);
+    const result = dot_q4_0_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(expected, result, 0.01);
 }
 
@@ -526,7 +564,7 @@ test "matmulQ4_0_f32 basic" {
     @memset(&input, 1.0);
     var output: [2]f32 = undefined;
 
-    matmulQ4_0_f32(&weight, &input, &output, 2, 32);
+    matmul_q4_0_f32(&weight, &input, &output, 2, 32);
 
     // Row 0: each val = 1.0 * 1.0, sum = 32.0
     try std.testing.expectApproxEqAbs(@as(f32, 32.0), output[0], 0.01);
@@ -544,7 +582,7 @@ test "dequantize Q4_1 basic" {
     @memset(block[4..20], 0x00);
 
     var dst: [32]f32 = undefined;
-    dequantizeQ4_1(&block, &dst, 32);
+    dequantize_q4_1(&block, &dst, 32);
     for (&dst) |v| {
         try std.testing.expectApproxEqAbs(@as(f32, 0.5), v, 1e-3);
     }
@@ -563,7 +601,7 @@ test "dotQ4_1_f32 basic" {
     @memset(&input, 1.0);
 
     // Each val = 1*1.0 + 0 = 1.0, dot with 1.0 = 32.0
-    const result = dotQ4_1_f32(&block, &input, 32);
+    const result = dot_q4_1_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(@as(f32, 32.0), result, 0.1);
 }
 
@@ -580,7 +618,7 @@ test "dotQ4_1_f32 with min" {
     @memset(&input, 1.0);
 
     // Each val = 1.0, dot with 1.0 = 32.0
-    const result = dotQ4_1_f32(&block, &input, 32);
+    const result = dot_q4_1_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(@as(f32, 32.0), result, 0.1);
 }
 
@@ -595,7 +633,7 @@ test "dotQ8_0_f32 basic" {
     @memset(&input, 1.0);
 
     // Each val = 2 * 1.0 = 2.0, dot with 1.0 = 64.0
-    const result = dotQ8_0_f32(&block, &input, 32);
+    const result = dot_q8_0_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(@as(f32, 64.0), result, 0.01);
 }
 
@@ -608,7 +646,7 @@ test "dotQ8_0_f32 matches dequantize" {
     @memset(block[4..34], 0);
 
     var dequantized: [32]f32 = undefined;
-    dequantizeQ8_0(&block, &dequantized, 32);
+    dequantize_q8_0(&block, &dequantized, 32);
 
     var input: [32]f32 = undefined;
     @memset(&input, 1.0);
@@ -616,7 +654,7 @@ test "dotQ8_0_f32 matches dequantize" {
     var expected: f32 = 0;
     for (dequantized) |v| expected += v;
 
-    const result = dotQ8_0_f32(&block, &input, 32);
+    const result = dot_q8_0_f32(&block, &input, 32);
     try std.testing.expectApproxEqAbs(expected, result, 0.01);
 }
 
@@ -638,7 +676,7 @@ test "matmulQ8_0_f32 basic" {
     @memset(&input, 1.0);
     var output: [2]f32 = undefined;
 
-    matmulQ8_0_f32(&weight, &input, &output, 2, 32);
+    matmul_q8_0_f32(&weight, &input, &output, 2, 32);
 
     // Row 0: 1 * 1.0 * 32 = 32.0
     try std.testing.expectApproxEqAbs(@as(f32, 32.0), output[0], 0.01);
@@ -647,10 +685,10 @@ test "matmulQ8_0_f32 basic" {
 }
 
 test "tensorBytes calculation" {
-    try std.testing.expectEqual(@as(usize, 128), tensorBytes(.f32, 32));
-    try std.testing.expectEqual(@as(usize, 64), tensorBytes(.f16, 32));
-    try std.testing.expectEqual(@as(usize, 18), tensorBytes(.q4_0, 32));
-    try std.testing.expectEqual(@as(usize, 36), tensorBytes(.q4_0, 64));
-    try std.testing.expectEqual(@as(usize, 20), tensorBytes(.q4_1, 32));
-    try std.testing.expectEqual(@as(usize, 34), tensorBytes(.q8_0, 32));
+    try std.testing.expectEqual(@as(usize, 128), tensor_bytes(.f32, 32));
+    try std.testing.expectEqual(@as(usize, 64), tensor_bytes(.f16, 32));
+    try std.testing.expectEqual(@as(usize, 18), tensor_bytes(.q4_0, 32));
+    try std.testing.expectEqual(@as(usize, 36), tensor_bytes(.q4_0, 64));
+    try std.testing.expectEqual(@as(usize, 20), tensor_bytes(.q4_1, 32));
+    try std.testing.expectEqual(@as(usize, 34), tensor_bytes(.q8_0, 32));
 }

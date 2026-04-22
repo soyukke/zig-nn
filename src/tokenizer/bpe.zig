@@ -22,9 +22,9 @@ pub const BPETokenizer = struct {
     };
 
     /// GGUF メタデータから BPE トークナイザーを構築
-    pub fn initFromGGUF(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
+    pub fn init_from_gguf(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
         // Vocab
-        const vocab_strings = try gguf_file.getArrayStrings("tokenizer.ggml.tokens", allocator);
+        const vocab_strings = try gguf_file.get_array_strings("tokenizer.ggml.tokens", allocator);
         defer allocator.free(vocab_strings);
 
         const vocab_count = vocab_strings.len;
@@ -44,7 +44,7 @@ pub const BPETokenizer = struct {
         }
 
         // Merges
-        const merges_raw = try gguf_file.getArrayStrings("tokenizer.ggml.merges", allocator);
+        const merges_raw = try gguf_file.get_array_strings("tokenizer.ggml.merges", allocator);
         defer allocator.free(merges_raw);
 
         const merges = try allocator.alloc(MergePair, merges_raw.len);
@@ -85,7 +85,7 @@ pub const BPETokenizer = struct {
         defer tokens.deinit(allocator);
 
         for (text) |byte| {
-            const byte_str = byteToToken(byte);
+            const byte_str = byte_to_token(byte);
             try tokens.append(allocator, byte_str);
         }
 
@@ -96,7 +96,11 @@ pub const BPETokenizer = struct {
             var best_priority: u32 = std.math.maxInt(u32);
 
             for (0..tokens.items.len - 1) |i| {
-                const pair_key = mergePairKey(tokens.items[i], tokens.items[i + 1], allocator) catch continue;
+                const pair_key = merge_pair_key(
+                    tokens.items[i],
+                    tokens.items[i + 1],
+                    allocator,
+                ) catch continue;
                 defer allocator.free(pair_key);
 
                 if (self.merge_map.get(pair_key)) |priority| {
@@ -111,7 +115,11 @@ pub const BPETokenizer = struct {
 
             // マージ実行: tokens[best_idx] と tokens[best_idx+1] を結合
             const idx = best_idx.?;
-            const merged = try std.mem.concat(allocator, u8, &[_][]const u8{ tokens.items[idx], tokens.items[idx + 1] });
+            const merged = try std.mem.concat(
+                allocator,
+                u8,
+                &[_][]const u8{ tokens.items[idx], tokens.items[idx + 1] },
+            );
             tokens.items[idx] = merged;
             _ = tokens.orderedRemove(idx + 1);
         }
@@ -133,7 +141,7 @@ pub const BPETokenizer = struct {
                 const tok = self.vocab[tid];
                 var i: usize = 0;
                 while (i < tok.len) {
-                    const byte = tokenCharToByte(tok, &i);
+                    const byte = token_char_to_byte(tok, &i);
                     try result.append(allocator, byte);
                 }
             }
@@ -170,12 +178,12 @@ pub const BPETokenizer = struct {
 // BPE トークン文字列は UTF-8 エンコードされたコードポイント列。
 
 /// バイト → GPT-2 BPE トークン文字列 (UTF-8 encoded)
-fn byteToToken(byte: u8) []const u8 {
+fn byte_to_token(byte: u8) []const u8 {
     return BYTE_TO_TOKEN_TABLE[byte].slice();
 }
 
 /// GPT-2 BPE トークン文字列から 1 文字分をデコードして元のバイトを返す
-fn tokenCharToByte(tok: []const u8, pos: *usize) u8 {
+fn token_char_to_byte(tok: []const u8, pos: *usize) u8 {
     if (pos.* >= tok.len) return 0;
 
     const b0 = tok[pos.*];
@@ -201,7 +209,7 @@ fn tokenCharToByte(tok: []const u8, pos: *usize) u8 {
     return b0;
 }
 
-fn isDirectByte(b: u8) bool {
+fn is_direct_byte(b: u8) bool {
     return (b >= 33 and b <= 126) or (b >= 161 and b <= 172) or (b >= 174);
 }
 
@@ -222,7 +230,7 @@ fn init_byte_table() [256]TokenEntry {
     var n: u16 = 0;
     for (0..256) |i| {
         const b: u8 = @intCast(i);
-        if (isDirectByte(b)) {
+        if (is_direct_byte(b)) {
             if (b < 0x80) {
                 table[i] = .{ .data = .{ b, 0, 0 }, .len = 1 };
             } else {
@@ -232,7 +240,10 @@ fn init_byte_table() [256]TokenEntry {
         } else {
             // U+0100 + n → UTF-8 (2 bytes)
             const cp: u16 = 256 + n;
-            table[i] = .{ .data = .{ @intCast(0xC0 | (cp >> 6)), @intCast(0x80 | (cp & 0x3F)), 0 }, .len = 2 };
+            table[i] = .{
+                .data = .{ @intCast(0xC0 | (cp >> 6)), @intCast(0x80 | (cp & 0x3F)), 0 },
+                .len = 2,
+            };
             n += 1;
         }
     }
@@ -251,7 +262,7 @@ fn init_cp_to_byte() [324]u8 {
     // 直接マッピング: byte == codepoint
     for (0..256) |i| {
         const b: u8 = @intCast(i);
-        if (isDirectByte(b)) {
+        if (is_direct_byte(b)) {
             table[i] = b;
         }
     }
@@ -260,7 +271,7 @@ fn init_cp_to_byte() [324]u8 {
     var n: u16 = 0;
     for (0..256) |i| {
         const b: u8 = @intCast(i);
-        if (!isDirectByte(b)) {
+        if (!is_direct_byte(b)) {
             table[256 + n] = b;
             n += 1;
         }
@@ -270,7 +281,7 @@ fn init_cp_to_byte() [324]u8 {
 }
 
 /// マージペアのキー文字列を構築: "first second"
-fn mergePairKey(first: []const u8, second: []const u8, allocator: Allocator) ![]u8 {
+fn merge_pair_key(first: []const u8, second: []const u8, allocator: Allocator) ![]u8 {
     const key = try allocator.alloc(u8, first.len + 1 + second.len);
     @memcpy(key[0..first.len], first);
     key[first.len] = ' ';
@@ -284,13 +295,13 @@ fn mergePairKey(first: []const u8, second: []const u8, allocator: Allocator) ![]
 
 test "byteToToken ASCII printable" {
     // 'A' (65) is in printable range → maps to itself
-    const tok = byteToToken('A');
+    const tok = byte_to_token('A');
     try std.testing.expectEqual(@as(u8, 'A'), tok[0]);
 }
 
 test "byteToToken space" {
     // space (32) is NOT in the direct range → maps to U+0100+n
-    const tok = byteToToken(' ');
+    const tok = byte_to_token(' ');
     // Should be a 2-byte UTF-8 sequence (U+0120 = 0xC4 0xA0)
     try std.testing.expect(tok[0] >= 0xC0);
 }
@@ -299,9 +310,9 @@ test "tokenCharToByte roundtrip" {
     // Test that byteToToken → tokenCharToByte roundtrips for all 256 bytes
     for (0..256) |i| {
         const byte: u8 = @intCast(i);
-        const tok = byteToToken(byte);
+        const tok = byte_to_token(byte);
         var pos: usize = 0;
-        const decoded = tokenCharToByte(tok, &pos);
+        const decoded = token_char_to_byte(tok, &pos);
         try std.testing.expectEqual(byte, decoded);
     }
 }

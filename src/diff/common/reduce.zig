@@ -22,10 +22,10 @@ pub const Case = enum(u8) {
 /// 削減方式ごとの scale factor:
 ///   sum  = 1.0
 ///   mean = 1.0 / reduction_size
-pub fn scaleSum() f32 {
+pub fn scale_sum() f32 {
     return 1.0;
 }
-pub fn scaleMean(reduction_size: usize) f32 {
+pub fn scale_mean(reduction_size: usize) f32 {
     return 1.0 / @as(f32, @floatFromInt(reduction_size));
 }
 
@@ -78,7 +78,7 @@ test "scatter axis1_2d with sum" {
     const testing = @import("std").testing;
     var ga = [_]f32{ 0, 0, 0, 0, 0, 0 };
     const go = [_]f32{ 10, 20 };
-    scatter(&ga, &go, &.{ 2, 3 }, .axis1_2d, scaleSum());
+    scatter(&ga, &go, &.{ 2, 3 }, .axis1_2d, scale_sum());
     try testing.expectEqualSlices(f32, &.{ 10, 10, 10, 20, 20, 20 }, &ga);
 }
 
@@ -86,7 +86,7 @@ test "scatter axis0_2d with sum" {
     const testing = @import("std").testing;
     var ga = [_]f32{ 0, 0, 0, 0, 0, 0 };
     const go = [_]f32{ 1, 2, 3 };
-    scatter(&ga, &go, &.{ 2, 3 }, .axis0_2d, scaleSum());
+    scatter(&ga, &go, &.{ 2, 3 }, .axis0_2d, scale_sum());
     try testing.expectEqualSlices(f32, &.{ 1, 2, 3, 1, 2, 3 }, &ga);
 }
 
@@ -95,7 +95,7 @@ test "scatter axis1_2d with mean" {
     var ga = [_]f32{ 0, 0, 0, 0 };
     const go = [_]f32{ 10, 20 };
     // scale = 1/2 (cols=2)
-    scatter(&ga, &go, &.{ 2, 2 }, .axis1_2d, scaleMean(2));
+    scatter(&ga, &go, &.{ 2, 2 }, .axis1_2d, scale_mean(2));
     try testing.expectEqualSlices(f32, &.{ 5, 5, 10, 10 }, &ga);
 }
 
@@ -103,6 +103,6 @@ test "scatter all (1D)" {
     const testing = @import("std").testing;
     var ga = [_]f32{ 0, 0, 0, 0 };
     const go = [_]f32{7};
-    scatter(&ga, &go, &.{4}, .all, scaleSum());
+    scatter(&ga, &go, &.{4}, .all, scale_sum());
     try testing.expectEqualSlices(f32, &.{ 7, 7, 7, 7 }, &ga);
 }

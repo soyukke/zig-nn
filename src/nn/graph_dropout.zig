@@ -2,7 +2,7 @@
 ///
 /// PyTorch 互換: training=true で inverted dropout (scale by 1/(1-rate))
 /// DiffCpuRuntime / MpsRuntime の dropout op にデリゲートする。
-pub fn Dropout(comptime rate: comptime_float) type {
+pub fn dropout(comptime rate: comptime_float) type {
     return struct {
         const Self = @This();
 

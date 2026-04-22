@@ -32,75 +32,75 @@ pub const Kind = struct {
 //   @import("../common/unary.zig").Negative
 // のように参照する。
 
-pub const Negative: Kind = .{ .fwd = negFwd, .deriv = negDeriv };
-fn negFwd(x: f32) f32 {
+pub const Negative: Kind = .{ .fwd = neg_fwd, .deriv = neg_deriv };
+fn neg_fwd(x: f32) f32 {
     return -x;
 }
-fn negDeriv(_: f32, _: f32) f32 {
+fn neg_deriv(_: f32, _: f32) f32 {
     return -1.0;
 }
 
-pub const Square: Kind = .{ .fwd = sqFwd, .deriv = sqDeriv };
-fn sqFwd(x: f32) f32 {
+pub const Square: Kind = .{ .fwd = sq_fwd, .deriv = sq_deriv };
+fn sq_fwd(x: f32) f32 {
     return x * x;
 }
-fn sqDeriv(x: f32, _: f32) f32 {
+fn sq_deriv(x: f32, _: f32) f32 {
     return 2.0 * x;
 }
 
-pub const Sigmoid: Kind = .{ .fwd = sigFwd, .deriv = sigDeriv };
-fn sigFwd(x: f32) f32 {
+pub const Sigmoid: Kind = .{ .fwd = sig_fwd, .deriv = sig_deriv };
+fn sig_fwd(x: f32) f32 {
     return 1.0 / (1.0 + @exp(-x));
 }
-fn sigDeriv(_: f32, y: f32) f32 {
+fn sig_deriv(_: f32, y: f32) f32 {
     return y * (1.0 - y);
 }
 
-pub const Tanh: Kind = .{ .fwd = tanhFwd, .deriv = tanhDeriv };
-fn tanhFwd(x: f32) f32 {
+pub const Tanh: Kind = .{ .fwd = tanh_fwd, .deriv = tanh_deriv };
+fn tanh_fwd(x: f32) f32 {
     return std.math.tanh(x);
 }
-fn tanhDeriv(_: f32, y: f32) f32 {
+fn tanh_deriv(_: f32, y: f32) f32 {
     return 1.0 - y * y;
 }
 
-pub const Relu: Kind = .{ .fwd = reluFwd, .deriv = reluDeriv };
-fn reluFwd(x: f32) f32 {
+pub const Relu: Kind = .{ .fwd = relu_fwd, .deriv = relu_deriv };
+fn relu_fwd(x: f32) f32 {
     return if (x > 0) x else 0;
 }
-fn reluDeriv(x: f32, _: f32) f32 {
+fn relu_deriv(x: f32, _: f32) f32 {
     return if (x > 0) @as(f32, 1.0) else @as(f32, 0.0);
 }
 
-pub const Exp: Kind = .{ .fwd = expFwd, .deriv = expDeriv };
-fn expFwd(x: f32) f32 {
+pub const Exp: Kind = .{ .fwd = exp_fwd, .deriv = exp_deriv };
+fn exp_fwd(x: f32) f32 {
     return @exp(x);
 }
-fn expDeriv(_: f32, y: f32) f32 {
+fn exp_deriv(_: f32, y: f32) f32 {
     return y; // d/dx exp(x) = exp(x) = y
 }
 
-pub const Log: Kind = .{ .fwd = logFwd, .deriv = logDeriv };
-fn logFwd(x: f32) f32 {
+pub const Log: Kind = .{ .fwd = log_fwd, .deriv = log_deriv };
+fn log_fwd(x: f32) f32 {
     return @log(x);
 }
-fn logDeriv(x: f32, _: f32) f32 {
+fn log_deriv(x: f32, _: f32) f32 {
     return 1.0 / x;
 }
 
-pub const Abs: Kind = .{ .fwd = absFwd, .deriv = absDeriv };
-fn absFwd(x: f32) f32 {
+pub const Abs: Kind = .{ .fwd = abs_fwd, .deriv = abs_deriv };
+fn abs_fwd(x: f32) f32 {
     return @abs(x);
 }
-fn absDeriv(x: f32, _: f32) f32 {
+fn abs_deriv(x: f32, _: f32) f32 {
     return if (x >= 0) @as(f32, 1.0) else @as(f32, -1.0);
 }
 
-pub const Sqrt: Kind = .{ .fwd = sqrtFwd, .deriv = sqrtDeriv };
-fn sqrtFwd(x: f32) f32 {
+pub const Sqrt: Kind = .{ .fwd = sqrt_fwd, .deriv = sqrt_deriv };
+fn sqrt_fwd(x: f32) f32 {
     return @sqrt(x);
 }
-fn sqrtDeriv(_: f32, y: f32) f32 {
+fn sqrt_deriv(_: f32, y: f32) f32 {
     return 0.5 / y; // d/dx sqrt(x) = 1 / (2*sqrt(x)) = 1 / (2*y)
 }
 
@@ -111,11 +111,11 @@ fn sqrtDeriv(_: f32, y: f32) f32 {
 /// 旧実装は forward で sig を cache していたが、deriv 内で再計算する方針に統一する。
 /// backward パスで exp() 1 回分の追加コストが発生するが、コードはシンプルかつ
 /// 他 unary op と同じ driver を使える。
-pub const Silu: Kind = .{ .fwd = siluFwd, .deriv = siluDeriv };
-fn siluFwd(x: f32) f32 {
+pub const Silu: Kind = .{ .fwd = silu_fwd, .deriv = silu_deriv };
+fn silu_fwd(x: f32) f32 {
     return x / (1.0 + @exp(-x));
 }
-fn siluDeriv(x: f32, _: f32) f32 {
+fn silu_deriv(x: f32, _: f32) f32 {
     const sig = 1.0 / (1.0 + @exp(-x));
     return sig + x * sig * (1.0 - sig);
 }
@@ -123,14 +123,14 @@ fn siluDeriv(x: f32, _: f32) f32 {
 /// GELU (tanh approximation)
 ///   fwd:   0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 ///   deriv: 0.5 * (1 + tanh) + 0.5 * x * sech^2 * inner'
-pub const Gelu: Kind = .{ .fwd = geluFwd, .deriv = geluDeriv };
+pub const Gelu: Kind = .{ .fwd = gelu_fwd, .deriv = gelu_deriv };
 const GELU_C: f32 = 0.7978845608028654; // sqrt(2/pi)
 const GELU_K: f32 = 0.044715;
-fn geluFwd(x: f32) f32 {
+fn gelu_fwd(x: f32) f32 {
     const inner = GELU_C * (x + GELU_K * x * x * x);
     return 0.5 * x * (1.0 + std.math.tanh(inner));
 }
-fn geluDeriv(x: f32, _: f32) f32 {
+fn gelu_deriv(x: f32, _: f32) f32 {
     const inner = GELU_C * (x + GELU_K * x * x * x);
     const tanh_val = std.math.tanh(inner);
     const sech2 = 1.0 - tanh_val * tanh_val;

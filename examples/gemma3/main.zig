@@ -40,17 +40,17 @@ fn gemma3Demo(io: std.Io) !void {
     defer gguf_file.deinit();
 
     // Print model info
-    if (gguf_file.getMetadataString("general.architecture")) |arch| {
+    if (gguf_file.get_metadata_string("general.architecture")) |arch| {
         log.info("architecture: {s}", .{arch});
     }
-    if (gguf_file.getMetadataString("general.name")) |name| {
+    if (gguf_file.get_metadata_string("general.name")) |name| {
         log.info("model: {s}", .{name});
     }
     log.info("tensors: {d}, metadata: {d}", .{ gguf_file.tensors.len, gguf_file.metadata.len });
 
     // 2. Load tokenizer (SentencePiece for Gemma)
     log.info("loading tokenizer...", .{});
-    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
+    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.init_from_gguf(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
@@ -59,7 +59,7 @@ fn gemma3Demo(io: std.Io) !void {
 
     // 3. Load model weights
     log.info("loading weights...", .{});
-    var model = nn.gemma3.Gemma3(nn.gemma3.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
+    var model = nn.gemma3.gemma3(nn.gemma3.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
         log.err("loading weights: {}", .{err});
         return;
     };
@@ -92,10 +92,10 @@ fn gemma3Demo(io: std.Io) !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
+    var prng = std.Random.DefaultPrng.init(nn.now_nanos());
     const rng = prng.random();
 
-    model.resetCache();
+    model.reset_cache();
 
     var timer = nn.Timer.start() catch unreachable;
 
@@ -122,7 +122,7 @@ fn gemma3Demo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gemma3.sampleTopK(logits, 40, 0.8, rng);
+        const next_token = nn.gemma3.sample_top_k(logits, 40, 0.8, rng);
         try tokens.append(allocator, next_token);
 
         if (next_token != tokenizer.eos_id) {
@@ -148,7 +148,7 @@ fn gemma3Demo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const last_token = tokens.items[tokens.items.len - 1];
-        const logits_d = model.decodeNext(last_token, temp) catch |err| {
+        const logits_d = model.decode_next(last_token, temp) catch |err| {
             log.err("in decodeNext: {}", .{err});
             return;
         };
@@ -166,7 +166,7 @@ fn gemma3Demo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gemma3.sampleTopK(logits_d, 40, 0.8, rng);
+        const next_token = nn.gemma3.sample_top_k(logits_d, 40, 0.8, rng);
         if (next_token == tokenizer.eos_id) break;
         try tokens.append(allocator, next_token);
         generated += 1;
@@ -202,13 +202,13 @@ fn gemma3MetalDemo(io: std.Io) !void {
     };
     defer gguf_file.deinit();
 
-    if (gguf_file.getMetadataString("general.name")) |name| {
+    if (gguf_file.get_metadata_string("general.name")) |name| {
         log.info("model: {s}", .{name});
     }
 
     // 2. Load tokenizer
     log.info("loading tokenizer...", .{});
-    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
+    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.init_from_gguf(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
@@ -216,7 +216,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
 
     // 3. Load model with Metal
     log.info("loading weights (Metal GPU)...", .{});
-    var model = nn.gemma3_metal.Gemma3Metal(nn.gemma3_metal.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
+    var model = nn.gemma3_metal.gemma3_metal(nn.gemma3_metal.Gemma3_1B).init(&gguf_file, allocator) catch |err| {
         log.err("loading model: {}", .{err});
         return;
     };
@@ -246,10 +246,10 @@ fn gemma3MetalDemo(io: std.Io) !void {
     var gen_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer gen_arena.deinit();
 
-    var prng = std.Random.DefaultPrng.init(nn.nowNanos());
+    var prng = std.Random.DefaultPrng.init(nn.now_nanos());
     const rng = prng.random();
 
-    model.resetCache();
+    model.reset_cache();
 
     var timer_gen = nn.Timer.start() catch unreachable;
     var prefill_ns: u64 = 0;
@@ -279,7 +279,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gemma3_metal.sampleTopK(logits_mut, 40, 0.8, rng);
+        const next_token = nn.gemma3_metal.sample_top_k(logits_mut, 40, 0.8, rng);
         try tokens.append(allocator, next_token);
 
         if (next_token != tokenizer.eos_id) {
@@ -307,7 +307,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
         const temp = gen_arena.allocator();
 
         const last_token = tokens.items[tokens.items.len - 1];
-        const logits_d = model.decodeNext(last_token, temp) catch |err| {
+        const logits_d = model.decode_next(last_token, temp) catch |err| {
             log.err("in decodeNext: {}", .{err});
             return;
         };
@@ -331,7 +331,7 @@ fn gemma3MetalDemo(io: std.Io) !void {
             }
         }
 
-        const next_token = nn.gemma3_metal.sampleTopK(logits_d, 40, 0.8, rng);
+        const next_token = nn.gemma3_metal.sample_top_k(logits_d, 40, 0.8, rng);
 
         // Restore modified values
         for (0..saved_count) |si| {
@@ -386,7 +386,7 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     };
     defer gguf_file.deinit();
 
-    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.initFromGGUF(&gguf_file, allocator) catch |err| {
+    var tokenizer = nn.sentencepiece.SentencePieceTokenizer.init_from_gguf(&gguf_file, allocator) catch |err| {
         log.err("loading tokenizer: {}", .{err});
         return;
     };
@@ -394,28 +394,28 @@ fn gemma3QLoRADemo(io: std.Io) !void {
 
     // --- Module + model + runtime ---
     log.info("initializing QLoRA model (rank={d})...", .{RANK});
-    const QLoRAModel = nn.gemma3_qlora.Gemma3QLoRA(C, RANK);
+    const QLoRAModel = nn.gemma3_qlora.gemma3_qlora(C, RANK);
 
     var module = nn.unified.Module.init(allocator);
     defer module.deinit();
 
-    var model = QLoRAModel.initParams(&module);
+    var model = QLoRAModel.init_params(&module);
 
     var rt = try nn.unified.DiffMpsRuntime.init(&module, &mtl, allocator);
     defer rt.deinit();
-    rt.initParams();
+    rt.init_params();
 
-    model.loadFromGguf(&rt, &gguf_file) catch |err| {
+    model.load_from_gguf(&rt, &gguf_file) catch |err| {
         log.err("loading weights: {}", .{err});
         return;
     };
     defer model.deinit();
 
-    const total_params = module.totalParamElements();
-    log.info("trainable params: {d} ({d} handles)", .{ total_params, module.paramCount() });
+    const total_params = module.total_param_elements();
+    log.info("trainable params: {d} ({d} handles)", .{ total_params, module.param_count() });
 
     // --- Adam (GPU-resident grad buffers already allocated by rt) ---
-    const sizes = try module.paramSizes(allocator);
+    const sizes = try module.param_sizes(allocator);
     defer allocator.free(sizes);
     var adam = try nn.unified.AdamState.init(allocator, sizes);
     defer adam.deinit();
@@ -447,15 +447,15 @@ fn gemma3QLoRADemo(io: std.Io) !void {
     for (0..steps) |step| {
         var step_loss: f32 = 0;
         for (train_input_ids, 0..) |_, seq_idx| {
-            rt.zeroGrad();
-            rt.resetArena();
+            rt.zero_grad();
+            rt.reset_arena();
 
             const logits = model.forward(&rt, &train_input_ids[seq_idx]);
-            const loss = rt.crossEntropyLossWithIndices(logits, &train_target_ids[seq_idx]);
+            const loss = rt.cross_entropy_loss_with_indices(logits, &train_target_ids[seq_idx]);
             const loss_val = MetalContextReadScalar(&rt, loss);
 
             rt.backward(loss);
-            rt.applyAdam(&adam, lr, 0.9, 0.999, 1e-8, 0.0);
+            rt.apply_adam(&adam, lr, 0.9, 0.999, 1e-8, 0.0);
 
             step_loss += loss_val;
         }
@@ -470,6 +470,6 @@ fn gemma3QLoRADemo(io: std.Io) !void {
 
 fn MetalContextReadScalar(rt: *nn.unified.DiffMpsRuntime, t: nn.unified.DiffMpsTensor) f32 {
     var buf: [1]f32 = undefined;
-    rt.copyToHost(t, &buf);
+    rt.copy_to_host(t, &buf);
     return buf[0];
 }

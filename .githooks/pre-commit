@@ -1,0 +1,2 @@
+#!/bin/sh
+exec nix develop -c just check-strict

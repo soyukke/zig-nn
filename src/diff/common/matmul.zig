@@ -24,7 +24,7 @@ const cpu_backend = @import("../../backend/cpu.zig");
 /// 形状: a (M×K), b (K×N), y = a @ b (M×N), go (M×N)
 ///   - ga (M×K) が非 null なら ga += go @ b^T
 ///   - gb (K×N) が非 null なら gb += a^T @ go
-pub fn backward2D(
+pub fn backward2d(
     go: [*]const f32,
     a: [*]const f32,
     b: [*]const f32,
@@ -35,14 +35,14 @@ pub fn backward2D(
     N: usize,
 ) void {
     // ga += go @ b^T  (PyTorch: grad.mm(b.t()))
-    if (ga) |g| cpu_backend.matmulTransBAccum(f32, go, b, g, M, N, K);
+    if (ga) |g| cpu_backend.matmul_trans_b_accum(f32, go, b, g, M, N, K);
     // gb += a^T @ go  (PyTorch: a.t().mm(grad))
-    if (gb) |g| cpu_backend.matmulTransAAccum(f32, a, go, g, K, M, N);
+    if (gb) |g| cpu_backend.matmul_trans_a_accum(f32, a, go, g, K, M, N);
 }
 
 /// 3D batched matmul の backward。a と b の両方が B 個のバッチを持つ。
 /// 各バッチで backward2D を呼ぶだけ。
-pub fn backward3D(
+pub fn backward3d(
     go: [*]const f32,
     a: [*]const f32,
     b: [*]const f32,
@@ -59,7 +59,7 @@ pub fn backward3D(
         const b_b = b + batch * K * N;
         const ga_b: ?[*]f32 = if (ga) |g| g + batch * M * K else null;
         const gb_b: ?[*]f32 = if (gb) |g| g + batch * K * N else null;
-        backward2D(go_b, a_b, b_b, ga_b, gb_b, M, K, N);
+        backward2d(go_b, a_b, b_b, ga_b, gb_b, M, K, N);
     }
 }
 
@@ -67,7 +67,7 @@ pub fn backward3D(
 /// a は batch 非依存 (2D M×K, 全バッチで共有)、b と go は 3D (B×K×N, B×M×N)。
 ///   - ga (2D M×K) は全バッチの Σ go[b] @ b[b]^T を accumulate
 ///   - gb (3D B×K×N) は各バッチ毎に a^T @ go[b]
-pub fn backward2Dx3D(
+pub fn backward2_dx3d(
     go: [*]const f32,
     a: [*]const f32,
     b: [*]const f32,
@@ -82,10 +82,10 @@ pub fn backward2Dx3D(
         const go_b = go + batch * M * N;
         if (ga) |g| {
             // ga は全 batch 共有、各 batch の寄与を accumulate
-            cpu_backend.matmulTransBAccum(f32, go_b, b + batch * K * N, g, M, N, K);
+            cpu_backend.matmul_trans_b_accum(f32, go_b, b + batch * K * N, g, M, N, K);
         }
         if (gb) |g| {
-            cpu_backend.matmulTransAAccum(f32, a, go_b, g + batch * K * N, K, M, N);
+            cpu_backend.matmul_trans_a_accum(f32, a, go_b, g + batch * K * N, K, M, N);
         }
     }
 }
@@ -108,7 +108,7 @@ test "backward2D matches analytical gradient (2x3 @ 3x2)" {
     var ga = [_]f32{ 0, 0, 0, 0, 0, 0 };
     var gb = [_]f32{ 0, 0, 0, 0, 0, 0 };
 
-    backward2D(&go, &a, &b, &ga, &gb, 2, 3, 2);
+    backward2d(&go, &a, &b, &ga, &gb, 2, 3, 2);
 
     // ga expected: go (2x2 all-1) @ b^T (2x3) = [[1,1,2],[1,1,2]]
     try testing.expectEqualSlices(f32, &.{ 1, 1, 2, 1, 1, 2 }, &ga);
@@ -125,13 +125,13 @@ test "backward2D skips null grads" {
 
     // ga only
     var ga = [_]f32{ 0, 0, 0, 0 };
-    backward2D(&go, &a, &b, &ga, null, 2, 2, 2);
+    backward2d(&go, &a, &b, &ga, null, 2, 2, 2);
     // go (2x2 all-1) @ b^T (I^T = I) = all-1 matrix
     try @import("std").testing.expectEqualSlices(f32, &.{ 1, 1, 1, 1 }, &ga);
 
     // gb only
     var gb = [_]f32{ 0, 0, 0, 0 };
-    backward2D(&go, &a, &b, null, &gb, 2, 2, 2);
+    backward2d(&go, &a, &b, null, &gb, 2, 2, 2);
     // a^T @ go = [[1+3,1+3],[2+4,2+4]] = [[4,4],[6,6]]
     try @import("std").testing.expectEqualSlices(f32, &.{ 4, 4, 6, 6 }, &gb);
 }

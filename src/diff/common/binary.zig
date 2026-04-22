@@ -30,41 +30,41 @@ pub const Kind = struct {
 
 // ── Add ──
 
-pub const Add: Kind = .{ .fwd = addFwd, .deriv_a = one3, .deriv_b = one3 };
-fn addFwd(a: f32, b: f32) f32 {
+pub const Add: Kind = .{ .fwd = add_fwd, .deriv_a = one3, .deriv_b = one3 };
+fn add_fwd(a: f32, b: f32) f32 {
     return a + b;
 }
 
 // ── Sub ──
 
-pub const Sub: Kind = .{ .fwd = subFwd, .deriv_a = one3, .deriv_b = minusOne3 };
-fn subFwd(a: f32, b: f32) f32 {
+pub const Sub: Kind = .{ .fwd = sub_fwd, .deriv_a = one3, .deriv_b = minus_one3 };
+fn sub_fwd(a: f32, b: f32) f32 {
     return a - b;
 }
 
 // ── Mul ──
 
-pub const Mul: Kind = .{ .fwd = mulFwd, .deriv_a = mulDerivA, .deriv_b = mulDerivB };
-fn mulFwd(a: f32, b: f32) f32 {
+pub const Mul: Kind = .{ .fwd = mul_fwd, .deriv_a = mul_deriv_a, .deriv_b = mul_deriv_b };
+fn mul_fwd(a: f32, b: f32) f32 {
     return a * b;
 }
-fn mulDerivA(_: f32, b: f32, _: f32) f32 {
+fn mul_deriv_a(_: f32, b: f32, _: f32) f32 {
     return b;
 }
-fn mulDerivB(a: f32, _: f32, _: f32) f32 {
+fn mul_deriv_b(a: f32, _: f32, _: f32) f32 {
     return a;
 }
 
 // ── Div ──
 
-pub const Div: Kind = .{ .fwd = divFwd, .deriv_a = divDerivA, .deriv_b = divDerivB };
-fn divFwd(a: f32, b: f32) f32 {
+pub const Div: Kind = .{ .fwd = div_fwd, .deriv_a = div_deriv_a, .deriv_b = div_deriv_b };
+fn div_fwd(a: f32, b: f32) f32 {
     return a / b;
 }
-fn divDerivA(_: f32, b: f32, _: f32) f32 {
+fn div_deriv_a(_: f32, b: f32, _: f32) f32 {
     return 1.0 / b;
 }
-fn divDerivB(a: f32, b: f32, _: f32) f32 {
+fn div_deriv_b(a: f32, b: f32, _: f32) f32 {
     return -a / (b * b);
 }
 
@@ -73,7 +73,7 @@ fn divDerivB(a: f32, b: f32, _: f32) f32 {
 fn one3(_: f32, _: f32, _: f32) f32 {
     return 1.0;
 }
-fn minusOne3(_: f32, _: f32, _: f32) f32 {
+fn minus_one3(_: f32, _: f32, _: f32) f32 {
     return -1.0;
 }
 
