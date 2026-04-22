@@ -104,6 +104,22 @@ fn sqrtDeriv(_: f32, y: f32) f32 {
     return 0.5 / y; // d/dx sqrt(x) = 1 / (2*sqrt(x)) = 1 / (2*y)
 }
 
+/// SiLU (Swish): x * sigmoid(x)
+///   fwd:   y = x / (1 + exp(-x))
+///   deriv: sig + x * sig * (1 - sig), where sig = 1/(1+exp(-x))
+///
+/// 旧実装は forward で sig を cache していたが、deriv 内で再計算する方針に統一する。
+/// backward パスで exp() 1 回分の追加コストが発生するが、コードはシンプルかつ
+/// 他 unary op と同じ driver を使える。
+pub const Silu: Kind = .{ .fwd = siluFwd, .deriv = siluDeriv };
+fn siluFwd(x: f32) f32 {
+    return x / (1.0 + @exp(-x));
+}
+fn siluDeriv(x: f32, _: f32) f32 {
+    const sig = 1.0 / (1.0 + @exp(-x));
+    return sig + x * sig * (1.0 - sig);
+}
+
 /// GELU (tanh approximation)
 ///   fwd:   0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 ///   deriv: 0.5 * (1 + tanh) + 0.5 * x * sech^2 * inner'
@@ -138,6 +154,7 @@ test "unary deriv matches numerical gradient" {
         .{ .k = Abs, .name = "Abs", .x = 0.7 },
         .{ .k = Sqrt, .name = "Sqrt", .x = 0.7 },
         .{ .k = Gelu, .name = "Gelu", .x = 0.7 },
+        .{ .k = Silu, .name = "Silu", .x = 0.7 },
     };
     for (kinds) |kd| {
         const y = kd.k.fwd(kd.x);

@@ -376,6 +376,10 @@ pub const DiffMpsRuntime = struct {
     pub fn silu(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
         const n: u32 = @intCast(x.totalElements());
         const out_buf = self.allocBuf(n);
+        // dispatchSiluForward は sig_buf にも書き込むが、共通 backward (unary.Silu) は
+        // 内部で sig を再計算するため、ここで確保した sig_buf は forward 後は未参照。
+        // (arena が zeroGrad() で回収する。将来 sig 不要な Metal kernel を追加すれば
+        // この無駄な GPU write を除去できる。)
         const sig_buf = self.allocBuf(n);
         const gpu = beginGpu(self.metal_ctx);
         self.metal_ctx.dispatchSiluForward(gpu.enc, x.data, out_buf, sig_buf, n);
@@ -383,29 +387,9 @@ pub const DiffMpsRuntime = struct {
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(SiluCtx);
-            ctx.* = .{ .sig_buf = sig_buf };
-            node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSilu;
+            node.backward_fn = &UnaryBackward(unary.Silu).apply;
         }
         return node;
-    }
-
-    const SiluCtx = struct { sig_buf: id };
-
-    fn backwardSilu(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const ctx: *SiluCtx = @ptrCast(@alignCast(self_node.context.?));
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const x_data = bufPtr(pa.data);
-            const sig = bufPtr(ctx.sig_buf);
-            for (0..total) |i| {
-                ga[i] += go[i] * (sig[i] + x_data[i] * sig[i] * (1.0 - sig[i]));
-            }
-        }
     }
 
     pub fn relu(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {

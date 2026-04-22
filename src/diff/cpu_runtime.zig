@@ -279,37 +279,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     pub fn silu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        const sig_cache = self.allocData(total);
-        kernels.siluForward(x.data[0..total], out[0..total], sig_cache[0..total]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            const ctx = self.allocContext(SiluContext);
-            ctx.* = .{ .sig_cache = sig_cache };
-            node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSilu;
-        }
-        return node;
-    }
-
-    const SiluContext = struct {
-        sig_cache: []f32,
-    };
-
-    fn backwardSilu(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        const ga = pa.grad.?;
-        const ctx: *SiluContext = @ptrCast(@alignCast(self_node.context.?));
-        const sig = ctx.sig_cache;
-        for (0..total) |i| {
-            const v = pa.data[i];
-            // d/dx (x * sig(x)) = sig + x * sig * (1 - sig)
-            ga[i] += go[i] * (sig[i] + v * sig[i] * (1.0 - sig[i]));
-        }
+        return self.unaryKind(unary.Silu, x);
     }
 
     /// Fused add + silu: silu(a + b) — delegates to add then silu
