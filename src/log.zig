@@ -92,10 +92,12 @@ fn ensureInit() void {
     if (@atomicLoad(bool, &initialized, .acquire)) return;
     if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_LEVEL")) |buf| {
         defer std.heap.page_allocator.free(buf);
+
         if (parseLevel(buf)) |lv| runtime_level = lv;
     } else |_| {}
     if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_SCOPES")) |buf| {
         defer std.heap.page_allocator.free(buf);
+
         loadScopeFilter(buf);
     } else |_| {}
     @atomicStore(bool, &initialized, true, .release);
@@ -133,6 +135,7 @@ pub const ProfileArtifact = struct {
 fn isProfileEnabled() bool {
     const v = std.process.getEnvVarOwned(std.heap.page_allocator, "NN_PROFILE") catch return false;
     defer std.heap.page_allocator.free(v);
+
     if (v.len == 0) return false;
     if (std.mem.eql(u8, v, "0")) return false;
     if (std.ascii.eqlIgnoreCase(v, "false")) return false;
@@ -149,6 +152,7 @@ pub fn openProfileArtifact(prefix: []const u8) !?ProfileArtifact {
 
     const dir_owned: ?[]u8 = std.process.getEnvVarOwned(allocator, "NN_PROFILE_DIR") catch null;
     defer if (dir_owned) |d| allocator.free(d);
+
     const dir: []const u8 = if (dir_owned) |d| d else "zig-out/profiles";
 
     std.fs.cwd().makePath(dir) catch {};

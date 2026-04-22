@@ -68,8 +68,10 @@ test "diff_cuda_runtime: negative gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testNegativeGrad(CudaAdapter, &rt);
 }
 
@@ -77,8 +79,10 @@ test "diff_cuda_runtime: gelu gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluGrad(CudaAdapter, &rt);
 }
 
@@ -86,8 +90,10 @@ test "diff_cuda_runtime: silu gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSiluGrad(CudaAdapter, &rt);
 }
 
@@ -95,8 +101,10 @@ test "diff_cuda_runtime: square gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSquareGrad(CudaAdapter, &rt);
 }
 
@@ -104,8 +112,10 @@ test "diff_cuda_runtime: reductionMean gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionMeanGrad(CudaAdapter, &rt);
 }
 
@@ -113,8 +123,10 @@ test "diff_cuda_runtime: tanh gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTanhGrad(CudaAdapter, &rt);
 }
 
@@ -122,8 +134,10 @@ test "diff_cuda_runtime: sigmoid gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSigmoidGrad(CudaAdapter, &rt);
 }
 
@@ -131,8 +145,10 @@ test "diff_cuda_runtime: softmax gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSoftmaxGrad(CudaAdapter, &rt);
 }
 
@@ -140,8 +156,10 @@ test "diff_cuda_runtime: relu gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReluGrad(CudaAdapter, &rt);
 }
 
@@ -149,8 +167,10 @@ test "diff_cuda_runtime: reductionSum gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionSumGrad(CudaAdapter, &rt);
 }
 
@@ -158,8 +178,10 @@ test "diff_cuda_runtime: transpose 3D gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTranspose3DGrad(CudaAdapter, &rt);
 }
 
@@ -167,8 +189,10 @@ test "diff_cuda_runtime: reshape gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReshapeGrad(CudaAdapter, &rt);
 }
 
@@ -181,9 +205,11 @@ test "diff_cuda_runtime: matmul 2D gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -199,10 +225,12 @@ test "diff_cuda_runtime: layerNorm gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{4}, .ones);
     _ = module.addParam(&.{4}, .zeros);
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
@@ -219,9 +247,11 @@ test "diff_cuda_runtime: add broadcast gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{3}, .xavier);
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -237,10 +267,12 @@ test "diff_cuda_runtime: linear forward+backward" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     _ = module.addParam(&.{2}, .zeros);
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var input_data = [_]f32{ 1, 2, 3, 4, 5, 6 };
@@ -276,6 +308,7 @@ test "diff_cuda_runtime: mseLoss gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -301,6 +334,7 @@ test "diff_cuda_runtime: crossEntropyLossWithIndices gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -326,6 +360,7 @@ test "diff_cuda_runtime: bceLossWithLogits gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -352,9 +387,11 @@ test "diff_cuda_runtime: gather gradient" {
     const cuda_ctx = try getOrInitCudaCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 4, 3 }, .xavier);
     var rt = try DiffCudaRuntime.init(&module, cuda_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     const indices = [_]u32{ 1, 3, 0, 1 };

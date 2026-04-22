@@ -61,14 +61,19 @@ download-model:
 clean:
     rm -rf .zig-cache zig-out
 
-# --- Zig style checker (installed from ~/dotfiles/zig-tools) ---
+# repo 管理の Git hooks を有効化
+setup-githooks:
+    git config core.hooksPath .githooks
+    chmod +x .githooks/pre-commit
+
+# --- Zig style checker ---
 #
 # `just lint` は src/ の現状を scripts/style_baseline.txt と比較し、
 # 増えた違反だけで失敗する (ratcheting baseline)。既存違反を直した後は
 # `just lint-update-baseline` で baseline を更新する。
 # ZIG_STYLE_CHECKER 環境変数で checker 本体のパスを差し替え可能。
 
-style_checker := env("ZIG_STYLE_CHECKER", env("HOME") + "/dotfiles/zig-tools/check_style.zig")
+style_checker := env("ZIG_STYLE_CHECKER", "scripts/check_style.zig")
 
 # zig fmt でフォーマット崩れを検出 (書き換えはしない)
 fmt-check:
@@ -92,4 +97,10 @@ lint-update-baseline:
 
 # fmt-check + lint をまとめて実行 (PR 前の最低限チェック)
 check: fmt-check lint
+
+# fmt-check + strict lint をまとめて実行
+check-strict: fmt-check lint-strict
+
+# CI で回す最低限チェック
+ci: check-strict test
 # --- end zig-tools linter ---

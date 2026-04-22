@@ -117,6 +117,7 @@ test "BatchIterator: basic iteration" {
 test "BatchIterator: numBatches" {
     var iter = try BatchIterator.init(testing.allocator, 10, 3, false);
     defer iter.deinit();
+
     try testing.expectEqual(@as(usize, 4), iter.numBatches()); // ceil(10/3) = 4
 }
 

@@ -43,96 +43,120 @@ const CpuAdapter = struct {
 test "diff_cpu_runtime: negative gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testNegativeGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: gelu gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: silu gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSiluGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: square gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSquareGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: reductionMean gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionMeanGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: tanh gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTanhGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: sigmoid gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSigmoidGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: softmax gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSoftmaxGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: relu gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReluGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: reductionSum gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionSumGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: transpose 3D gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTranspose3DGrad(CpuAdapter, &rt);
 }
 
 test "diff_cpu_runtime: reshape gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReshapeGrad(CpuAdapter, &rt);
 }
 
@@ -144,9 +168,11 @@ const checkGrad = helpers.GradientChecker(CpuAdapter).checkGrad;
 test "diff_cpu_runtime: matmul 2D gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -161,10 +187,12 @@ test "diff_cpu_runtime: matmul 2D gradient" {
 test "diff_cpu_runtime: layerNorm gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{4}, .ones);
     _ = module.addParam(&.{4}, .zeros);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
@@ -180,9 +208,11 @@ test "diff_cpu_runtime: layerNorm gradient" {
 test "diff_cpu_runtime: add broadcast gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{3}, .xavier);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -197,6 +227,7 @@ test "diff_cpu_runtime: add broadcast gradient" {
 test "diff_cpu_runtime: mul broadcast gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -214,10 +245,12 @@ test "diff_cpu_runtime: mul broadcast gradient" {
 test "diff_cpu_runtime: linear forward+backward" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     _ = module.addParam(&.{2}, .zeros);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var input_data = [_]f32{ 1, 2, 3, 4, 5, 6 };
@@ -251,6 +284,7 @@ test "diff_cpu_runtime: linear forward+backward" {
 test "diff_cpu_runtime: mseLoss gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -274,6 +308,7 @@ test "diff_cpu_runtime: mseLoss gradient" {
 test "diff_cpu_runtime: crossEntropyLossWithIndices gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -297,9 +332,11 @@ test "diff_cpu_runtime: crossEntropyLossWithIndices gradient" {
 test "diff_cpu_runtime: gather gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 4, 3 }, .xavier);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     const indices = [_]u32{ 1, 3, 0, 1 };
@@ -324,6 +361,7 @@ test "diff_cpu_runtime: gather gradient" {
 test "diff_cpu_runtime: bceLossWithLogits gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -352,6 +390,7 @@ test "diff_cpu_runtime: bceLossWithLogits gradient" {
 test "diff_cpu_runtime: concat last-axis gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -367,6 +406,7 @@ test "diff_cpu_runtime: concat last-axis gradient" {
 test "diff_cpu_runtime: concat axis=0 gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -382,6 +422,7 @@ test "diff_cpu_runtime: concat axis=0 gradient" {
 test "diff_cpu_runtime: split last-axis gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -396,6 +437,7 @@ test "diff_cpu_runtime: split last-axis gradient" {
 test "diff_cpu_runtime: split+transform gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -412,10 +454,12 @@ test "diff_cpu_runtime: split+transform gradient" {
 test "diff_cpu_runtime: conv2d gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 1, 4 }, .xavier);
     _ = module.addParam(&.{1}, .zeros);
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
@@ -442,6 +486,7 @@ test "diff_cpu_runtime: conv2d gradient" {
 test "diff_cpu_runtime: maxPool2d gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 
@@ -474,6 +519,7 @@ test "diff_cpu_runtime: maxPool2d gradient" {
 test "diff_cpu_runtime: logSoftmax gradient" {
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
 

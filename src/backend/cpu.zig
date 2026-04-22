@@ -31,6 +31,7 @@ pub fn printProfile() void {
     var maybe_artifact = log_mod.openProfileArtifact("cpu") catch null;
     if (maybe_artifact) |*artifact| {
         defer artifact.close();
+
         const sgemm_ms = @as(f64, @floatFromInt(sgemm_nanos)) / 1_000_000.0;
         const saxpy_ms = @as(f64, @floatFromInt(saxpy_nanos)) / 1_000_000.0;
         const other_ms = @as(f64, @floatFromInt(other_nanos)) / 1_000_000.0;

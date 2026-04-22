@@ -338,6 +338,7 @@ test "backwardPass: backward_fn の逆順呼び出しと visited リセット" {
     // topo_buf = [0, 1, 2] — backwardPass は逆順 (2, 1, 0) で呼ぶ
     var buf: std.ArrayListUnmanaged(*Node) = .empty;
     defer buf.deinit(testing.allocator);
+
     buf.append(testing.allocator, &nodes[0]) catch unreachable;
     buf.append(testing.allocator, &nodes[1]) catch unreachable;
     buf.append(testing.allocator, &nodes[2]) catch unreachable;

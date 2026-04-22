@@ -439,70 +439,75 @@ fn requireBytes(buf: []const u8, pos: usize, n: usize) !void {
     if (pos + n > buf.len) return error.UnexpectedEof;
 }
 
+const MetadataParseError = error{
+    UnexpectedEof,
+    UnsupportedValueType,
+};
+
+fn consumeBytes(buf: []const u8, pos: *usize, n: usize) MetadataParseError![]const u8 {
+    try requireBytes(buf, pos.*, n);
+    const bytes = buf[pos.* .. pos.* + n];
+    pos.* += n;
+    return bytes;
+}
+
 /// スカラ系 MetadataValue (配列と文字列以外) を読む
-fn readMetadataScalar(buf: []const u8, pos: *usize, vt: ValueType) !MetadataValue {
+fn readMetadataScalar(
+    buf: []const u8,
+    pos: *usize,
+    vt: ValueType,
+) MetadataParseError!MetadataValue {
     switch (vt) {
         .uint8 => {
-            try requireBytes(buf, pos.*, 1);
-            defer pos.* += 1;
-            return .{ .uint8 = buf[pos.*] };
+            const bytes = try consumeBytes(buf, pos, 1);
+            return .{ .uint8 = bytes[0] };
         },
         .int8 => {
-            try requireBytes(buf, pos.*, 1);
-            defer pos.* += 1;
-            return .{ .int8 = @bitCast(buf[pos.*]) };
+            const bytes = try consumeBytes(buf, pos, 1);
+            return .{ .int8 = @bitCast(bytes[0]) };
         },
         .uint16 => {
-            try requireBytes(buf, pos.*, 2);
-            defer pos.* += 2;
-            return .{ .uint16 = std.mem.readInt(u16, buf[pos.*..][0..2], .little) };
+            const bytes = try consumeBytes(buf, pos, 2);
+            return .{ .uint16 = std.mem.readInt(u16, bytes[0..2], .little) };
         },
         .int16 => {
-            try requireBytes(buf, pos.*, 2);
-            defer pos.* += 2;
-            return .{ .int16 = std.mem.readInt(i16, buf[pos.*..][0..2], .little) };
+            const bytes = try consumeBytes(buf, pos, 2);
+            return .{ .int16 = std.mem.readInt(i16, bytes[0..2], .little) };
         },
         .uint32 => {
-            try requireBytes(buf, pos.*, 4);
-            defer pos.* += 4;
-            return .{ .uint32 = readU32(buf[pos.*..][0..4]) };
+            const bytes = try consumeBytes(buf, pos, 4);
+            return .{ .uint32 = readU32(bytes[0..4]) };
         },
         .int32 => {
-            try requireBytes(buf, pos.*, 4);
-            defer pos.* += 4;
-            return .{ .int32 = readI32(buf[pos.*..][0..4]) };
+            const bytes = try consumeBytes(buf, pos, 4);
+            return .{ .int32 = readI32(bytes[0..4]) };
         },
         .float32 => {
-            try requireBytes(buf, pos.*, 4);
-            defer pos.* += 4;
-            return .{ .float32 = @bitCast(buf[pos.*..][0..4].*) };
+            const bytes = try consumeBytes(buf, pos, 4);
+            return .{ .float32 = @bitCast(bytes[0..4].*) };
         },
         .bool_ => {
-            try requireBytes(buf, pos.*, 1);
-            defer pos.* += 1;
-            return .{ .bool_ = buf[pos.*] != 0 };
+            const bytes = try consumeBytes(buf, pos, 1);
+            return .{ .bool_ = bytes[0] != 0 };
         },
         .uint64 => {
-            try requireBytes(buf, pos.*, 8);
-            defer pos.* += 8;
-            return .{ .uint64 = readU64(buf[pos.*..][0..8]) };
+            const bytes = try consumeBytes(buf, pos, 8);
+            return .{ .uint64 = readU64(bytes[0..8]) };
         },
         .int64 => {
-            try requireBytes(buf, pos.*, 8);
-            defer pos.* += 8;
-            return .{ .int64 = std.mem.readInt(i64, buf[pos.*..][0..8], .little) };
+            const bytes = try consumeBytes(buf, pos, 8);
+            return .{ .int64 = std.mem.readInt(i64, bytes[0..8], .little) };
         },
         .float64 => {
-            try requireBytes(buf, pos.*, 8);
-            defer pos.* += 8;
-            return .{ .float64 = @bitCast(buf[pos.*..][0..8].*) };
+            const bytes = try consumeBytes(buf, pos, 8);
+            return .{ .float64 = @bitCast(bytes[0..8].*) };
         },
         else => return error.UnsupportedValueType,
     }
 }
 
 /// 配列型 MetadataValue を読む (要素をパースしつつ生バイト範囲を記録)
-fn readMetadataArray(buf: []const u8, pos: *usize) !MetadataValue {
+fn readMetadataArray(buf: []const u8, pos: *usize) MetadataParseError!MetadataValue {
     if (pos.* + 12 > buf.len) return error.UnexpectedEof;
     const elem_type: ValueType = @enumFromInt(readU32(buf[pos.*..][0..4]));
     pos.* += 4;
@@ -522,7 +527,11 @@ fn readMetadataArray(buf: []const u8, pos: *usize) !MetadataValue {
     } };
 }
 
-fn readMetadataValue(buf: []const u8, pos: *usize, value_type_raw: u32) !MetadataValue {
+fn readMetadataValue(
+    buf: []const u8,
+    pos: *usize,
+    value_type_raw: u32,
+) MetadataParseError!MetadataValue {
     const vt: ValueType = @enumFromInt(value_type_raw);
     return switch (vt) {
         .string => .{ .string = try readGGUFString(buf, pos) },
@@ -634,6 +643,7 @@ test "parse minimal GGUF" {
     // Load tensor
     const data = try gguf_file.loadTensorF32("w", alloc);
     defer alloc.free(data);
+
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), data[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 4.0), data[3], 1e-6);
 }

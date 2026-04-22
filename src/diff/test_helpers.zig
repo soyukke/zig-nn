@@ -84,6 +84,7 @@ pub fn GradientChecker(comptime Adapter: type) type {
             const out_n = probeOutputSize(f, runtime, x_data, shape);
             const weights = try allocator.alloc(f32, out_n);
             defer allocator.free(weights);
+
             for (weights, 0..) |*w, idx| {
                 w.* = @as(f32, @floatFromInt(idx + 1)) * 0.3 + 0.1;
             }
@@ -109,6 +110,7 @@ pub fn GradientChecker(comptime Adapter: type) type {
             // 勾配を読み取って比較
             const ana_grad_buf = try allocator.alloc(f32, n);
             defer allocator.free(ana_grad_buf);
+
             const ana_grad = computeAnalyticalGrad(
                 f,
                 runtime,

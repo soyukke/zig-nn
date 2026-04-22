@@ -76,6 +76,7 @@ pub const ProfileStats = struct {
         var maybe_artifact = log_mod.openProfileArtifact("gemma3") catch null;
         if (maybe_artifact) |*artifact| {
             defer artifact.close();
+
             const w = artifact.writer();
             w.print("=== Gemma3 Profile ({d} calls) ===\n", .{self.call_count}) catch return;
             for (&entries) |*e| {

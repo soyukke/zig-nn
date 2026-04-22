@@ -2093,6 +2093,7 @@ pub const DiffCpuRuntime = struct {
         const count = self.module.paramCount();
         const slices = try self.allocator.alloc([]const f32, count);
         defer self.allocator.free(slices);
+
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }
@@ -2109,6 +2110,7 @@ pub const DiffCpuRuntime = struct {
         const count = self.module.paramCount();
         const slices = try self.allocator.alloc([]f32, count);
         defer self.allocator.free(slices);
+
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }

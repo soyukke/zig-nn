@@ -63,8 +63,10 @@ test "diff_mps_runtime: gelu gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluGrad(MpsAdapter, &rt);
 }
 
@@ -72,8 +74,10 @@ test "diff_mps_runtime: silu gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSiluGrad(MpsAdapter, &rt);
 }
 
@@ -81,8 +85,10 @@ test "diff_mps_runtime: square gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSquareGrad(MpsAdapter, &rt);
 }
 
@@ -90,8 +96,10 @@ test "diff_mps_runtime: tanh gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTanhGrad(MpsAdapter, &rt);
 }
 
@@ -99,8 +107,10 @@ test "diff_mps_runtime: sigmoid gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSigmoidGrad(MpsAdapter, &rt);
 }
 
@@ -108,8 +118,10 @@ test "diff_mps_runtime: relu gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReluGrad(MpsAdapter, &rt);
 }
 
@@ -117,8 +129,10 @@ test "diff_mps_runtime: negative gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testNegativeGrad(MpsAdapter, &rt);
 }
 
@@ -126,8 +140,10 @@ test "diff_mps_runtime: softmax gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSoftmaxGrad(MpsAdapter, &rt);
 }
 
@@ -135,8 +151,10 @@ test "diff_mps_runtime: reductionSum gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionSumGrad(MpsAdapter, &rt);
 }
 
@@ -144,8 +162,10 @@ test "diff_mps_runtime: reductionMean gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReductionMeanGrad(MpsAdapter, &rt);
 }
 
@@ -153,8 +173,10 @@ test "diff_mps_runtime: transpose 3D gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testTranspose3DGrad(MpsAdapter, &rt);
 }
 
@@ -162,8 +184,10 @@ test "diff_mps_runtime: reshape gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testReshapeGrad(MpsAdapter, &rt);
 }
 
@@ -176,9 +200,11 @@ test "diff_mps_runtime: matmul 2D gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -194,10 +220,12 @@ test "diff_mps_runtime: layerNorm gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{4}, .ones);
     _ = module.addParam(&.{4}, .zeros);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
@@ -214,9 +242,11 @@ test "diff_mps_runtime: add broadcast gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{3}, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
@@ -232,6 +262,7 @@ test "diff_mps_runtime: mul broadcast gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -249,10 +280,12 @@ test "diff_mps_runtime: linear forward+backward" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 3, 2 }, .xavier);
     _ = module.addParam(&.{2}, .zeros);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     // loss = sum(x @ W + b) → dW = x^T @ ones, db = sum(ones, axis=0)
@@ -292,6 +325,7 @@ test "diff_mps_runtime: mseLoss gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -317,6 +351,7 @@ test "diff_mps_runtime: crossEntropyLossWithIndices gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -360,6 +395,7 @@ test "diff_mps_runtime: bceLossWithLogits gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -386,9 +422,11 @@ test "diff_mps_runtime: gather gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 4, 3 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     const indices = [_]u32{ 1, 3, 0, 1 };
@@ -420,8 +458,10 @@ test "diff_mps_runtime: gelu n=33 (BM=64 boundary)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluBoundary(MpsAdapter, &rt, 33);
 }
 
@@ -429,8 +469,10 @@ test "diff_mps_runtime: gelu n=65 (BM=64+1)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluBoundary(MpsAdapter, &rt, 65);
 }
 
@@ -438,8 +480,10 @@ test "diff_mps_runtime: gelu n=257 (threadgroup 256+1)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testGeluBoundary(MpsAdapter, &rt, 257);
 }
 
@@ -447,9 +491,11 @@ test "diff_mps_runtime: matmul 65x33 (tiling boundary)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 65, 33 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
     try helpers.testMatmulBoundary(MpsAdapter, &rt, 5, 65, 33);
 }
@@ -458,9 +504,11 @@ test "diff_mps_runtime: matmul 7x5 (non-power-of-2)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{ 7, 5 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
     try helpers.testMatmulBoundary(MpsAdapter, &rt, 3, 7, 5);
 }
@@ -469,8 +517,10 @@ test "diff_mps_runtime: softmax 4x7 (non-power-of-2 cols)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSoftmaxBoundary(MpsAdapter, &rt, 4, 7);
 }
 
@@ -478,8 +528,10 @@ test "diff_mps_runtime: softmax 3x33 (non-power-of-2)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     try helpers.testSoftmaxBoundary(MpsAdapter, &rt, 3, 33);
 }
 
@@ -491,9 +543,11 @@ test "diff_mps_runtime: rmsNorm gradient (x)" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{4}, .ones);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
@@ -509,9 +563,11 @@ test "diff_mps_runtime: rmsNorm forward sanity" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     _ = module.addParam(&.{3}, .ones);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     // x = [[1, 2, 3]], inv_rms = 1/sqrt((1+4+9)/3) = sqrt(3/14) ≈ 0.4629
@@ -535,6 +591,7 @@ test "diff_mps_runtime: causalSoftmax upper-triangular mask" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -570,6 +627,7 @@ test "diff_mps_runtime: causalSoftmax gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -637,6 +695,7 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -696,6 +755,7 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
@@ -754,6 +814,7 @@ test "diff_mps_runtime: rope gradient" {
     const metal_ctx = try getOrInitMetalCtx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
+
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 

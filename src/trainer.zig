@@ -86,6 +86,7 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
 
             const sizes = try module.paramSizes(allocator);
             defer allocator.free(sizes);
+
             const adam = if (is_cuda)
                 try GpuAdamState.init(allocator, device_ctx, sizes)
             else

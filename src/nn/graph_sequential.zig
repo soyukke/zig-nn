@@ -98,10 +98,12 @@ test "Sequential: Linear + ReLU + Linear forward+backward" {
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     // Input [2, 3]
@@ -131,10 +133,12 @@ test "Sequential: single layer" {
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
     defer rt.deinit();
+
     rt.initParams();
 
     var data = [_]f32{ 1, 2, 3, 4 };
@@ -148,6 +152,7 @@ test "Sequential: activations only" {
 
     var module = compute.Module.init(testing.allocator);
     defer module.deinit();
+
     const model = Model.init(&module);
 
     var rt = try DiffCpuRuntime.init(&module, testing.allocator);
