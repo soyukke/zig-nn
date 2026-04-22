@@ -14,6 +14,7 @@ const cpu_backend = @import("../backend/cpu.zig");
 const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
 const unary = @import("common/unary.zig");
+const binary = @import("common/binary.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -179,6 +180,64 @@ pub const DiffCpuRuntime = struct {
         };
     }
 
+    /// Pointwise binary op driver. 数式は diff/common/binary.zig に集約。
+    /// broadcasting: a と b の総要素数の大きい方が出力。mod index で shape mismatch を吸収。
+    fn binaryKind(
+        self: *DiffCpuRuntime,
+        comptime kind: binary.Kind,
+        a: DiffTensor,
+        b: DiffTensor,
+    ) DiffTensor {
+        const a_total = a.totalElements();
+        const b_total = b.totalElements();
+        const out_total = @max(a_total, b_total);
+        const smaller = @min(a_total, b_total);
+        if (!(a_total == b_total or out_total % smaller == 0)) {
+            @panic("binary: incompatible shapes for broadcast");
+        }
+        const out_shape = if (a_total >= b_total) a.shape[0..a.ndim] else b.shape[0..b.ndim];
+        const out = self.allocData(out_total);
+        for (0..out_total) |i| {
+            out[i] = kind.fwd(a.data[i % a_total], b.data[i % b_total]);
+        }
+        const rg = a.requires_grad or b.requires_grad;
+        const node = self.makeNode(out, out_shape, rg);
+        if (rg) {
+            node.parents[0] = a;
+            node.parents[1] = b;
+            node.backward_fn = &BinaryBackward(kind).apply;
+        }
+        return node;
+    }
+
+    fn BinaryBackward(comptime kind: binary.Kind) type {
+        return struct {
+            fn apply(self_node: *DiffNode) void {
+                const pa = self_node.parents[0].?;
+                const pb = self_node.parents[1].?;
+                const out_total = self_node.totalElements();
+                const a_total = pa.totalElements();
+                const b_total = pb.totalElements();
+                const go = self_node.grad.?;
+                const y = self_node.data;
+                if (pa.grad) |ga| {
+                    for (0..out_total) |i| {
+                        const ai = i % a_total;
+                        const bi = i % b_total;
+                        ga[ai] += go[i] * kind.deriv_a(pa.data[ai], pb.data[bi], y[i]);
+                    }
+                }
+                if (pb.grad) |gb| {
+                    for (0..out_total) |i| {
+                        const ai = i % a_total;
+                        const bi = i % b_total;
+                        gb[bi] += go[i] * kind.deriv_b(pa.data[ai], pb.data[bi], y[i]);
+                    }
+                }
+            }
+        };
+    }
+
     // ── Param access ──
 
     pub fn param(self: *DiffCpuRuntime, handle: ParamHandle) DiffTensor {
@@ -313,30 +372,7 @@ pub const DiffCpuRuntime = struct {
 
     /// element-wise div: a / b — d/da = 1/b, d/db = -a/b^2
     pub fn div(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        const total = a.totalElements();
-        const out = self.allocData(total);
-        for (0..total) |i| out[i] = a.data[i] / b.data[i];
-        const rg = a.requires_grad or b.requires_grad;
-        const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-        if (rg) {
-            node.parents[0] = a;
-            node.parents[1] = b;
-            node.backward_fn = &backwardDiv;
-        }
-        return node;
-    }
-
-    fn backwardDiv(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const total = self_node.totalElements();
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i] / pb.data[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..total) |i| gb[i] += -go[i] * pa.data[i] / (pb.data[i] * pb.data[i]);
-        }
+        return self.binaryKind(binary.Div, a, b);
     }
 
     pub fn tanh_(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
@@ -347,239 +383,18 @@ pub const DiffCpuRuntime = struct {
         return self.unaryKind(unary.Sigmoid, x);
     }
 
-    // ── Binary ops ──
+    // ── Binary ops (数式は diff/common/binary.zig) ──
 
     pub fn add(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
-        const rg = a.requires_grad or b.requires_grad;
-
-        if (a_total == b_total) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] + b.data[i];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardAddSame;
-            }
-            return node;
-        }
-
-        // Broadcast: b is smaller
-        if (b_total < a_total and a_total % b_total == 0) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] + b.data[i % b_total];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardAddBroadcastB;
-            }
-            return node;
-        }
-
-        // Broadcast: a is smaller
-        if (a_total < b_total and b_total % a_total == 0) {
-            const out = self.allocData(b_total);
-            for (0..b_total) |i| out[i] = a.data[i % a_total] + b.data[i];
-            const node = self.makeNode(out, b.shape[0..b.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardAddBroadcastA;
-            }
-            return node;
-        }
-
-        @panic("add: incompatible shapes for broadcast");
-    }
-
-    fn backwardAddSame(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const total = self_node.totalElements();
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..total) |i| gb[i] += go[i];
-        }
-    }
-
-    fn backwardAddBroadcastB(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| {
-            for (0..a_total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..a_total) |i| gb[i % b_total] += go[i];
-        }
-    }
-
-    fn backwardAddBroadcastA(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| {
-            for (0..b_total) |i| ga[i % a_total] += go[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..b_total) |i| gb[i] += go[i];
-        }
-    }
-
-    pub fn mul(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
-        const rg = a.requires_grad or b.requires_grad;
-
-        if (a_total == b_total) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] * b.data[i];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulSame;
-            }
-            return node;
-        }
-
-        // Broadcast: b is scalar or smaller
-        if (b_total <= a_total and a_total % b_total == 0) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] * b.data[i % b_total];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulBroadcastB;
-            }
-            return node;
-        }
-
-        // Broadcast: a is scalar or smaller
-        if (a_total < b_total and b_total % a_total == 0) {
-            const out = self.allocData(b_total);
-            for (0..b_total) |i| out[i] = a.data[i % a_total] * b.data[i];
-            const node = self.makeNode(out, b.shape[0..b.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulBroadcastA;
-            }
-            return node;
-        }
-
-        @panic("mul: incompatible shapes for broadcast");
-    }
-
-    fn backwardMulSame(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const total = self_node.totalElements();
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i] * pb.data[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..total) |i| gb[i] += go[i] * pa.data[i];
-        }
-    }
-
-    fn backwardMulBroadcastB(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| {
-            for (0..a_total) |i| ga[i] += go[i] * pb.data[i % b_total];
-        }
-        if (pb.grad) |gb| {
-            for (0..a_total) |i| gb[i % b_total] += go[i] * pa.data[i];
-        }
-    }
-
-    fn backwardMulBroadcastA(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| {
-            for (0..b_total) |i| ga[i % a_total] += go[i] * pb.data[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..b_total) |i| gb[i] += go[i] * pa.data[i % a_total];
-        }
+        return self.binaryKind(binary.Add, a, b);
     }
 
     pub fn sub(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
-        const rg = a.requires_grad or b.requires_grad;
-
-        if (a_total == b_total) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] - b.data[i];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardSubSame;
-            }
-            return node;
-        }
-
-        if (b_total < a_total and a_total % b_total == 0) {
-            const out = self.allocData(a_total);
-            for (0..a_total) |i| out[i] = a.data[i] - b.data[i % b_total];
-            const node = self.makeNode(out, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardSubBroadcastB;
-            }
-            return node;
-        }
-
-        @panic("sub: incompatible shapes for broadcast");
+        return self.binaryKind(binary.Sub, a, b);
     }
 
-    fn backwardSubSame(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const total = self_node.totalElements();
-        if (pa.grad) |ga| {
-            for (0..total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..total) |i| gb[i] -= go[i];
-        }
-    }
-
-    fn backwardSubBroadcastB(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| {
-            for (0..a_total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |gb| {
-            for (0..a_total) |i| gb[i % b_total] -= go[i];
-        }
+    pub fn mul(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
+        return self.binaryKind(binary.Mul, a, b);
     }
 
     // ── Matmul ──
