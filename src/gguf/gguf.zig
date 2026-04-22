@@ -160,7 +160,10 @@ pub const GGUFFile = struct {
 
         if (file_offset + data_bytes > self.file_buf.len) return error.UnexpectedEof;
 
-        const out_dim: usize = if (info.n_dims >= 2) @intCast(info.dimensions[1]) else @intCast(info.dimensions[0]);
+        const out_dim: usize = if (info.n_dims >= 2)
+            @intCast(info.dimensions[1])
+        else
+            @intCast(info.dimensions[0]);
         const in_dim: usize = if (info.n_dims >= 2) @intCast(info.dimensions[0]) else 1;
 
         return .{
@@ -190,7 +193,11 @@ pub const GGUFFile = struct {
 
     /// テンソルデータを f32 として読み込み + 2D 転置
     /// GGUF の 2D テンソルは (cols, rows) 順なので (rows, cols) に転置
-    pub fn loadTensorF32Transposed(self: *const GGUFFile, name: []const u8, allocator: Allocator) ![]f32 {
+    pub fn loadTensorF32Transposed(
+        self: *const GGUFFile,
+        name: []const u8,
+        allocator: Allocator,
+    ) ![]f32 {
         const info = self.getTensorInfo(name) orelse return error.TensorNotFound;
         if (info.n_dims != 2) return error.InvalidDimensions;
 
@@ -214,7 +221,11 @@ pub const GGUFFile = struct {
     }
 
     /// 配列メタデータの文字列要素を取得
-    pub fn getArrayStrings(self: *const GGUFFile, key: []const u8, allocator: Allocator) ![][]const u8 {
+    pub fn getArrayStrings(
+        self: *const GGUFFile,
+        key: []const u8,
+        allocator: Allocator,
+    ) ![][]const u8 {
         const val = self.getMetadata(key) orelse return error.KeyNotFound;
         const arr = switch (val) {
             .array => |a| a,
@@ -257,10 +268,17 @@ pub const GGUFFile = struct {
             var len: usize = 0;
             for (0..t.n_dims) |d| {
                 const sep: []const u8 = if (d > 0) "x" else "";
-                const written = std.fmt.bufPrint(buf[len..], "{s}{d}", .{ sep, t.dimensions[d] }) catch break;
+                const written = std.fmt.bufPrint(
+                    buf[len..],
+                    "{s}{d}",
+                    .{ sep, t.dimensions[d] },
+                ) catch break;
                 len += written.len;
             }
-            log.debug("  tensor {s}: {s} (type={d})", .{ t.name, buf[0..len], @intFromEnum(t.type_) });
+            log.debug(
+                "  tensor {s}: {s} (type={d})",
+                .{ t.name, buf[0..len], @intFromEnum(t.type_) },
+            );
         }
     }
 };
@@ -302,52 +320,75 @@ pub fn parse(allocator: Allocator, io: std.Io, file_path: []const u8) !GGUFFile 
     return parseFromBuffer(allocator, file_buf, file_path);
 }
 
-pub fn parseFromBuffer(allocator: Allocator, file_buf: []const u8, file_path: []const u8) !GGUFFile {
-    var pos: usize = 0;
+const GgufHeader = struct {
+    version: u32,
+    tensor_count: usize,
+    metadata_kv_count: usize,
+};
 
-    // Header
+/// GGUF ヘッダ (magic + version + counts) を読む
+fn parseGgufHeader(file_buf: []const u8, pos: *usize) !GgufHeader {
     if (file_buf.len < 20) return error.FileTooSmall;
 
-    const magic = readU32(file_buf[pos..][0..4]);
-    pos += 4;
+    const magic = readU32(file_buf[pos.*..][0..4]);
+    pos.* += 4;
     if (magic != GGUF_MAGIC) return error.InvalidMagic;
 
-    const version = readU32(file_buf[pos..][0..4]);
-    pos += 4;
+    const version = readU32(file_buf[pos.*..][0..4]);
+    pos.* += 4;
     if (version < 2 or version > 3) return error.UnsupportedVersion;
 
-    const tensor_count: usize = @intCast(readU64(file_buf[pos..][0..8]));
-    pos += 8;
-    const metadata_kv_count: usize = @intCast(readU64(file_buf[pos..][0..8]));
-    pos += 8;
+    const tensor_count: usize = @intCast(readU64(file_buf[pos.*..][0..8]));
+    pos.* += 8;
+    const metadata_kv_count: usize = @intCast(readU64(file_buf[pos.*..][0..8]));
+    pos.* += 8;
 
-    // Metadata
-    const metadata = try allocator.alloc(MetadataKV, metadata_kv_count);
-    errdefer allocator.free(metadata);
+    return .{
+        .version = version,
+        .tensor_count = tensor_count,
+        .metadata_kv_count = metadata_kv_count,
+    };
+}
 
-    for (0..metadata_kv_count) |i| {
-        const kv = try readMetadataKV(file_buf, &pos);
-        metadata[i] = kv;
-    }
-
-    // アライメント値を取得
-    var alignment: u64 = 32;
+/// metadata から general.alignment を探す (デフォルト 32)
+fn findAlignment(metadata: []const MetadataKV) u64 {
     for (metadata) |kv| {
         if (std.mem.eql(u8, kv.key, "general.alignment")) {
-            alignment = switch (kv.value) {
+            return switch (kv.value) {
                 .uint32 => |v| v,
                 .uint64 => |v| v,
                 else => 32,
             };
-            break;
         }
     }
+    return 32;
+}
+
+pub fn parseFromBuffer(
+    allocator: Allocator,
+    file_buf: []const u8,
+    file_path: []const u8,
+) !GGUFFile {
+    var pos: usize = 0;
+
+    const header = try parseGgufHeader(file_buf, &pos);
+
+    // Metadata
+    const metadata = try allocator.alloc(MetadataKV, header.metadata_kv_count);
+    errdefer allocator.free(metadata);
+
+    for (0..header.metadata_kv_count) |i| {
+        const kv = try readMetadataKV(file_buf, &pos);
+        metadata[i] = kv;
+    }
+
+    const alignment = findAlignment(metadata);
 
     // Tensor info
-    const tensors = try allocator.alloc(TensorInfo, tensor_count);
+    const tensors = try allocator.alloc(TensorInfo, header.tensor_count);
     errdefer allocator.free(tensors);
 
-    for (0..tensor_count) |i| {
+    for (0..header.tensor_count) |i| {
         tensors[i] = try readTensorInfo(file_buf, &pos);
     }
 
@@ -360,7 +401,7 @@ pub fn parseFromBuffer(allocator: Allocator, file_buf: []const u8, file_path: []
     @memcpy(path_copy, file_path);
 
     return .{
-        .version = version,
+        .version = header.version,
         .metadata = metadata,
         .tensors = tensors,
         .data_offset = @intCast(data_offset),
@@ -393,99 +434,101 @@ fn readMetadataKV(buf: []const u8, pos: *usize) !MetadataKV {
     return .{ .key = key, .value = value };
 }
 
+/// pos の位置から n バイトを読み進められるかチェック
+fn requireBytes(buf: []const u8, pos: usize, n: usize) !void {
+    if (pos + n > buf.len) return error.UnexpectedEof;
+}
+
+/// スカラ系 MetadataValue (配列と文字列以外) を読む
+fn readMetadataScalar(buf: []const u8, pos: *usize, vt: ValueType) !MetadataValue {
+    switch (vt) {
+        .uint8 => {
+            try requireBytes(buf, pos.*, 1);
+            defer pos.* += 1;
+            return .{ .uint8 = buf[pos.*] };
+        },
+        .int8 => {
+            try requireBytes(buf, pos.*, 1);
+            defer pos.* += 1;
+            return .{ .int8 = @bitCast(buf[pos.*]) };
+        },
+        .uint16 => {
+            try requireBytes(buf, pos.*, 2);
+            defer pos.* += 2;
+            return .{ .uint16 = std.mem.readInt(u16, buf[pos.*..][0..2], .little) };
+        },
+        .int16 => {
+            try requireBytes(buf, pos.*, 2);
+            defer pos.* += 2;
+            return .{ .int16 = std.mem.readInt(i16, buf[pos.*..][0..2], .little) };
+        },
+        .uint32 => {
+            try requireBytes(buf, pos.*, 4);
+            defer pos.* += 4;
+            return .{ .uint32 = readU32(buf[pos.*..][0..4]) };
+        },
+        .int32 => {
+            try requireBytes(buf, pos.*, 4);
+            defer pos.* += 4;
+            return .{ .int32 = readI32(buf[pos.*..][0..4]) };
+        },
+        .float32 => {
+            try requireBytes(buf, pos.*, 4);
+            defer pos.* += 4;
+            return .{ .float32 = @bitCast(buf[pos.*..][0..4].*) };
+        },
+        .bool_ => {
+            try requireBytes(buf, pos.*, 1);
+            defer pos.* += 1;
+            return .{ .bool_ = buf[pos.*] != 0 };
+        },
+        .uint64 => {
+            try requireBytes(buf, pos.*, 8);
+            defer pos.* += 8;
+            return .{ .uint64 = readU64(buf[pos.*..][0..8]) };
+        },
+        .int64 => {
+            try requireBytes(buf, pos.*, 8);
+            defer pos.* += 8;
+            return .{ .int64 = std.mem.readInt(i64, buf[pos.*..][0..8], .little) };
+        },
+        .float64 => {
+            try requireBytes(buf, pos.*, 8);
+            defer pos.* += 8;
+            return .{ .float64 = @bitCast(buf[pos.*..][0..8].*) };
+        },
+        else => return error.UnsupportedValueType,
+    }
+}
+
+/// 配列型 MetadataValue を読む (要素をパースしつつ生バイト範囲を記録)
+fn readMetadataArray(buf: []const u8, pos: *usize) !MetadataValue {
+    if (pos.* + 12 > buf.len) return error.UnexpectedEof;
+    const elem_type: ValueType = @enumFromInt(readU32(buf[pos.*..][0..4]));
+    pos.* += 4;
+    const count = readU64(buf[pos.*..][0..8]);
+    pos.* += 8;
+
+    const raw_start = pos.*;
+    for (0..count) |_| {
+        _ = try readMetadataValue(buf, pos, @intFromEnum(elem_type));
+    }
+    const raw_end = pos.*;
+
+    return .{ .array = .{
+        .elem_type = elem_type,
+        .count = count,
+        .raw_data = buf[raw_start..raw_end],
+    } };
+}
+
 fn readMetadataValue(buf: []const u8, pos: *usize, value_type_raw: u32) !MetadataValue {
-    return switch (@as(ValueType, @enumFromInt(value_type_raw))) {
-        .uint8 => blk: {
-            if (pos.* + 1 > buf.len) return error.UnexpectedEof;
-            const v = buf[pos.*];
-            pos.* += 1;
-            break :blk .{ .uint8 = v };
-        },
-        .int8 => blk: {
-            if (pos.* + 1 > buf.len) return error.UnexpectedEof;
-            const v: i8 = @bitCast(buf[pos.*]);
-            pos.* += 1;
-            break :blk .{ .int8 = v };
-        },
-        .uint16 => blk: {
-            if (pos.* + 2 > buf.len) return error.UnexpectedEof;
-            const v = std.mem.readInt(u16, buf[pos.*..][0..2], .little);
-            pos.* += 2;
-            break :blk .{ .uint16 = v };
-        },
-        .int16 => blk: {
-            if (pos.* + 2 > buf.len) return error.UnexpectedEof;
-            const v = std.mem.readInt(i16, buf[pos.*..][0..2], .little);
-            pos.* += 2;
-            break :blk .{ .int16 = v };
-        },
-        .uint32 => blk: {
-            if (pos.* + 4 > buf.len) return error.UnexpectedEof;
-            const v = readU32(buf[pos.*..][0..4]);
-            pos.* += 4;
-            break :blk .{ .uint32 = v };
-        },
-        .int32 => blk: {
-            if (pos.* + 4 > buf.len) return error.UnexpectedEof;
-            const v = readI32(buf[pos.*..][0..4]);
-            pos.* += 4;
-            break :blk .{ .int32 = v };
-        },
-        .float32 => blk: {
-            if (pos.* + 4 > buf.len) return error.UnexpectedEof;
-            const v: f32 = @bitCast(buf[pos.*..][0..4].*);
-            pos.* += 4;
-            break :blk .{ .float32 = v };
-        },
-        .bool_ => blk: {
-            if (pos.* + 1 > buf.len) return error.UnexpectedEof;
-            const v = buf[pos.*] != 0;
-            pos.* += 1;
-            break :blk .{ .bool_ = v };
-        },
-        .string => blk: {
-            const s = try readGGUFString(buf, pos);
-            break :blk .{ .string = s };
-        },
-        .array => blk: {
-            if (pos.* + 12 > buf.len) return error.UnexpectedEof;
-            const elem_type: ValueType = @enumFromInt(readU32(buf[pos.*..][0..4]));
-            pos.* += 4;
-            const count = readU64(buf[pos.*..][0..8]);
-            pos.* += 8;
-
-            // 配列の生バイトを記録（要素を実際にパースしてスキップする）
-            const raw_start = pos.*;
-            for (0..count) |_| {
-                _ = try readMetadataValue(buf, pos, @intFromEnum(elem_type));
-            }
-            const raw_end = pos.*;
-
-            break :blk .{ .array = .{
-                .elem_type = elem_type,
-                .count = count,
-                .raw_data = buf[raw_start..raw_end],
-            } };
-        },
-        .uint64 => blk: {
-            if (pos.* + 8 > buf.len) return error.UnexpectedEof;
-            const v = readU64(buf[pos.*..][0..8]);
-            pos.* += 8;
-            break :blk .{ .uint64 = v };
-        },
-        .int64 => blk: {
-            if (pos.* + 8 > buf.len) return error.UnexpectedEof;
-            const v = std.mem.readInt(i64, buf[pos.*..][0..8], .little);
-            pos.* += 8;
-            break :blk .{ .int64 = v };
-        },
-        .float64 => blk: {
-            if (pos.* + 8 > buf.len) return error.UnexpectedEof;
-            const v: f64 = @bitCast(buf[pos.*..][0..8].*);
-            pos.* += 8;
-            break :blk .{ .float64 = v };
-        },
+    const vt: ValueType = @enumFromInt(value_type_raw);
+    return switch (vt) {
+        .string => .{ .string = try readGGUFString(buf, pos) },
+        .array => try readMetadataArray(buf, pos),
         _ => return error.UnsupportedValueType,
+        else => try readMetadataScalar(buf, pos, vt),
     };
 }
 

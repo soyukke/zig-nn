@@ -21,7 +21,12 @@ pub const BatchIterator = struct {
     allocator: Allocator,
     shuffle: bool,
 
-    pub fn init(allocator: Allocator, n_samples: usize, batch_size: usize, do_shuffle: bool) !BatchIterator {
+    pub fn init(
+        allocator: Allocator,
+        n_samples: usize,
+        batch_size: usize,
+        do_shuffle: bool,
+    ) !BatchIterator {
         const indices = try allocator.alloc(usize, n_samples);
         for (indices, 0..) |*idx, i| idx.* = i;
 

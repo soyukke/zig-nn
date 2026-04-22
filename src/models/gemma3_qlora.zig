@@ -104,6 +104,76 @@ pub fn Gemma3QLoRA(comptime C: type, comptime RANK: usize) type {
             return self;
         }
 
+        /// 1 レイヤ分の凍結量子化重みを GPU バッファに載せる
+        fn buildLayerQuant(
+            rt: *DiffMpsRuntime,
+            blk: *const gemma3_mod.GemmaBlockWeights,
+        ) !LayerQuant {
+            const qt = gemma3_mod.quantTypeOfWeight;
+            return .{
+                .q = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.attn_q_weight.data),
+                    .quant_type = qt(blk.attn_q_weight),
+                    .out_dim = @intCast(Q_DIM),
+                    .in_dim = @intCast(EMBED),
+                },
+                .k = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.attn_k_weight.data),
+                    .quant_type = qt(blk.attn_k_weight),
+                    .out_dim = @intCast(KV_DIM),
+                    .in_dim = @intCast(EMBED),
+                },
+                .v = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.attn_v_weight.data),
+                    .quant_type = qt(blk.attn_v_weight),
+                    .out_dim = @intCast(KV_DIM),
+                    .in_dim = @intCast(EMBED),
+                },
+                .o = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.attn_output_weight.data),
+                    .quant_type = qt(blk.attn_output_weight),
+                    .out_dim = @intCast(EMBED),
+                    .in_dim = @intCast(Q_DIM),
+                },
+                .gate = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_gate_weight.data),
+                    .quant_type = qt(blk.ffn_gate_weight),
+                    .out_dim = @intCast(FFN_DIM),
+                    .in_dim = @intCast(EMBED),
+                },
+                .up = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_up_weight.data),
+                    .quant_type = qt(blk.ffn_up_weight),
+                    .out_dim = @intCast(FFN_DIM),
+                    .in_dim = @intCast(EMBED),
+                },
+                .down = .{
+                    .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_down_weight.data),
+                    .quant_type = qt(blk.ffn_down_weight),
+                    .out_dim = @intCast(EMBED),
+                    .in_dim = @intCast(FFN_DIM),
+                },
+            };
+        }
+
+        /// RMSNorm パラメータを GGUF から上書きする (そのままだと .ones のまま)
+        fn copyLayerNorms(
+            self: *Self,
+            rt: *DiffMpsRuntime,
+            blk: *const gemma3_mod.GemmaBlockWeights,
+            i: usize,
+        ) void {
+            @memcpy(paramBuf(rt, self.attn_norm[i])[0..EMBED], blk.attn_norm_weight);
+            @memcpy(paramBuf(rt, self.ffn_norm[i])[0..EMBED], blk.ffn_norm_weight);
+            @memcpy(paramBuf(rt, self.q_norm[i])[0..HEAD_DIM], blk.attn_q_norm_weight);
+            @memcpy(paramBuf(rt, self.k_norm[i])[0..HEAD_DIM], blk.attn_k_norm_weight);
+            @memcpy(
+                paramBuf(rt, self.post_attn_norm[i])[0..EMBED],
+                blk.post_attention_norm_weight,
+            );
+            @memcpy(paramBuf(rt, self.post_ffw_norm[i])[0..EMBED], blk.post_ffw_norm_weight);
+        }
+
         /// Step 2: load frozen quantized weights into GPU buffers and overwrite
         /// RMSNorm params with values from the GGUF file. Call after `rt.initParams()`.
         pub fn loadFromGguf(
@@ -124,65 +194,17 @@ pub fn Gemma3QLoRA(comptime C: type, comptime RANK: usize) type {
 
             // RoPE precomputed frequencies (f32).
             var rope_freqs = gemma3_mod.computeRoPEFreqs(HEAD_DIM, C.ROPE_BASE);
-            self.rope_freqs_buf = try rt.metal_ctx.createBufferWithData(std.mem.sliceAsBytes(&rope_freqs));
+            self.rope_freqs_buf = try rt.metal_ctx.createBufferWithData(
+                std.mem.sliceAsBytes(&rope_freqs),
+            );
 
             // Final RMSNorm weight from GGUF.
             @memcpy(paramBuf(rt, self.output_norm)[0..EMBED], weights.output_norm_weight);
 
             for (0..LAYER) |i| {
                 const blk = &weights.blocks[i];
-                self.layers[i] = .{
-                    .q = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.attn_q_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.attn_q_weight),
-                        .out_dim = @intCast(Q_DIM),
-                        .in_dim = @intCast(EMBED),
-                    },
-                    .k = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.attn_k_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.attn_k_weight),
-                        .out_dim = @intCast(KV_DIM),
-                        .in_dim = @intCast(EMBED),
-                    },
-                    .v = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.attn_v_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.attn_v_weight),
-                        .out_dim = @intCast(KV_DIM),
-                        .in_dim = @intCast(EMBED),
-                    },
-                    .o = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.attn_output_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.attn_output_weight),
-                        .out_dim = @intCast(EMBED),
-                        .in_dim = @intCast(Q_DIM),
-                    },
-                    .gate = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_gate_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.ffn_gate_weight),
-                        .out_dim = @intCast(FFN_DIM),
-                        .in_dim = @intCast(EMBED),
-                    },
-                    .up = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_up_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.ffn_up_weight),
-                        .out_dim = @intCast(FFN_DIM),
-                        .in_dim = @intCast(EMBED),
-                    },
-                    .down = .{
-                        .buf = try rt.metal_ctx.createBufferWithData(blk.ffn_down_weight.data),
-                        .quant_type = gemma3_mod.quantTypeOfWeight(blk.ffn_down_weight),
-                        .out_dim = @intCast(EMBED),
-                        .in_dim = @intCast(FFN_DIM),
-                    },
-                };
-
-                // Overwrite RMSNorm params with GGUF values (otherwise stays at .ones).
-                @memcpy(paramBuf(rt, self.attn_norm[i])[0..EMBED], blk.attn_norm_weight);
-                @memcpy(paramBuf(rt, self.ffn_norm[i])[0..EMBED], blk.ffn_norm_weight);
-                @memcpy(paramBuf(rt, self.q_norm[i])[0..HEAD_DIM], blk.attn_q_norm_weight);
-                @memcpy(paramBuf(rt, self.k_norm[i])[0..HEAD_DIM], blk.attn_k_norm_weight);
-                @memcpy(paramBuf(rt, self.post_attn_norm[i])[0..EMBED], blk.post_attention_norm_weight);
-                @memcpy(paramBuf(rt, self.post_ffw_norm[i])[0..EMBED], blk.post_ffw_norm_weight);
+                self.layers[i] = try buildLayerQuant(rt, blk);
+                self.copyLayerNorms(rt, blk, i);
             }
         }
 
@@ -230,7 +252,11 @@ pub fn Gemma3QLoRA(comptime C: type, comptime RANK: usize) type {
         }
 
         /// Full forward: input_ids → logits [seq_len, VOCAB].
-        pub fn forward(self: *const Self, rt: *DiffMpsRuntime, input_ids: []const u32) DiffMpsTensor {
+        pub fn forward(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            input_ids: []const u32,
+        ) DiffMpsTensor {
             const seq_len = input_ids.len;
 
             var x = self.embed(rt, input_ids);
@@ -244,62 +270,118 @@ pub fn Gemma3QLoRA(comptime C: type, comptime RANK: usize) type {
             return rt.quantMatmulNoGrad(final, &self.token_embd);
         }
 
+        /// QKV projection with optional LoRA (base + scaling * (h @ A) @ B).
+        fn qkvWithLora(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            h: DiffMpsTensor,
+            base_w: *const QW,
+            lora_a: ParamHandle,
+            lora_b: ParamHandle,
+        ) DiffMpsTensor {
+            _ = self;
+            const base = rt.quantMatmulNoGrad(h, base_w);
+            const lora = rt.mulScalar(
+                rt.matmul(rt.matmul(h, rt.param(lora_a)), rt.param(lora_b)),
+                SCALING,
+            );
+            return rt.add(base, lora);
+        }
+
+        /// Per-head RMSNorm + RoPE for Q and K.
+        fn qkNormRope(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            q: DiffMpsTensor,
+            k: DiffMpsTensor,
+            i: usize,
+            seq_len: usize,
+            rope_freqs: DiffMpsTensor,
+        ) struct { q: DiffMpsTensor, k: DiffMpsTensor } {
+            const q_flat = rt.reshape(q, &.{ seq_len * HEAD, HEAD_DIM });
+            const q_normed = rt.rmsNorm(q_flat, rt.param(self.q_norm[i]), C.RMS_EPS);
+            const k_flat = rt.reshape(k, &.{ seq_len * HEAD_KV, HEAD_DIM });
+            const k_normed = rt.rmsNorm(k_flat, rt.param(self.k_norm[i]), C.RMS_EPS);
+
+            const q_rope_in = rt.reshape(q_normed, &.{ seq_len, HEAD, HEAD_DIM });
+            const q_roped = rt.rope(q_rope_in, rope_freqs, HEAD, @intCast(seq_len), HALF_DIM);
+            const k_rope_in = rt.reshape(k_normed, &.{ seq_len, HEAD_KV, HEAD_DIM });
+            const k_roped = rt.rope(k_rope_in, rope_freqs, HEAD_KV, @intCast(seq_len), HALF_DIM);
+            return .{ .q = q_roped, .k = k_roped };
+        }
+
+        /// Causal attention: softmax(Q @ K^T / √d) @ V → (seq, Q_DIM)
+        fn attentionQKV(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            q: DiffMpsTensor,
+            k: DiffMpsTensor,
+            v: DiffMpsTensor,
+            seq_len: usize,
+        ) DiffMpsTensor {
+            _ = self;
+            const q_2d = rt.reshape(q, &.{ seq_len * HEAD, HEAD_DIM });
+            const k_2d = rt.reshape(k, &.{ seq_len * HEAD_KV, HEAD_DIM });
+            const k_t = rt.transpose(k_2d, 0, 1);
+            const scores = rt.matmul(q_2d, k_t);
+            const scaled = rt.mulScalar(scores, INV_SQRT_HEAD_DIM);
+            const probs = rt.causalSoftmax(scaled, HEAD, @intCast(seq_len));
+
+            const v_2d = rt.reshape(v, &.{ seq_len * HEAD_KV, HEAD_DIM });
+            const attn_out = rt.matmul(probs, v_2d);
+            return rt.reshape(attn_out, &.{ seq_len, Q_DIM });
+        }
+
+        /// SwiGLU FFN: gate(x) * up(x) → down; with post-norm + residual outside.
+        fn ffnSwiGLU(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            ff_h: DiffMpsTensor,
+            i: usize,
+        ) DiffMpsTensor {
+            const gate = rt.quantMatmulNoGrad(ff_h, &self.layers[i].gate);
+            const gate_act = rt.gelu(gate);
+            const up = rt.quantMatmulNoGrad(ff_h, &self.layers[i].up);
+            const ffn_inner = rt.mul(gate_act, up);
+            return rt.quantMatmulNoGrad(ffn_inner, &self.layers[i].down);
+        }
+
         /// Single transformer block (Gemma3 style: pre-norm attention + pre-norm FFN,
         /// with additional post-attention / post-ffw RMSNorm before the residual).
-        fn block(self: *const Self, rt: *DiffMpsRuntime, x_in: DiffMpsTensor, i: usize, seq_len: usize) DiffMpsTensor {
+        fn block(
+            self: *const Self,
+            rt: *DiffMpsRuntime,
+            x_in: DiffMpsTensor,
+            i: usize,
+            seq_len: usize,
+        ) DiffMpsTensor {
             const rope_freqs = rt.makeNode(self.rope_freqs_buf, &.{HALF_DIM}, false);
 
             // ── Pre-attention RMSNorm ──
             const h = rt.rmsNorm(x_in, rt.param(self.attn_norm[i]), C.RMS_EPS);
 
             // ── QKV projections (Q/V have LoRA; K is frozen base only) ──
-            const q = blk: {
-                const base = rt.quantMatmulNoGrad(h, &self.layers[i].q);
-                const lora = rt.mulScalar(
-                    rt.matmul(rt.matmul(h, rt.param(self.lora_q_a[i])), rt.param(self.lora_q_b[i])),
-                    SCALING,
-                );
-                break :blk rt.add(base, lora);
-            };
+            const q = self.qkvWithLora(
+                rt,
+                h,
+                &self.layers[i].q,
+                self.lora_q_a[i],
+                self.lora_q_b[i],
+            );
             const k = rt.quantMatmulNoGrad(h, &self.layers[i].k);
-            const v = blk: {
-                const base = rt.quantMatmulNoGrad(h, &self.layers[i].v);
-                const lora = rt.mulScalar(
-                    rt.matmul(rt.matmul(h, rt.param(self.lora_v_a[i])), rt.param(self.lora_v_b[i])),
-                    SCALING,
-                );
-                break :blk rt.add(base, lora);
-            };
+            const v = self.qkvWithLora(
+                rt,
+                h,
+                &self.layers[i].v,
+                self.lora_v_a[i],
+                self.lora_v_b[i],
+            );
 
-            // ── Per-head QK RMSNorm ──
-            // Q: (seq, Q_DIM=HEAD*HEAD_DIM) → treated as (seq*HEAD, HEAD_DIM) in row-major.
-            const q_flat = rt.reshape(q, &.{ seq_len * HEAD, HEAD_DIM });
-            const q_normed = rt.rmsNorm(q_flat, rt.param(self.q_norm[i]), C.RMS_EPS);
-            // K: (seq, KV_DIM=HEAD_KV*HEAD_DIM). Flatten per-head for norm.
-            const k_flat = rt.reshape(k, &.{ seq_len * HEAD_KV, HEAD_DIM });
-            const k_normed = rt.rmsNorm(k_flat, rt.param(self.k_norm[i]), C.RMS_EPS);
+            // ── Per-head QK RMSNorm + RoPE ──
+            const qk = self.qkNormRope(rt, q, k, i, seq_len, rope_freqs);
 
-            // ── RoPE ──
-            // Expect shape (seq, n_heads, HEAD_DIM).
-            const q_rope_in = rt.reshape(q_normed, &.{ seq_len, HEAD, HEAD_DIM });
-            const q_roped = rt.rope(q_rope_in, rope_freqs, HEAD, @intCast(seq_len), HALF_DIM);
-            const k_rope_in = rt.reshape(k_normed, &.{ seq_len, HEAD_KV, HEAD_DIM });
-            const k_roped = rt.rope(k_rope_in, rope_freqs, HEAD_KV, @intCast(seq_len), HALF_DIM);
-
-            // ── Attention scores: Q @ K^T ──
-            // Q: (seq*HEAD, HEAD_DIM), K: (seq*HEAD_KV, HEAD_DIM) with HEAD_KV=1 → broadcast across heads.
-            const q_2d = rt.reshape(q_roped, &.{ seq_len * HEAD, HEAD_DIM });
-            const k_2d = rt.reshape(k_roped, &.{ seq_len * HEAD_KV, HEAD_DIM });
-            const k_t = rt.transpose(k_2d, 0, 1); // (HEAD_DIM, seq*HEAD_KV) — for HEAD_KV=1 this is (HEAD_DIM, seq)
-            const scores = rt.matmul(q_2d, k_t); // (seq*HEAD, seq)
-            const scaled = rt.mulScalar(scores, INV_SQRT_HEAD_DIM);
-            const probs = rt.causalSoftmax(scaled, HEAD, @intCast(seq_len));
-
-            // ── Attention output: probs @ V ──
-            // V: (seq*HEAD_KV, HEAD_DIM); HEAD_KV=1 so this broadcasts. probs: (seq*HEAD, seq).
-            const v_2d = rt.reshape(v, &.{ seq_len * HEAD_KV, HEAD_DIM });
-            const attn_out = rt.matmul(probs, v_2d); // (seq*HEAD, HEAD_DIM)
-            const attn_reshape = rt.reshape(attn_out, &.{ seq_len, Q_DIM });
+            // ── Attention output: softmax(Q @ K^T) @ V ──
+            const attn_reshape = self.attentionQKV(rt, qk.q, qk.k, v, seq_len);
 
             // Output projection + post-attention RMSNorm + residual.
             const proj = rt.quantMatmulNoGrad(attn_reshape, &self.layers[i].o);
@@ -308,11 +390,7 @@ pub fn Gemma3QLoRA(comptime C: type, comptime RANK: usize) type {
 
             // ── FFN: pre-norm → SwiGLU ──
             const ff_h = rt.rmsNorm(post_attn, rt.param(self.ffn_norm[i]), C.RMS_EPS);
-            const gate = rt.quantMatmulNoGrad(ff_h, &self.layers[i].gate);
-            const gate_act = rt.gelu(gate);
-            const up = rt.quantMatmulNoGrad(ff_h, &self.layers[i].up);
-            const ffn_inner = rt.mul(gate_act, up);
-            const down = rt.quantMatmulNoGrad(ffn_inner, &self.layers[i].down);
+            const down = self.ffnSwiGLU(rt, ff_h, i);
 
             // Post-FFN RMSNorm + residual.
             const down_n = rt.rmsNorm(down, rt.param(self.post_ffw_norm[i]), C.RMS_EPS);

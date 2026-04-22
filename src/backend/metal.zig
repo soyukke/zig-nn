@@ -101,14 +101,38 @@ fn send2ie(target: id, selector: SEL, a1: ?*anyopaque, a2: *?*anyopaque) ?*anyop
 }
 
 // 引数3個 (ptr, u64, u64) → id  newBufferWithBytes:length:options:
-fn send3puu(target: id, selector: SEL, a1: *const anyopaque, a2: NSUInteger, a3: NSUInteger) ?*anyopaque {
-    const F = *const fn (id, SEL, *const anyopaque, NSUInteger, NSUInteger) callconv(.c) ?*anyopaque;
+fn send3puu(
+    target: id,
+    selector: SEL,
+    a1: *const anyopaque,
+    a2: NSUInteger,
+    a3: NSUInteger,
+) ?*anyopaque {
+    const F = *const fn (
+        id,
+        SEL,
+        *const anyopaque,
+        NSUInteger,
+        NSUInteger,
+    ) callconv(.c) ?*anyopaque;
     return @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(target, selector, a1, a2, a3);
 }
 
 // 引数3個 (id, id, *err) → id  newLibraryWithSource:options:error:
-fn send3iie(target: id, selector: SEL, a1: ?*anyopaque, a2: ?*anyopaque, a3: *?*anyopaque) ?*anyopaque {
-    const F = *const fn (id, SEL, ?*anyopaque, ?*anyopaque, *?*anyopaque) callconv(.c) ?*anyopaque;
+fn send3iie(
+    target: id,
+    selector: SEL,
+    a1: ?*anyopaque,
+    a2: ?*anyopaque,
+    a3: *?*anyopaque,
+) ?*anyopaque {
+    const F = *const fn (
+        id,
+        SEL,
+        ?*anyopaque,
+        ?*anyopaque,
+        *?*anyopaque,
+    ) callconv(.c) ?*anyopaque;
     return @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(target, selector, a1, a2, a3);
 }
 
@@ -205,13 +229,55 @@ pub const MetalContext = struct {
                 const total = self.totalNs();
                 const ms = std.time.ns_per_ms;
                 w.print("[GPU profile] total={d}ms\n", .{total / ms}) catch return;
-                self.writeLine(w, "mps_matmul", self.mps_matmul_ns, self.mps_matmul_count, total) catch return;
-                self.writeLine(w, "batched_matmul", self.batched_matmul_ns, self.batched_matmul_count, total) catch return;
-                self.writeLine(w, "layernorm", self.layernorm_ns, self.layernorm_count, total) catch return;
-                self.writeLine(w, "softmax", self.softmax_ns, self.softmax_count, total) catch return;
-                self.writeLine(w, "gelu_tanh", self.gelu_tanh_ns, self.gelu_tanh_count, total) catch return;
-                self.writeLine(w, "embedding", self.embedding_ns, self.embedding_count, total) catch return;
-                self.writeLine(w, "add_bias", self.add_bias_ns, self.add_bias_count, total) catch return;
+                self.writeLine(
+                    w,
+                    "mps_matmul",
+                    self.mps_matmul_ns,
+                    self.mps_matmul_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "batched_matmul",
+                    self.batched_matmul_ns,
+                    self.batched_matmul_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "layernorm",
+                    self.layernorm_ns,
+                    self.layernorm_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "softmax",
+                    self.softmax_ns,
+                    self.softmax_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "gelu_tanh",
+                    self.gelu_tanh_ns,
+                    self.gelu_tanh_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "embedding",
+                    self.embedding_ns,
+                    self.embedding_count,
+                    total,
+                ) catch return;
+                self.writeLine(
+                    w,
+                    "add_bias",
+                    self.add_bias_ns,
+                    self.add_bias_count,
+                    total,
+                ) catch return;
                 self.writeLine(w, "scale", self.scale_ns, self.scale_count, total) catch return;
                 self.writeLine(w, "concat", self.concat_ns, self.concat_count, total) catch return;
                 self.writeLine(w, "loss", self.loss_ns, self.loss_count, total) catch return;
@@ -220,9 +286,19 @@ pub const MetalContext = struct {
             }
         }
 
-        fn writeLine(_: ProfileStats, w: anytype, name: []const u8, ns: u64, count: u32, total: u64) !void {
+        fn writeLine(
+            _: ProfileStats,
+            w: anytype,
+            name: []const u8,
+            ns: u64,
+            count: u32,
+            total: u64,
+        ) !void {
             const pct = if (total > 0) (ns * 100) / total else 0;
-            try w.print("  {s}: {d}ms ({d}%) [{d} calls]\n", .{ name, ns / std.time.ns_per_ms, pct, count });
+            try w.print(
+                "  {s}: {d}ms ({d}%) [{d} calls]\n",
+                .{ name, ns / std.time.ns_per_ms, pct, count },
+            );
         }
 
         /// GpuProfileCat enum value でカウント加算
@@ -405,6 +481,28 @@ pub const MetalContext = struct {
         const queue = send0(device, sel("newCommandQueue")) orelse return error.MetalInitFailed;
 
         // MSL ソースをコンパイル
+        const library = try compileInferenceLibrary(device);
+
+        var ctx = MetalContext{
+            .device = device,
+            .command_queue = queue,
+            .library = library,
+            .pipelines = undefined,
+            .training_pipelines = null,
+            .training_library = null,
+        };
+
+        // パイプライン作成
+        ctx.pipelines = try buildInferencePipelines(&ctx);
+
+        // デバイス名を表示
+        logDeviceName(device);
+
+        return ctx;
+    }
+
+    /// 推論用 MSL をコンパイルして MTLLibrary を返す
+    fn compileInferenceLibrary(device: id) !id {
         const msl_source = @embedFile("shaders/nn_kernels.metal");
         const ns_source = nsString(msl_source.ptr);
 
@@ -427,18 +525,12 @@ pub const MetalContext = struct {
             }
             return error.ShaderCompilationFailed;
         };
+        return library;
+    }
 
-        var ctx = MetalContext{
-            .device = device,
-            .command_queue = queue,
-            .library = library,
-            .pipelines = undefined,
-            .training_pipelines = null,
-            .training_library = null,
-        };
-
-        // パイプライン作成
-        ctx.pipelines = .{
+    /// 推論用 compute pipeline 群を一括作成
+    fn buildInferencePipelines(ctx: *MetalContext) !Pipelines {
+        return .{
             .matmul_q4_0 = try ctx.createPipeline("matmul_q4_0"),
             .matmul_q4_1 = try ctx.createPipeline("matmul_q4_1"),
             .matmul_q8_0 = try ctx.createPipeline("matmul_q8_0"),
@@ -460,8 +552,10 @@ pub const MetalContext = struct {
             .gqa_attention_decode = try ctx.createPipeline("gqa_attention_decode"),
             .write_kv_cache = try ctx.createPipeline("write_kv_cache"),
         };
+    }
 
-        // デバイス名を表示
+    /// Metal デバイス名をログに出力
+    fn logDeviceName(device: id) void {
         const name = send0(device, sel("name"));
         if (name) |n| {
             const cstr = send0str(n, sel("UTF8String"));
@@ -469,8 +563,6 @@ pub const MetalContext = struct {
                 log.info("device: {s}", .{s});
             }
         }
-
-        return ctx;
     }
 
     fn createPipeline(self: *MetalContext, name: [*:0]const u8) !id {
@@ -602,11 +694,21 @@ pub const MetalContext = struct {
     fn dispatch1D(encoder: id, total: u64, group_size: u64) void {
         const threads_per_grid = MTLSize{ .width = total, .height = 1, .depth = 1 };
         const threads_per_group = MTLSize{ .width = group_size, .height = 1, .depth = 1 };
-        send2ssv(encoder, sel("dispatchThreads:threadsPerThreadgroup:"), threads_per_grid, threads_per_group);
+        send2ssv(
+            encoder,
+            sel("dispatchThreads:threadsPerThreadgroup:"),
+            threads_per_grid,
+            threads_per_group,
+        );
     }
 
     fn dispatchThreadgroups(encoder: id, groups: MTLSize, threads_per_group: MTLSize) void {
-        send2ssv(encoder, sel("dispatchThreadgroups:threadsPerThreadgroup:"), groups, threads_per_group);
+        send2ssv(
+            encoder,
+            sel("dispatchThreadgroups:threadsPerThreadgroup:"),
+            groups,
+            threads_per_group,
+        );
     }
 
     fn setThreadgroupMemoryLength(encoder: id, length: u64, index: u64) void {
@@ -668,8 +770,8 @@ pub const MetalContext = struct {
         // SIMD group dispatch - per quant type configuration
         const rows_per_tg: u64 = switch (quant_type) {
             .q4_0 => 2 * 4, // NSG=2, NR0=4 → 8 rows/TG
-            .q4_1 => 4,     // NSG=4, NR0=1 → 4 rows/TG
-            .q8_0 => 4,     // NSG=4, NR0=1 → 4 rows/TG
+            .q4_1 => 4, // NSG=4, NR0=1 → 4 rows/TG
+            .q8_0 => 4, // NSG=4, NR0=1 → 4 rows/TG
         };
         const n_sg: u64 = switch (quant_type) {
             .q4_0 => 2,
@@ -678,7 +780,11 @@ pub const MetalContext = struct {
         };
         const tg_size: u64 = n_sg * 32;
         const n_groups: u64 = (@as(u64, out_dim) + rows_per_tg - 1) / rows_per_tg;
-        dispatchThreadgroups(encoder, .{ .width = n_groups, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = n_groups, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchMatmulBatched(
@@ -731,7 +837,11 @@ pub const MetalContext = struct {
         const tg_size: u64 = 4 * 32; // 4 SG × 32 lanes
         const n_groups_x: u64 = (@as(u64, out_dim) + rows_per_tg - 1) / rows_per_tg;
         const n_groups_y: u64 = @as(u64, m_rows);
-        dispatchThreadgroups(encoder, .{ .width = n_groups_x, .height = n_groups_y, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = n_groups_x, .height = n_groups_y, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchRMSNorm(
@@ -754,7 +864,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(RMSNormParams), 3);
 
         const tg_size: u64 = @min(@as(u64, dim), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchRMSNormInPlace(
@@ -773,7 +887,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&eps), 4, 3);
 
         const tg_size: u64 = @min(@as(u64, dim), 256);
-        dispatchThreadgroups(encoder, .{ .width = 1, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = 1, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchRoPE(
@@ -804,7 +922,13 @@ pub const MetalContext = struct {
         dispatch1D(encoder, n, @min(@as(u64, n), 256));
     }
 
-    pub fn dispatchGELUMul(self: *MetalContext, encoder: id, gate_buf: id, up_buf: id, n: u32) void {
+    pub fn dispatchGELUMul(
+        self: *MetalContext,
+        encoder: id,
+        gate_buf: id,
+        up_buf: id,
+        n: u32,
+    ) void {
         setPipeline(encoder, self.pipelines.gelu_mul);
         setBuffer(encoder, gate_buf, 0, 0);
         setBuffer(encoder, up_buf, 0, 1);
@@ -832,7 +956,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(RMSNormParams), 3);
 
         const tg_size: u64 = @min(@as(u64, dim), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchAdd(self: *MetalContext, encoder: id, a_buf: id, b_buf: id, n: u32) void {
@@ -939,7 +1067,11 @@ pub const MetalContext = struct {
         // shared[256] に合わせて常に256を使用。kv_len < 256 のスレッドは
         // identity 値 (-INF for max, 0 for sum) を提供するので正しく動作する。
         const tg_size: u64 = 256;
-        dispatchThreadgroups(encoder, .{ .width = n_head, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = n_head, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchWriteKVCache(
@@ -1097,7 +1229,21 @@ pub const MetalContext = struct {
     pub fn initTrainingPipelines(self: *MetalContext) !void {
         if (self.training_pipelines != null) return;
 
-        // 学習用 MSL ソースをコンパイル
+        const lib = try self.compileTrainingLibrary();
+        self.training_library = lib;
+
+        var tp: TrainingPipelines = undefined;
+        try self.initTrainingPipelinesPhase1(lib, &tp);
+        try self.initTrainingPipelinesPhase2(lib, &tp);
+        try self.initTrainingPipelinesPhase3(lib, &tp);
+        try self.initTrainingPipelinesPhase4(lib, &tp);
+        try self.initTrainingPipelinesPhase5(lib, &tp);
+        try self.initTrainingPipelinesPhase6(lib, &tp);
+        self.training_pipelines = tp;
+    }
+
+    /// 学習用 MSL をコンパイルして MTLLibrary を返す
+    fn compileTrainingLibrary(self: *MetalContext) !id {
         const msl_source = @embedFile("shaders/nn_training_kernels.metal");
         const ns_source = nsString(msl_source.ptr);
 
@@ -1120,72 +1266,202 @@ pub const MetalContext = struct {
             }
             return error.ShaderCompilationFailed;
         };
-        self.training_library = lib;
+        return lib;
+    }
 
-        self.training_pipelines = .{
-            .matmul_f32 = try self.createTrainingPipeline(lib, "matmul_f32"),
-            .add_f32 = try self.createTrainingPipeline(lib, "add_f32"),
-            .add_bias_f32 = try self.createTrainingPipeline(lib, "add_bias_f32"),
-            .silu_forward = try self.createTrainingPipeline(lib, "silu_forward"),
-            .mse_loss_diff = try self.createTrainingPipeline(lib, "mse_loss_diff"),
-            .mse_loss_reduce = try self.createTrainingPipeline(lib, "mse_loss_reduce"),
-            .matmul_f32_backward_a = try self.createTrainingPipeline(lib, "matmul_f32_backward_a"),
-            .matmul_f32_backward_b = try self.createTrainingPipeline(lib, "matmul_f32_backward_b"),
-            .add_backward_accum = try self.createTrainingPipeline(lib, "add_backward_accum"),
-            .add_bias_backward = try self.createTrainingPipeline(lib, "add_bias_backward"),
-            .silu_backward = try self.createTrainingPipeline(lib, "silu_backward"),
-            .mse_loss_backward = try self.createTrainingPipeline(lib, "mse_loss_backward"),
-            .adam_step = try self.createTrainingPipeline(lib, "adam_step"),
-            .zero_buffer = try self.createTrainingPipeline(lib, "zero_buffer"),
-            // Phase 2: Transformer
-            .relu_forward = try self.createTrainingPipeline(lib, "relu_forward"),
-            .relu_backward = try self.createTrainingPipeline(lib, "relu_backward"),
-            .gelu_forward = try self.createTrainingPipeline(lib, "gelu_forward"),
-            .gelu_backward = try self.createTrainingPipeline(lib, "gelu_backward"),
-            .softmax_f32 = try self.createTrainingPipeline(lib, "softmax_f32"),
-            .softmax_backward = try self.createTrainingPipeline(lib, "softmax_backward"),
-            .causal_softmax_f32 = try self.createTrainingPipeline(lib, "causal_softmax_f32"),
-            .layernorm_forward = try self.createTrainingPipeline(lib, "layernorm_forward"),
-            .layernorm_backward_x = try self.createTrainingPipeline(lib, "layernorm_backward_x"),
-            .layernorm_backward_params = try self.createTrainingPipeline(lib, "layernorm_backward_params"),
-            .cross_entropy_forward = try self.createTrainingPipeline(lib, "cross_entropy_forward"),
-            .cross_entropy_reduce = try self.createTrainingPipeline(lib, "cross_entropy_reduce"),
-            .cross_entropy_backward = try self.createTrainingPipeline(lib, "cross_entropy_backward"),
-            .embedding_forward = try self.createTrainingPipeline(lib, "embedding_forward"),
-            .embedding_backward = try self.createTrainingPipeline(lib, "embedding_backward"),
-            .scale_f32 = try self.createTrainingPipeline(lib, "scale_f32"),
-            .scale_backward = try self.createTrainingPipeline(lib, "scale_backward"),
-            .matmul_f32_trans_b = try self.createTrainingPipeline(lib, "matmul_f32_trans_b"),
-            .matmul_f32_accum = try self.createTrainingPipeline(lib, "matmul_f32_accum"),
-            // Phase 3: QLoRA
-            .matmul_q4_0_trans_batched = try self.createTrainingPipeline(lib, "matmul_q4_0_trans_batched"),
-            .matmul_q4_1_trans_batched = try self.createTrainingPipeline(lib, "matmul_q4_1_trans_batched"),
-            .matmul_q8_0_trans_batched = try self.createTrainingPipeline(lib, "matmul_q8_0_trans_batched"),
-            .rmsnorm_forward_training = try self.createTrainingPipeline(lib, "rmsnorm_forward_training"),
-            .rmsnorm_backward_x = try self.createTrainingPipeline(lib, "rmsnorm_backward_x"),
-            .rmsnorm_backward_weight = try self.createTrainingPipeline(lib, "rmsnorm_backward_weight"),
-            .rope_forward_training = try self.createTrainingPipeline(lib, "rope_forward_training"),
-            .rope_backward = try self.createTrainingPipeline(lib, "rope_backward"),
-            .dequant_q8_0_batch_scaled = try self.createTrainingPipeline(lib, "dequant_q8_0_batch_scaled"),
-            // Phase 4: Sequence ops
-            .tanh_forward = try self.createTrainingPipeline(lib, "tanh_forward"),
-            .tanh_backward = try self.createTrainingPipeline(lib, "tanh_backward"),
-            .concat_last_dim = try self.createTrainingPipeline(lib, "concat_last_dim"),
-            .concat_last_dim_backward = try self.createTrainingPipeline(lib, "concat_last_dim_backward"),
-            // Phase 5: Batched matmul
-            .batched_matmul_f32 = try self.createTrainingPipeline(lib, "batched_matmul_f32"),
-            .batched_matmul_trans_b_f32 = try self.createTrainingPipeline(lib, "batched_matmul_trans_b_f32"),
-            .batched_matmul_backward_a_f32 = try self.createTrainingPipeline(lib, "batched_matmul_backward_a_f32"),
-            .batched_matmul_backward_b_f32 = try self.createTrainingPipeline(lib, "batched_matmul_backward_b_f32"),
-            .batched_matmul_trans_b_backward_a_f32 = try self.createTrainingPipeline(lib, "batched_matmul_trans_b_backward_a_f32"),
-            .batched_matmul_trans_b_backward_b_f32 = try self.createTrainingPipeline(lib, "batched_matmul_trans_b_backward_b_f32"),
-            // Phase 6: Fused kernels
-            .matmul_addbias_gelu_f32 = try self.createTrainingPipeline(lib, "matmul_addbias_gelu_f32"),
-            .gelu_bias_backward = try self.createTrainingPipeline(lib, "gelu_bias_backward"),
-            .matmul_addbias_tanh_f32 = try self.createTrainingPipeline(lib, "matmul_addbias_tanh_f32"),
-            .tanh_bias_backward = try self.createTrainingPipeline(lib, "tanh_bias_backward"),
-            .batched_matmul_trans_b_scale_f32 = try self.createTrainingPipeline(lib, "batched_matmul_trans_b_scale_f32"),
-        };
+    /// Phase 1: DDPM (MLP) 用パイプライン
+    fn initTrainingPipelinesPhase1(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.matmul_f32 = try self.createTrainingPipeline(lib, "matmul_f32");
+        tp.add_f32 = try self.createTrainingPipeline(lib, "add_f32");
+        tp.add_bias_f32 = try self.createTrainingPipeline(lib, "add_bias_f32");
+        tp.silu_forward = try self.createTrainingPipeline(lib, "silu_forward");
+        tp.mse_loss_diff = try self.createTrainingPipeline(lib, "mse_loss_diff");
+        tp.mse_loss_reduce = try self.createTrainingPipeline(lib, "mse_loss_reduce");
+        tp.matmul_f32_backward_a = try self.createTrainingPipeline(
+            lib,
+            "matmul_f32_backward_a",
+        );
+        tp.matmul_f32_backward_b = try self.createTrainingPipeline(
+            lib,
+            "matmul_f32_backward_b",
+        );
+        tp.add_backward_accum = try self.createTrainingPipeline(lib, "add_backward_accum");
+        tp.add_bias_backward = try self.createTrainingPipeline(lib, "add_bias_backward");
+        tp.silu_backward = try self.createTrainingPipeline(lib, "silu_backward");
+        tp.mse_loss_backward = try self.createTrainingPipeline(lib, "mse_loss_backward");
+        tp.adam_step = try self.createTrainingPipeline(lib, "adam_step");
+        tp.zero_buffer = try self.createTrainingPipeline(lib, "zero_buffer");
+    }
+
+    /// Phase 2: Transformer 用パイプライン
+    fn initTrainingPipelinesPhase2(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.relu_forward = try self.createTrainingPipeline(lib, "relu_forward");
+        tp.relu_backward = try self.createTrainingPipeline(lib, "relu_backward");
+        tp.gelu_forward = try self.createTrainingPipeline(lib, "gelu_forward");
+        tp.gelu_backward = try self.createTrainingPipeline(lib, "gelu_backward");
+        tp.softmax_f32 = try self.createTrainingPipeline(lib, "softmax_f32");
+        tp.softmax_backward = try self.createTrainingPipeline(lib, "softmax_backward");
+        tp.causal_softmax_f32 = try self.createTrainingPipeline(
+            lib,
+            "causal_softmax_f32",
+        );
+        tp.layernorm_forward = try self.createTrainingPipeline(lib, "layernorm_forward");
+        tp.layernorm_backward_x = try self.createTrainingPipeline(
+            lib,
+            "layernorm_backward_x",
+        );
+        tp.layernorm_backward_params = try self.createTrainingPipeline(
+            lib,
+            "layernorm_backward_params",
+        );
+        tp.cross_entropy_forward = try self.createTrainingPipeline(
+            lib,
+            "cross_entropy_forward",
+        );
+        tp.cross_entropy_reduce = try self.createTrainingPipeline(
+            lib,
+            "cross_entropy_reduce",
+        );
+        tp.cross_entropy_backward = try self.createTrainingPipeline(
+            lib,
+            "cross_entropy_backward",
+        );
+        tp.embedding_forward = try self.createTrainingPipeline(lib, "embedding_forward");
+        tp.embedding_backward = try self.createTrainingPipeline(
+            lib,
+            "embedding_backward",
+        );
+        tp.scale_f32 = try self.createTrainingPipeline(lib, "scale_f32");
+        tp.scale_backward = try self.createTrainingPipeline(lib, "scale_backward");
+        tp.matmul_f32_trans_b = try self.createTrainingPipeline(
+            lib,
+            "matmul_f32_trans_b",
+        );
+        tp.matmul_f32_accum = try self.createTrainingPipeline(lib, "matmul_f32_accum");
+    }
+
+    /// Phase 3: QLoRA 用パイプライン
+    fn initTrainingPipelinesPhase3(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.matmul_q4_0_trans_batched = try self.createTrainingPipeline(
+            lib,
+            "matmul_q4_0_trans_batched",
+        );
+        tp.matmul_q4_1_trans_batched = try self.createTrainingPipeline(
+            lib,
+            "matmul_q4_1_trans_batched",
+        );
+        tp.matmul_q8_0_trans_batched = try self.createTrainingPipeline(
+            lib,
+            "matmul_q8_0_trans_batched",
+        );
+        tp.rmsnorm_forward_training = try self.createTrainingPipeline(
+            lib,
+            "rmsnorm_forward_training",
+        );
+        tp.rmsnorm_backward_x = try self.createTrainingPipeline(
+            lib,
+            "rmsnorm_backward_x",
+        );
+        tp.rmsnorm_backward_weight = try self.createTrainingPipeline(
+            lib,
+            "rmsnorm_backward_weight",
+        );
+        tp.rope_forward_training = try self.createTrainingPipeline(
+            lib,
+            "rope_forward_training",
+        );
+        tp.rope_backward = try self.createTrainingPipeline(lib, "rope_backward");
+        tp.dequant_q8_0_batch_scaled = try self.createTrainingPipeline(
+            lib,
+            "dequant_q8_0_batch_scaled",
+        );
+    }
+
+    /// Phase 4: Sequence ops 用パイプライン
+    fn initTrainingPipelinesPhase4(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.tanh_forward = try self.createTrainingPipeline(lib, "tanh_forward");
+        tp.tanh_backward = try self.createTrainingPipeline(lib, "tanh_backward");
+        tp.concat_last_dim = try self.createTrainingPipeline(lib, "concat_last_dim");
+        tp.concat_last_dim_backward = try self.createTrainingPipeline(
+            lib,
+            "concat_last_dim_backward",
+        );
+    }
+
+    /// Phase 5: Batched matmul 用パイプライン
+    fn initTrainingPipelinesPhase5(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.batched_matmul_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_f32",
+        );
+        tp.batched_matmul_trans_b_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_trans_b_f32",
+        );
+        tp.batched_matmul_backward_a_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_backward_a_f32",
+        );
+        tp.batched_matmul_backward_b_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_backward_b_f32",
+        );
+        tp.batched_matmul_trans_b_backward_a_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_trans_b_backward_a_f32",
+        );
+        tp.batched_matmul_trans_b_backward_b_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_trans_b_backward_b_f32",
+        );
+    }
+
+    /// Phase 6: Fused kernel 用パイプライン
+    fn initTrainingPipelinesPhase6(
+        self: *MetalContext,
+        lib: id,
+        tp: *TrainingPipelines,
+    ) !void {
+        tp.matmul_addbias_gelu_f32 = try self.createTrainingPipeline(
+            lib,
+            "matmul_addbias_gelu_f32",
+        );
+        tp.gelu_bias_backward = try self.createTrainingPipeline(
+            lib,
+            "gelu_bias_backward",
+        );
+        tp.matmul_addbias_tanh_f32 = try self.createTrainingPipeline(
+            lib,
+            "matmul_addbias_tanh_f32",
+        );
+        tp.tanh_bias_backward = try self.createTrainingPipeline(
+            lib,
+            "tanh_bias_backward",
+        );
+        tp.batched_matmul_trans_b_scale_f32 = try self.createTrainingPipeline(
+            lib,
+            "batched_matmul_trans_b_scale_f32",
+        );
     }
 
     fn createTrainingPipeline(self: *MetalContext, lib: id, name: [*:0]const u8) !id {
@@ -1235,7 +1511,11 @@ pub const MetalContext = struct {
         // Threadgroups: ceil(N/64) x ceil(M/64), threadgroup 16x16
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchAddF32(
@@ -1323,7 +1603,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&count), 4, 2);
         // Single threadgroup reduction
         const tg_size: u64 = 256;
-        dispatchThreadgroups(encoder, .{ .width = 1, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = 1, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchMatmulBackwardA(
@@ -1346,7 +1630,11 @@ pub const MetalContext = struct {
         // Output: (M, K), BM=64 block tiling
         const gx: u64 = (@as(u64, k_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchMatmulBackwardB(
@@ -1369,7 +1657,11 @@ pub const MetalContext = struct {
         // Output: (K, N), BM=64 block tiling
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, k_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchAddBackwardAccum(
@@ -1505,7 +1797,12 @@ pub const MetalContext = struct {
     // ============================================================
 
     const TrainingSoftmaxParams = extern struct { rows: u32, cols: u32 };
-    const TrainingCausalSoftmaxParams = extern struct { rows: u32, cols: u32, num_heads: u32, seq_len: u32 };
+    const TrainingCausalSoftmaxParams = extern struct {
+        rows: u32,
+        cols: u32,
+        num_heads: u32,
+        seq_len: u32,
+    };
     const TrainingLayerNormParams = extern struct { rows: u32, cols: u32, epsilon: f32 };
     const TrainingCrossEntropyParams = extern struct { batch_size: u32, num_classes: u32 };
     const TrainingEmbeddingParams = extern struct { num_tokens: u32, embed_dim: u32 };
@@ -1597,7 +1894,11 @@ pub const MetalContext = struct {
         // Parallel reduction requires power-of-2 threadgroup size;
         // extra threads use identity values (-INFINITY for max, 0 for sum)
         const tg_size: u64 = @min(ceilPow2(@as(u64, cols)), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchSoftmaxBackward(
@@ -1617,7 +1918,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_in_buf, 0, 2);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingSoftmaxParams), 3);
         const tg_size: u64 = @min(ceilPow2(@as(u64, cols)), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchCausalSoftmaxF32(
@@ -1631,13 +1936,22 @@ pub const MetalContext = struct {
         seq_len: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingCausalSoftmaxParams{ .rows = rows, .cols = cols, .num_heads = num_heads, .seq_len = seq_len };
+        const params = TrainingCausalSoftmaxParams{
+            .rows = rows,
+            .cols = cols,
+            .num_heads = num_heads,
+            .seq_len = seq_len,
+        };
         setPipeline(encoder, tp.causal_softmax_f32);
         setBuffer(encoder, input_buf, 0, 0);
         setBuffer(encoder, output_buf, 0, 1);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingCausalSoftmaxParams), 2);
         const tg_size: u64 = @min(@as(u64, cols), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     // --- LayerNorm ---
@@ -1666,7 +1980,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, inv_std_buf, 0, 5);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingLayerNormParams), 6);
         const tg_size: u64 = @min(@as(u64, cols), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchLayerNormBackwardX(
@@ -1692,7 +2010,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_x_buf, 0, 5);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingLayerNormParams), 6);
         const tg_size: u64 = @min(@as(u64, cols), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchLayerNormBackwardParams(
@@ -1733,7 +2055,10 @@ pub const MetalContext = struct {
         num_classes: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingCrossEntropyParams{ .batch_size = batch_size, .num_classes = num_classes };
+        const params = TrainingCrossEntropyParams{
+            .batch_size = batch_size,
+            .num_classes = num_classes,
+        };
         setPipeline(encoder, tp.cross_entropy_forward);
         setBuffer(encoder, logits_buf, 0, 0);
         setBuffer(encoder, targets_buf, 0, 1);
@@ -1741,7 +2066,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, loss_buf, 0, 3);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingCrossEntropyParams), 4);
         const tg_size: u64 = @min(@as(u64, num_classes), 256);
-        dispatchThreadgroups(encoder, .{ .width = batch_size, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = batch_size, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchCrossEntropyReduce(
@@ -1761,7 +2090,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, targets_buf, 0, 3);
         setBytes(encoder, @ptrCast(&num_classes), 4, 4);
         const tg_size: u64 = @min(@as(u64, batch_size), 256);
-        dispatchThreadgroups(encoder, .{ .width = 1, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = 1, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchCrossEntropyBackward(
@@ -1776,7 +2109,10 @@ pub const MetalContext = struct {
         valid_count: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingCrossEntropyParams{ .batch_size = batch_size, .num_classes = num_classes };
+        const params = TrainingCrossEntropyParams{
+            .batch_size = batch_size,
+            .num_classes = num_classes,
+        };
         setPipeline(encoder, tp.cross_entropy_backward);
         setBuffer(encoder, softmax_buf, 0, 0);
         setBuffer(encoder, targets_buf, 0, 1);
@@ -1887,7 +2223,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingMatmulParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchMatmulF32Accum(
@@ -1909,7 +2249,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingMatmulParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
     // ============================================================
     // Phase 3: QLoRA Training Dispatch 関数群
@@ -1982,7 +2326,11 @@ pub const MetalContext = struct {
         // 16x16 threadgroup: x=in_dim, y=M
         const gx: u64 = (@as(u64, in_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_rows) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchRMSNormForwardTraining(
@@ -2007,7 +2355,11 @@ pub const MetalContext = struct {
         // Parallel reduction requires power-of-2 threadgroup size; MSL fills extra
         // lanes with local_ss=0 because the per-lane stride loop skips them.
         const tg_size: u64 = @min(ceilPow2(@as(u64, dim)), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchRMSNormBackwardX(
@@ -2031,7 +2383,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_x_buf, 0, 4);
         setBytes(encoder, @ptrCast(&params), @sizeOf(RMSNormTrainParams), 5);
         const tg_size: u64 = @min(ceilPow2(@as(u64, dim)), 256);
-        dispatchThreadgroups(encoder, .{ .width = rows, .height = 1, .depth = 1 }, .{ .width = tg_size, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = rows, .height = 1, .depth = 1 },
+            .{ .width = tg_size, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchRMSNormBackwardWeight(
@@ -2067,7 +2423,11 @@ pub const MetalContext = struct {
         half_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = RoPETrainParams{ .seq_len = seq_len, .n_heads = n_heads, .half_dim = half_dim };
+        const params = RoPETrainParams{
+            .seq_len = seq_len,
+            .n_heads = n_heads,
+            .half_dim = half_dim,
+        };
         setPipeline(encoder, tp.rope_forward_training);
         setBuffer(encoder, x_buf, 0, 0);
         setBuffer(encoder, freqs_buf, 0, 1);
@@ -2089,7 +2449,11 @@ pub const MetalContext = struct {
         half_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = RoPETrainParams{ .seq_len = seq_len, .n_heads = n_heads, .half_dim = half_dim };
+        const params = RoPETrainParams{
+            .seq_len = seq_len,
+            .n_heads = n_heads,
+            .half_dim = half_dim,
+        };
         setPipeline(encoder, tp.rope_backward);
         setBuffer(encoder, grad_buf, 0, 0);
         setBuffer(encoder, sin_cache_buf, 0, 1);
@@ -2177,7 +2541,15 @@ pub const MetalContext = struct {
         setBuffer(encoder, out_buf, 0, 2);
         setBytes(encoder, @ptrCast(&params), @sizeOf(ConcatParams), 3);
         const cols_total: u64 = @as(u64, cols_a) + @as(u64, cols_b);
-        dispatchThreadgroups(encoder, .{ .width = @intCast((cols_total + 15) / 16), .height = @intCast((@as(u64, rows) + 15) / 16), .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{
+                .width = @intCast((cols_total + 15) / 16),
+                .height = @intCast((@as(u64, rows) + 15) / 16),
+                .depth = 1,
+            },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchConcatLastDimBackward(
@@ -2198,7 +2570,15 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_b_buf, 0, 2);
         setBytes(encoder, @ptrCast(&params), @sizeOf(ConcatParams), 3);
         const cols_total: u64 = @as(u64, cols_a) + @as(u64, cols_b);
-        dispatchThreadgroups(encoder, .{ .width = @intCast((cols_total + 15) / 16), .height = @intCast((@as(u64, rows) + 15) / 16), .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{
+                .width = @intCast((cols_total + 15) / 16),
+                .height = @intCast((@as(u64, rows) + 15) / 16),
+                .depth = 1,
+            },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     // ============================================================
@@ -2219,7 +2599,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_f32);
         setBuffer(encoder, a_buf, 0, 0);
         setBuffer(encoder, b_buf, 0, 1);
@@ -2227,7 +2612,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulTransBF32(
@@ -2242,7 +2631,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_trans_b_f32);
         setBuffer(encoder, a_buf, 0, 0);
         setBuffer(encoder, b_buf, 0, 1);
@@ -2250,7 +2644,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulBackwardA(
@@ -2265,7 +2663,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_backward_a_f32);
         setBuffer(encoder, dc_buf, 0, 0);
         setBuffer(encoder, b_buf, 0, 1);
@@ -2273,7 +2676,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, k_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulBackwardB(
@@ -2288,7 +2695,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_backward_b_f32);
         setBuffer(encoder, a_buf, 0, 0);
         setBuffer(encoder, dc_buf, 0, 1);
@@ -2296,7 +2708,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 15) / 16;
         const gy: u64 = (@as(u64, k_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulTransBBackwardA(
@@ -2311,7 +2727,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_trans_b_backward_a_f32);
         setBuffer(encoder, dc_buf, 0, 0);
         setBuffer(encoder, b_buf, 0, 1);
@@ -2319,7 +2740,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, k_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulTransBBackwardB(
@@ -2334,7 +2759,12 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim };
+        const params = TrainingBatchedMatmulParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+        };
         setPipeline(encoder, tp.batched_matmul_trans_b_backward_b_f32);
         setBuffer(encoder, dc_buf, 0, 0);
         setBuffer(encoder, a_buf, 0, 1);
@@ -2342,7 +2772,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulParams), 3);
         const gx: u64 = (@as(u64, k_dim) + 15) / 16;
         const gy: u64 = (@as(u64, n_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     // ============================================================
@@ -2386,7 +2820,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingFusedMatmulBiasParams), 5);
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchGeluBiasBackward(
@@ -2407,7 +2845,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_pre_act_buf, 0, 2);
         setBuffer(encoder, grad_bias_buf, 0, 3);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBiasParams), 4);
-        dispatchThreadgroups(encoder, .{ .width = (@as(u64, cols) + 255) / 256, .height = 1, .depth = 1 }, .{ .width = 256, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = (@as(u64, cols) + 255) / 256, .height = 1, .depth = 1 },
+            .{ .width = 256, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchMatmulAddbiasGeluBackward(
@@ -2426,13 +2868,37 @@ pub const MetalContext = struct {
         n_dim: u32,
     ) void {
         // 1. gelu_bias_backward: grad_pre_act + grad_bias
-        self.dispatchGeluBiasBackward(encoder, grad_out_buf, pre_act_buf, grad_pre_act_buf, grad_bias_buf, m_dim, n_dim);
+        self.dispatchGeluBiasBackward(
+            encoder,
+            grad_out_buf,
+            pre_act_buf,
+            grad_pre_act_buf,
+            grad_bias_buf,
+            m_dim,
+            n_dim,
+        );
         memoryBarrier(encoder);
         // 2. matmul_backward_a: grad_A += grad_pre_act @ B^T
-        self.dispatchMatmulBackwardA(encoder, grad_pre_act_buf, b_buf, grad_a_buf, m_dim, k_dim, n_dim);
+        self.dispatchMatmulBackwardA(
+            encoder,
+            grad_pre_act_buf,
+            b_buf,
+            grad_a_buf,
+            m_dim,
+            k_dim,
+            n_dim,
+        );
         memoryBarrier(encoder);
         // 3. matmul_backward_b: grad_B += A^T @ grad_pre_act
-        self.dispatchMatmulBackwardB(encoder, a_buf, grad_pre_act_buf, grad_b_buf, m_dim, k_dim, n_dim);
+        self.dispatchMatmulBackwardB(
+            encoder,
+            a_buf,
+            grad_pre_act_buf,
+            grad_b_buf,
+            m_dim,
+            k_dim,
+            n_dim,
+        );
     }
 
     pub fn dispatchMatmulAddbiasGeluBackwardNoGradA(
@@ -2449,9 +2915,25 @@ pub const MetalContext = struct {
         k_dim: u32,
         n_dim: u32,
     ) void {
-        self.dispatchGeluBiasBackward(encoder, grad_out_buf, pre_act_buf, grad_pre_act_buf, grad_bias_buf, m_dim, n_dim);
+        self.dispatchGeluBiasBackward(
+            encoder,
+            grad_out_buf,
+            pre_act_buf,
+            grad_pre_act_buf,
+            grad_bias_buf,
+            m_dim,
+            n_dim,
+        );
         memoryBarrier(encoder);
-        self.dispatchMatmulBackwardB(encoder, a_buf, grad_pre_act_buf, grad_b_buf, m_dim, k_dim, n_dim);
+        self.dispatchMatmulBackwardB(
+            encoder,
+            a_buf,
+            grad_pre_act_buf,
+            grad_b_buf,
+            m_dim,
+            k_dim,
+            n_dim,
+        );
     }
 
     pub fn dispatchMatmulAddbiasGeluBackwardGradAOnly(
@@ -2473,7 +2955,15 @@ pub const MetalContext = struct {
             grad_pre_act_buf, // dummy - will be overwritten anyway
             m_dim, n_dim);
         memoryBarrier(encoder);
-        self.dispatchMatmulBackwardA(encoder, grad_pre_act_buf, b_buf, grad_a_buf, m_dim, k_dim, n_dim);
+        self.dispatchMatmulBackwardA(
+            encoder,
+            grad_pre_act_buf,
+            b_buf,
+            grad_a_buf,
+            m_dim,
+            k_dim,
+            n_dim,
+        );
     }
 
     pub fn dispatchMatmulAddbiasTanhF32(
@@ -2497,7 +2987,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingFusedMatmulBiasParams), 4);
         const gx: u64 = (@as(u64, n_dim) + 63) / 64;
         const gy: u64 = (@as(u64, m_dim) + 63) / 64;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = 1 }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = 1 },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     pub fn dispatchTanhBiasBackward(
@@ -2518,7 +3012,11 @@ pub const MetalContext = struct {
         setBuffer(encoder, grad_pre_act_buf, 0, 2);
         setBuffer(encoder, grad_bias_buf, 0, 3);
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBiasParams), 4);
-        dispatchThreadgroups(encoder, .{ .width = (@as(u64, cols) + 255) / 256, .height = 1, .depth = 1 }, .{ .width = 256, .height = 1, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = (@as(u64, cols) + 255) / 256, .height = 1, .depth = 1 },
+            .{ .width = 256, .height = 1, .depth = 1 },
+        );
     }
 
     pub fn dispatchBatchedMatmulTransBScaleF32(
@@ -2534,7 +3032,13 @@ pub const MetalContext = struct {
         scale_val: f32,
     ) void {
         const tp = self.training_pipelines.?;
-        const params = TrainingBatchedMatmulScaleParams{ .batch = batch, .M = m_dim, .K = k_dim, .N = n_dim, .scale = scale_val };
+        const params = TrainingBatchedMatmulScaleParams{
+            .batch = batch,
+            .M = m_dim,
+            .K = k_dim,
+            .N = n_dim,
+            .scale = scale_val,
+        };
         setPipeline(encoder, tp.batched_matmul_trans_b_scale_f32);
         setBuffer(encoder, a_buf, 0, 0);
         setBuffer(encoder, b_buf, 0, 1);
@@ -2542,7 +3046,11 @@ pub const MetalContext = struct {
         setBytes(encoder, @ptrCast(&params), @sizeOf(TrainingBatchedMatmulScaleParams), 3);
         const gx: u64 = (@as(u64, n_dim) + 15) / 16;
         const gy: u64 = (@as(u64, m_dim) + 15) / 16;
-        dispatchThreadgroups(encoder, .{ .width = gx, .height = gy, .depth = batch }, .{ .width = 16, .height = 16, .depth = 1 });
+        dispatchThreadgroups(
+            encoder,
+            .{ .width = gx, .height = gy, .depth = batch },
+            .{ .width = 16, .height = 16, .depth = 1 },
+        );
     }
 
     // ============================================================
@@ -2551,21 +3059,83 @@ pub const MetalContext = struct {
 
     // objc_msgSend variants for MPS
     // (id, SEL, u64, u64, u64, u64) → id : MPSMatrixDescriptor
-    fn send4uuuu(target: id, selector: SEL, a1: NSUInteger, a2: NSUInteger, a3: NSUInteger, a4: NSUInteger) ?*anyopaque {
-        const F = *const fn (id, SEL, NSUInteger, NSUInteger, NSUInteger, NSUInteger) callconv(.c) ?*anyopaque;
+    fn send4uuuu(
+        target: id,
+        selector: SEL,
+        a1: NSUInteger,
+        a2: NSUInteger,
+        a3: NSUInteger,
+        a4: NSUInteger,
+    ) ?*anyopaque {
+        const F = *const fn (
+            id,
+            SEL,
+            NSUInteger,
+            NSUInteger,
+            NSUInteger,
+            NSUInteger,
+        ) callconv(.c) ?*anyopaque;
         return @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(target, selector, a1, a2, a3, a4);
     }
 
-    // (id, SEL, id, BOOL, BOOL, u64, u64, u64, f64, f64) → id : MPSMatrixMultiplication initWithDevice:...
-    fn sendMpsMatmulInit(target: id, selector: SEL, device: id, transpose_left: bool, transpose_right: bool, result_rows: NSUInteger, result_columns: NSUInteger, interior_columns: NSUInteger, alpha: f64, beta: f64) ?*anyopaque {
-        const F = *const fn (id, SEL, id, u8, u8, NSUInteger, NSUInteger, NSUInteger, f64, f64) callconv(.c) ?*anyopaque;
-        return @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(target, selector, device, @intFromBool(transpose_left), @intFromBool(transpose_right), result_rows, result_columns, interior_columns, alpha, beta);
+    // (id, SEL, id, BOOL, BOOL, u64, u64, u64, f64, f64) → id
+    //   : MPSMatrixMultiplication initWithDevice:...
+    fn sendMpsMatmulInit(
+        target: id,
+        selector: SEL,
+        device: id,
+        transpose_left: bool,
+        transpose_right: bool,
+        result_rows: NSUInteger,
+        result_columns: NSUInteger,
+        interior_columns: NSUInteger,
+        alpha: f64,
+        beta: f64,
+    ) ?*anyopaque {
+        const F = *const fn (
+            id,
+            SEL,
+            id,
+            u8,
+            u8,
+            NSUInteger,
+            NSUInteger,
+            NSUInteger,
+            f64,
+            f64,
+        ) callconv(.c) ?*anyopaque;
+        return @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(
+            target,
+            selector,
+            device,
+            @intFromBool(transpose_left),
+            @intFromBool(transpose_right),
+            result_rows,
+            result_columns,
+            interior_columns,
+            alpha,
+            beta,
+        );
     }
 
     // (id, SEL, id, id, id, id) → void : encodeToCommandBuffer:leftMatrix:rightMatrix:resultMatrix:
-    fn sendMpsEncode(target: id, selector: SEL, cmd_buf: id, left: id, right: id, result: id) void {
+    fn sendMpsEncode(
+        target: id,
+        selector: SEL,
+        cmd_buf: id,
+        left: id,
+        right: id,
+        result: id,
+    ) void {
         const F = *const fn (id, SEL, id, id, id, id) callconv(.c) void;
-        @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(target, selector, cmd_buf, left, right, result);
+        @as(F, @ptrCast(@alignCast(objc_msgSend_ptr)))(
+            target,
+            selector,
+            cmd_buf,
+            left,
+            right,
+            result,
+        );
     }
 
     /// MPSMatrix を作成 (buffer + descriptor)
@@ -2599,9 +3169,22 @@ pub const MetalContext = struct {
     /// MPS matmul: C = alpha * op(A) * op(B) + beta * C
     /// C: (result_rows × result_cols)
     /// op(A): (result_rows × interior_cols), op(B): (interior_cols × result_cols)
-    /// A storage: transL=false → (result_rows, interior_cols), transL=true → (interior_cols, result_rows)
-    /// B storage: transR=false → (interior_cols, result_cols), transR=true → (result_cols, interior_cols)
+    /// A storage: transL=false → (result_rows, interior_cols),
+    ///            transL=true  → (interior_cols, result_rows)
+    /// B storage: transR=false → (interior_cols, result_cols),
+    ///            transR=true  → (result_cols, interior_cols)
     /// batch mode 時は encoder を一時停止して MPS encode → 再開
+    /// dispatchMPSMatmul: パラメータ束ね (引数爆発を避ける)
+    const MPSMatmulParams = struct {
+        result_rows: u32,
+        result_cols: u32,
+        interior_cols: u32,
+        transpose_left: bool,
+        transpose_right: bool,
+        alpha: f64,
+        beta: f64,
+    };
+
     pub fn dispatchMPSMatmul(
         self: *MetalContext,
         a_buf: id,
@@ -2615,6 +3198,16 @@ pub const MetalContext = struct {
         alpha: f64,
         beta: f64,
     ) void {
+        const params = MPSMatmulParams{
+            .result_rows = result_rows,
+            .result_cols = result_cols,
+            .interior_cols = interior_cols,
+            .transpose_left = transpose_left,
+            .transpose_right = transpose_right,
+            .alpha = alpha,
+            .beta = beta,
+        };
+
         const rr: NSUInteger = @intCast(result_rows);
         const rc: NSUInteger = @intCast(result_cols);
         const ic: NSUInteger = @intCast(interior_cols);
@@ -2631,52 +3224,69 @@ pub const MetalContext = struct {
         const mat_c = createMPSMatrix(c_buf, rr, rc);
 
         // MPSMatrixMultiplication: キャッシュから取得 or 新規作成
-        const cache_key = MPSCacheKey{
-            .result_rows = result_rows,
-            .result_cols = result_cols,
-            .interior_cols = interior_cols,
-            .transpose_left = transpose_left,
-            .transpose_right = transpose_right,
-            .beta_is_one = (beta == 1.0),
-        };
-        const mps_mul = if (self.mps_cache) |*cache| blk: {
-            if (cache.get(cache_key)) |cached| {
-                break :blk cached;
-            }
-            const MPSMatrixMultiplication = getClass("MPSMatrixMultiplication");
-            const alloc_obj = send0(MPSMatrixMultiplication, sel("alloc")).?;
-            const new_mul = sendMpsMatmulInit(
-                alloc_obj,
-                sel("initWithDevice:transposeLeft:transposeRight:resultRows:resultColumns:interiorColumns:alpha:beta:"),
-                self.device,
-                transpose_left,
-                transpose_right,
-                rr,
-                rc,
-                ic,
-                alpha,
-                beta,
-            ).?;
-            cache.put(cache_key, new_mul) catch {};
-            break :blk new_mul;
-        } else blk: {
-            const MPSMatrixMultiplication = getClass("MPSMatrixMultiplication");
-            const alloc_obj = send0(MPSMatrixMultiplication, sel("alloc")).?;
-            break :blk sendMpsMatmulInit(
-                alloc_obj,
-                sel("initWithDevice:transposeLeft:transposeRight:resultRows:resultColumns:interiorColumns:alpha:beta:"),
-                self.device,
-                transpose_left,
-                transpose_right,
-                rr,
-                rc,
-                ic,
-                alpha,
-                beta,
-            ).?;
-        };
+        const mps_mul = self.acquireMPSMatmul(params);
 
         // Encoder 切り替え: batch mode 時は encoder を endEncoding → MPS encode → 新 encoder
+        self.encodeMPSMatmul(mps_mul, mat_a, mat_b, mat_c);
+
+        // MPSMatrix は毎回 release (バッファが異なる)
+        // MPSMatrixMultiplication はキャッシュ時は release しない
+        if (self.mps_cache == null) {
+            objRelease(mps_mul);
+        }
+        objRelease(mat_a);
+        objRelease(mat_b);
+        objRelease(mat_c);
+    }
+
+    /// MPSMatrixMultiplication をキャッシュから取得、なければ生成
+    fn acquireMPSMatmul(self: *MetalContext, params: MPSMatmulParams) id {
+        const cache_key = MPSCacheKey{
+            .result_rows = params.result_rows,
+            .result_cols = params.result_cols,
+            .interior_cols = params.interior_cols,
+            .transpose_left = params.transpose_left,
+            .transpose_right = params.transpose_right,
+            .beta_is_one = (params.beta == 1.0),
+        };
+        if (self.mps_cache) |*cache| {
+            if (cache.get(cache_key)) |cached| return cached;
+            const new_mul = self.createMPSMatmul(params);
+            cache.put(cache_key, new_mul) catch {};
+            return new_mul;
+        }
+        return self.createMPSMatmul(params);
+    }
+
+    /// 新規 MPSMatrixMultiplication を alloc/init
+    fn createMPSMatmul(self: *MetalContext, params: MPSMatmulParams) id {
+        const MPSMatrixMultiplication = getClass("MPSMatrixMultiplication");
+        const alloc_obj = send0(MPSMatrixMultiplication, sel("alloc")).?;
+        return sendMpsMatmulInit(
+            alloc_obj,
+            sel(
+                "initWithDevice:transposeLeft:transposeRight:" ++
+                    "resultRows:resultColumns:interiorColumns:alpha:beta:",
+            ),
+            self.device,
+            params.transpose_left,
+            params.transpose_right,
+            @as(NSUInteger, @intCast(params.result_rows)),
+            @as(NSUInteger, @intCast(params.result_cols)),
+            @as(NSUInteger, @intCast(params.interior_cols)),
+            params.alpha,
+            params.beta,
+        ).?;
+    }
+
+    /// MPS matmul の encode: profile/batch/immediate の各モードを処理
+    fn encodeMPSMatmul(
+        self: *MetalContext,
+        mps_mul: id,
+        mat_a: id,
+        mat_b: id,
+        mat_c: id,
+    ) void {
         const encode_sel = sel("encodeToCommandBuffer:leftMatrix:rightMatrix:resultMatrix:");
         if (self.profile_mode and self.batch_encoder != null) {
             // Profile mode: 前のカテゴリを flush → MPS をカテゴリとして開始
@@ -2703,15 +3313,6 @@ pub const MetalContext = struct {
             commit(cmd_buf);
             waitUntilCompleted(cmd_buf);
         }
-
-        // MPSMatrix は毎回 release (バッファが異なる)
-        // MPSMatrixMultiplication はキャッシュ時は release しない
-        if (self.mps_cache == null) {
-            objRelease(mps_mul);
-        }
-        objRelease(mat_a);
-        objRelease(mat_b);
-        objRelease(mat_c);
     }
 };
 

@@ -66,7 +66,11 @@ pub const DiffMpsRuntime = struct {
     topo_buf: std.ArrayListUnmanaged(*DiffMpsNode),
     training: bool,
 
-    pub fn init(module: *const Module, metal_ctx: *MetalContext, allocator: Allocator) !DiffMpsRuntime {
+    pub fn init(
+        module: *const Module,
+        metal_ctx: *MetalContext,
+        allocator: Allocator,
+    ) !DiffMpsRuntime {
         try metal_ctx.initTrainingPipelines();
 
         const count = module.paramCount();
@@ -172,7 +176,12 @@ pub const DiffMpsRuntime = struct {
 
     // ── Node creation ──
 
-    pub fn makeNode(self: *DiffMpsRuntime, data_buf: id, shape_slice: []const usize, requires_grad: bool) *DiffMpsNode {
+    pub fn makeNode(
+        self: *DiffMpsRuntime,
+        data_buf: id,
+        shape_slice: []const usize,
+        requires_grad: bool,
+    ) *DiffMpsNode {
         const node = self.arenaAlloc().create(DiffMpsNode) catch unreachable;
         node.* = .{
             .data = data_buf,
@@ -260,7 +269,11 @@ pub const DiffMpsRuntime = struct {
     //                                        backward_fn = &UnaryBackward(Kind).apply
 
     /// CPU fwd (UMA) + CPU bwd (UMA) の pointwise unary op (Metal kernel なし)。
-    fn unaryKindCpu(self: *DiffMpsRuntime, comptime kind: unary.Kind, x: DiffMpsTensor) DiffMpsTensor {
+    fn unaryKindCpu(
+        self: *DiffMpsRuntime,
+        comptime kind: unary.Kind,
+        x: DiffMpsTensor,
+    ) DiffMpsTensor {
         const n = x.totalElements();
         const out_buf = self.allocBuf(n);
         const src = bufPtr(x.data);
@@ -552,7 +565,11 @@ pub const DiffMpsRuntime = struct {
     // Shape ops (CPU via UMA)
     // ════════════════════════════════════════════════════════════════
 
-    pub fn reshape(self: *DiffMpsRuntime, x: DiffMpsTensor, new_shape: []const usize) DiffMpsTensor {
+    pub fn reshape(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        new_shape: []const usize,
+    ) DiffMpsTensor {
         const node = self.makeNode(x.data, new_shape, x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
@@ -650,81 +667,88 @@ pub const DiffMpsRuntime = struct {
     // ════════════════════════════════════════════════════════════════
 
     pub fn reductionSum(self: *DiffMpsRuntime, x: DiffMpsTensor, axis: i64) DiffMpsTensor {
-        const actual_axis: usize = if (axis < 0) @intCast(@as(i64, @intCast(x.ndim)) + axis) else @intCast(axis);
+        const actual_axis: usize = if (axis < 0)
+            @intCast(@as(i64, @intCast(x.ndim)) + axis)
+        else
+            @intCast(axis);
 
-        if (x.ndim == 2) {
-            const rows = x.shape[0];
-            const cols = x.shape[1];
-            const src = bufPtr(x.data);
-            if (actual_axis == 1) {
-                const out_buf = self.allocBuf(rows);
-                const dst = bufPtr(out_buf);
-                for (0..rows) |i| {
-                    var s: f32 = 0;
-                    for (0..cols) |j| s += src[i * cols + j];
-                    dst[i] = s;
-                }
-                const node = self.makeNode(out_buf, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleSum());
-                return node;
-            } else {
-                const out_buf = self.allocBuf(cols);
-                const dst = bufPtr(out_buf);
-                @memset(dst[0..cols], 0);
-                for (0..rows) |i| {
-                    for (0..cols) |j| dst[j] += src[i * cols + j];
-                }
-                const node = self.makeNode(out_buf, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleSum());
-                return node;
-            }
-        }
-
-        if (x.ndim == 1) {
-            const n = x.totalElements();
-            const src = bufPtr(x.data);
-            const out_buf = self.allocBuf(1);
-            var s: f32 = 0;
-            for (0..n) |i| s += src[i];
-            bufPtr(out_buf)[0] = s;
-            const node = self.makeNode(out_buf, &.{1}, x.requires_grad);
-            if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleSum());
-            return node;
-        }
-
-        // ndim >= 3: flatten around the reduction axis
-        if (x.ndim >= 3) {
-            const total = x.totalElements();
-            var before: usize = 1;
-            for (0..actual_axis) |d| before *= x.shape[d];
-            const axis_dim = x.shape[actual_axis];
-            if (actual_axis == x.ndim - 1) {
-                const flat = self.reshape(x, &.{ total / axis_dim, axis_dim });
-                const reduced = self.reductionSum(flat, 1);
-                var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
-                for (0..x.ndim - 1) |d| new_shape[d] = x.shape[d];
-                return self.reshape(reduced, new_shape[0..x.ndim]);
-            } else if (actual_axis == 0) {
-                const flat = self.reshape(x, &.{ axis_dim, total / axis_dim });
-                const reduced = self.reductionSum(flat, 0);
-                var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
-                for (1..x.ndim) |d| new_shape[d] = x.shape[d];
-                return self.reshape(reduced, new_shape[0..x.ndim]);
-            } else {
-                var after: usize = 1;
-                for (actual_axis + 1..x.ndim) |d| after *= x.shape[d];
-                const r3 = self.reshape(x, &.{ before, axis_dim, after });
-                const t3 = self.transpose(r3, 1, 2);
-                const flat = self.reshape(t3, &.{ before * after, axis_dim });
-                const reduced = self.reductionSum(flat, 1);
-                var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
-                for (0..x.ndim) |d| new_shape[d] = x.shape[d];
-                new_shape[actual_axis] = 1;
-                return self.reshape(reduced, new_shape[0..x.ndim]);
-            }
-        }
+        if (x.ndim == 2) return self.reductionSum2D(x, actual_axis);
+        if (x.ndim == 1) return self.reductionSum1D(x);
+        if (x.ndim >= 3) return self.reductionSumND(x, actual_axis);
 
         @panic("reductionSum: unsupported ndim/axis");
+    }
+
+    fn reductionSum2D(self: *DiffMpsRuntime, x: DiffMpsTensor, actual_axis: usize) DiffMpsTensor {
+        const rows = x.shape[0];
+        const cols = x.shape[1];
+        const src = bufPtr(x.data);
+        if (actual_axis == 1) {
+            const out_buf = self.allocBuf(rows);
+            const dst = bufPtr(out_buf);
+            for (0..rows) |i| {
+                var s: f32 = 0;
+                for (0..cols) |j| s += src[i * cols + j];
+                dst[i] = s;
+            }
+            const node = self.makeNode(out_buf, &.{ rows, 1 }, x.requires_grad);
+            if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleSum());
+            return node;
+        } else {
+            const out_buf = self.allocBuf(cols);
+            const dst = bufPtr(out_buf);
+            @memset(dst[0..cols], 0);
+            for (0..rows) |i| {
+                for (0..cols) |j| dst[j] += src[i * cols + j];
+            }
+            const node = self.makeNode(out_buf, &.{ 1, cols }, x.requires_grad);
+            if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleSum());
+            return node;
+        }
+    }
+
+    fn reductionSum1D(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
+        const n = x.totalElements();
+        const src = bufPtr(x.data);
+        const out_buf = self.allocBuf(1);
+        var s: f32 = 0;
+        for (0..n) |i| s += src[i];
+        bufPtr(out_buf)[0] = s;
+        const node = self.makeNode(out_buf, &.{1}, x.requires_grad);
+        if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleSum());
+        return node;
+    }
+
+    // ndim >= 3: flatten around the reduction axis
+    fn reductionSumND(self: *DiffMpsRuntime, x: DiffMpsTensor, actual_axis: usize) DiffMpsTensor {
+        const total = x.totalElements();
+        var before: usize = 1;
+        for (0..actual_axis) |d| before *= x.shape[d];
+        const axis_dim = x.shape[actual_axis];
+        if (actual_axis == x.ndim - 1) {
+            const flat = self.reshape(x, &.{ total / axis_dim, axis_dim });
+            const reduced = self.reductionSum(flat, 1);
+            var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
+            for (0..x.ndim - 1) |d| new_shape[d] = x.shape[d];
+            return self.reshape(reduced, new_shape[0..x.ndim]);
+        } else if (actual_axis == 0) {
+            const flat = self.reshape(x, &.{ axis_dim, total / axis_dim });
+            const reduced = self.reductionSum(flat, 0);
+            var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
+            for (1..x.ndim) |d| new_shape[d] = x.shape[d];
+            return self.reshape(reduced, new_shape[0..x.ndim]);
+        } else {
+            var after: usize = 1;
+            for (actual_axis + 1..x.ndim) |d| after *= x.shape[d];
+            const r3 = self.reshape(x, &.{ before, axis_dim, after });
+            const t3 = self.transpose(r3, 1, 2);
+            const flat = self.reshape(t3, &.{ before * after, axis_dim });
+            const reduced = self.reductionSum(flat, 1);
+            var new_shape: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
+            for (0..x.ndim) |d| new_shape[d] = x.shape[d];
+            new_shape[actual_axis] = 1;
+            return self.reshape(reduced, new_shape[0..x.ndim]);
+        }
     }
 
     // ── Reduction backward 共通基盤 (数式は diff/common/reduce.zig) ──
@@ -763,7 +787,10 @@ pub const DiffMpsRuntime = struct {
     }
 
     pub fn reductionMean(self: *DiffMpsRuntime, x: DiffMpsTensor, axis: i64) DiffMpsTensor {
-        const actual_axis: usize = if (axis < 0) @intCast(@as(i64, @intCast(x.ndim)) + axis) else @intCast(axis);
+        const actual_axis: usize = if (axis < 0)
+            @intCast(@as(i64, @intCast(x.ndim)) + axis)
+        else
+            @intCast(axis);
 
         if (x.ndim == 2) {
             const rows = x.shape[0];
@@ -779,7 +806,8 @@ pub const DiffMpsRuntime = struct {
                     dst[i] = s / cols_f;
                 }
                 const node = self.makeNode(out_buf, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleMean(cols));
+                if (x.requires_grad)
+                    self.setReduceBackward(node, x, .axis1_2d, reduce.scaleMean(cols));
                 return node;
             } else {
                 const out_buf = self.allocBuf(cols);
@@ -791,7 +819,8 @@ pub const DiffMpsRuntime = struct {
                 }
                 for (0..cols) |j| dst[j] /= rows_f;
                 const node = self.makeNode(out_buf, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleMean(rows));
+                if (x.requires_grad)
+                    self.setReduceBackward(node, x, .axis0_2d, reduce.scaleMean(rows));
                 return node;
             }
         }
@@ -802,7 +831,14 @@ pub const DiffMpsRuntime = struct {
     // LayerNorm (Metal forward, CPU backward via UMA)
     // ════════════════════════════════════════════════════════════════
 
-    pub fn layerNorm(self: *DiffMpsRuntime, x: DiffMpsTensor, gamma: DiffMpsTensor, beta: DiffMpsTensor, eps: f32, axis: i64) DiffMpsTensor {
+    pub fn layerNorm(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        gamma: DiffMpsTensor,
+        beta: DiffMpsTensor,
+        eps: f32,
+        axis: i64,
+    ) DiffMpsTensor {
         _ = axis;
         const rows: u32 = @intCast(x.numRows());
         const cols: u32 = @intCast(x.lastDim());
@@ -810,7 +846,18 @@ pub const DiffMpsRuntime = struct {
         const mean_buf = self.allocBuf(rows);
         const inv_std_buf = self.allocBuf(rows);
         const gpu = beginGpu(self.metal_ctx);
-        self.metal_ctx.dispatchLayerNormForward(gpu.enc, x.data, gamma.data, beta.data, out_buf, mean_buf, inv_std_buf, rows, cols, eps);
+        self.metal_ctx.dispatchLayerNormForward(
+            gpu.enc,
+            x.data,
+            gamma.data,
+            beta.data,
+            out_buf,
+            mean_buf,
+            inv_std_buf,
+            rows,
+            cols,
+            eps,
+        );
         endGpu(gpu);
         const rg = x.requires_grad or gamma.requires_grad or beta.requires_grad;
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], rg);
@@ -874,7 +921,10 @@ pub const DiffMpsRuntime = struct {
                 }
                 for (0..cols) |c| {
                     const xhat = (x_data[r * cols + c] - mean[r]) * inv_std[r];
-                    const dx = inv_std[r] * (go[r * cols + c] * gamma_data[c] - sum_go_gamma / cols_f - xhat * sum_go_gamma_xhat / cols_f);
+                    const dx = inv_std[r] *
+                        (go[r * cols + c] * gamma_data[c] -
+                            sum_go_gamma / cols_f -
+                            xhat * sum_go_gamma_xhat / cols_f);
                     ga[r * cols + c] += dx;
                 }
             }
@@ -885,14 +935,28 @@ pub const DiffMpsRuntime = struct {
     // RMSNorm: y = x * inv_rms * weight, inv_rms = 1/sqrt(mean(x²) + eps)
     // ════════════════════════════════════════════════════════════════
 
-    pub fn rmsNorm(self: *DiffMpsRuntime, x: DiffMpsTensor, weight: DiffMpsTensor, eps: f32) DiffMpsTensor {
+    pub fn rmsNorm(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        weight: DiffMpsTensor,
+        eps: f32,
+    ) DiffMpsTensor {
         const rows: u32 = @intCast(x.numRows());
         const cols: u32 = @intCast(x.lastDim());
         const n = x.totalElements();
         const out_buf = self.allocBuf(n);
         const inv_rms_buf = self.allocBuf(rows);
         const gpu = beginGpu(self.metal_ctx);
-        self.metal_ctx.dispatchRMSNormForwardTraining(gpu.enc, x.data, weight.data, out_buf, inv_rms_buf, rows, cols, eps);
+        self.metal_ctx.dispatchRMSNormForwardTraining(
+            gpu.enc,
+            x.data,
+            weight.data,
+            out_buf,
+            inv_rms_buf,
+            rows,
+            cols,
+            eps,
+        );
         endGpu(gpu);
         const rg = x.requires_grad or weight.requires_grad;
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], rg);
@@ -931,7 +995,8 @@ pub const DiffMpsRuntime = struct {
                 }
             }
         }
-        // dX[r,c] = inv_rms[r] * (w[c] * go[r,c] - x[r,c] * inv_rms[r]² · (Σⱼ x[r,j]·w[j]·go[r,j]) / D)
+        // dX[r,c] = inv_rms[r] *
+        //           (w[c] * go[r,c] - x[r,c] * inv_rms[r]² · (Σⱼ x[r,j]·w[j]·go[r,j]) / D)
         if (pa.grad) |g| {
             const ga = bufPtr(g);
             for (0..rows) |r| {
@@ -955,13 +1020,26 @@ pub const DiffMpsRuntime = struct {
     // where rows = batch*num_heads*seq_q, cols = seq_k = seq_len
     // ════════════════════════════════════════════════════════════════
 
-    pub fn causalSoftmax(self: *DiffMpsRuntime, x: DiffMpsTensor, num_heads: u32, seq_len: u32) DiffMpsTensor {
+    pub fn causalSoftmax(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        num_heads: u32,
+        seq_len: u32,
+    ) DiffMpsTensor {
         const rows: u32 = @intCast(x.numRows());
         const cols: u32 = @intCast(x.lastDim());
         const n = x.totalElements();
         const out_buf = self.allocBuf(n);
         const gpu = beginGpu(self.metal_ctx);
-        self.metal_ctx.dispatchCausalSoftmaxF32(gpu.enc, x.data, out_buf, rows, cols, num_heads, seq_len);
+        self.metal_ctx.dispatchCausalSoftmaxF32(
+            gpu.enc,
+            x.data,
+            out_buf,
+            rows,
+            cols,
+            num_heads,
+            seq_len,
+        );
         endGpu(gpu);
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
@@ -979,7 +1057,14 @@ pub const DiffMpsRuntime = struct {
     // freqs shape: [half_dim] precomputed frequencies θᵢ = base^(-2i/d)
     // ════════════════════════════════════════════════════════════════
 
-    pub fn rope(self: *DiffMpsRuntime, x: DiffMpsTensor, freqs: DiffMpsTensor, n_heads: u32, seq_len: u32, half_dim: u32) DiffMpsTensor {
+    pub fn rope(
+        self: *DiffMpsRuntime,
+        x: DiffMpsTensor,
+        freqs: DiffMpsTensor,
+        n_heads: u32,
+        seq_len: u32,
+        half_dim: u32,
+    ) DiffMpsTensor {
         const n = x.totalElements();
         const out_buf = self.allocBuf(n);
         // Metal RoPE kernel works in-place; copy x into out_buf first.
@@ -987,7 +1072,16 @@ pub const DiffMpsRuntime = struct {
         const sin_cache = self.allocBuf(seq_len * half_dim);
         const cos_cache = self.allocBuf(seq_len * half_dim);
         const gpu = beginGpu(self.metal_ctx);
-        self.metal_ctx.dispatchRoPEForwardTraining(gpu.enc, out_buf, freqs.data, sin_cache, cos_cache, seq_len, n_heads, half_dim);
+        self.metal_ctx.dispatchRoPEForwardTraining(
+            gpu.enc,
+            out_buf,
+            freqs.data,
+            sin_cache,
+            cos_cache,
+            seq_len,
+            n_heads,
+            half_dim,
+        );
         endGpu(gpu);
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
@@ -1168,7 +1262,10 @@ pub const DiffMpsRuntime = struct {
         const o_data = bufPtr(out_buf);
         for (0..num_indices) |i| {
             const row = indices[i];
-            @memcpy(o_data[i * embed_dim ..][0..embed_dim], t_data[row * embed_dim ..][0..embed_dim]);
+            @memcpy(
+                o_data[i * embed_dim ..][0..embed_dim],
+                t_data[row * embed_dim ..][0..embed_dim],
+            );
         }
         const node = self.makeNode(out_buf, &.{ num_indices, embed_dim }, table.requires_grad);
         if (table.requires_grad) {
@@ -1242,7 +1339,11 @@ pub const DiffMpsRuntime = struct {
         }
     }
 
-    pub fn crossEntropyLossWithIndices(self: *DiffMpsRuntime, logits: DiffMpsTensor, indices: []const u32) DiffMpsTensor {
+    pub fn crossEntropyLossWithIndices(
+        self: *DiffMpsRuntime,
+        logits: DiffMpsTensor,
+        indices: []const u32,
+    ) DiffMpsTensor {
         const batch = logits.shape[0];
         const num_classes = logits.shape[1];
         const ld = bufPtr(logits.data);
@@ -1301,7 +1402,11 @@ pub const DiffMpsRuntime = struct {
         }
     }
 
-    pub fn bceLossWithLogits(self: *DiffMpsRuntime, logits: DiffMpsTensor, target: []const f32) DiffMpsTensor {
+    pub fn bceLossWithLogits(
+        self: *DiffMpsRuntime,
+        logits: DiffMpsTensor,
+        target: []const f32,
+    ) DiffMpsTensor {
         const total = logits.totalElements();
         const ld = bufPtr(logits.data);
         var loss_sum: f32 = 0;

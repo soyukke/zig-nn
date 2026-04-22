@@ -36,12 +36,40 @@ pub fn Conv2d(
         /// Sequential 対応の forward(self, ctx, input)。事前に setInputSize() が必要。
         pub fn forward(self: @This(), ctx: anytype, input: anytype) @TypeOf(input) {
             std.debug.assert(self.input_h > 0 and self.input_w > 0);
-            return ctx.conv2d(input, ctx.param(self.w), ctx.param(self.b), stride, padding, kernel_size, in_ch, out_ch, self.input_h, self.input_w);
+            return ctx.conv2d(
+                input,
+                ctx.param(self.w),
+                ctx.param(self.b),
+                stride,
+                padding,
+                kernel_size,
+                in_ch,
+                out_ch,
+                self.input_h,
+                self.input_w,
+            );
         }
 
         /// 明示的 h, w 指定の forward (backward compatibility)
-        pub fn forwardWithSize(self: @This(), ctx: anytype, input: anytype, h: usize, input_w: usize) @TypeOf(input) {
-            return ctx.conv2d(input, ctx.param(self.w), ctx.param(self.b), stride, padding, kernel_size, in_ch, out_ch, h, input_w);
+        pub fn forwardWithSize(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            h: usize,
+            input_w: usize,
+        ) @TypeOf(input) {
+            return ctx.conv2d(
+                input,
+                ctx.param(self.w),
+                ctx.param(self.b),
+                stride,
+                padding,
+                kernel_size,
+                in_ch,
+                out_ch,
+                h,
+                input_w,
+            );
         }
 
         /// 出力の空間サイズを計算
@@ -74,11 +102,25 @@ pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
         /// Sequential 対応の forward(self, ctx, input)。事前に setInputSize() が必要。
         pub fn forward(self: @This(), ctx: anytype, input: anytype) @TypeOf(input) {
             std.debug.assert(self.channels > 0 and self.input_h > 0 and self.input_w > 0);
-            return ctx.maxPool2d(input, pool_size, stride, self.channels, self.input_h, self.input_w);
+            return ctx.maxPool2d(
+                input,
+                pool_size,
+                stride,
+                self.channels,
+                self.input_h,
+                self.input_w,
+            );
         }
 
         /// 明示的パラメータ指定の forward (backward compatibility)
-        pub fn forwardWithSize(self: @This(), ctx: anytype, input: anytype, channels: usize, h: usize, input_w: usize) @TypeOf(input) {
+        pub fn forwardWithSize(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            channels: usize,
+            h: usize,
+            input_w: usize,
+        ) @TypeOf(input) {
             _ = self;
             return ctx.maxPool2d(input, pool_size, stride, channels, h, input_w);
         }

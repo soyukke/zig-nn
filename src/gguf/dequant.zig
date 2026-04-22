@@ -167,7 +167,13 @@ pub fn dotQ4_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 /// weight: Q4_0 エンコード済み行列 (out_dim 行 × in_dim 列)
 /// input: f32 ベクトル (in_dim 要素)
 /// output: f32 出力 (out_dim 要素)
-pub fn matmulQ4_0_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
+pub fn matmulQ4_0_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
     const row_bytes = tensorBytes(.q4_0, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
@@ -237,7 +243,13 @@ pub fn dotQ4_1_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 }
 
 /// Q4_1 行列 × f32 ベクトル → f32 出力ベクトル
-pub fn matmulQ4_1_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
+pub fn matmulQ4_1_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
     const row_bytes = tensorBytes(.q4_1, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
@@ -282,7 +294,13 @@ pub fn dotQ8_0_f32(weight_row: []const u8, input: []const f32, in_dim: usize) f3
 }
 
 /// Q8_0 行列 × f32 ベクトル → f32 出力ベクトル
-pub fn matmulQ8_0_f32(weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize) void {
+pub fn matmulQ8_0_f32(
+    weight: []const u8,
+    input: []const f32,
+    output: []f32,
+    out_dim: usize,
+    in_dim: usize,
+) void {
     const row_bytes = tensorBytes(.q8_0, in_dim);
     for (0..out_dim) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
@@ -350,7 +368,10 @@ pub fn matmulParallel(
     // ワーカースレッドを起動 (2番目以降のチャンク)
     for (1..effective_threads) |t| {
         const start = t * rows_per_thread;
-        const end = if (t == effective_threads - 1) out_dim else (t + 1) * rows_per_thread;
+        const end = if (t == effective_threads - 1)
+            out_dim
+        else
+            (t + 1) * rows_per_thread;
         threads[t - 1] = std.Thread.spawn(.{}, matmulChunkF32, .{
             weight, input, output, start, end, row_bytes, in_dim, quant_type,
         }) catch break;
@@ -368,12 +389,26 @@ pub fn matmulParallel(
     // spawn に失敗したスレッドの分をメインスレッドで補完
     if (spawned < effective_threads - 1) {
         const remaining_start = (spawned + 1) * rows_per_thread;
-        matmulChunkF32(weight, input, output, remaining_start, out_dim, row_bytes, in_dim, quant_type);
+        matmulChunkF32(
+            weight,
+            input,
+            output,
+            remaining_start,
+            out_dim,
+            row_bytes,
+            in_dim,
+            quant_type,
+        );
     }
 }
 
 /// 型に応じた統合逆量子化関数
-pub fn dequantize(type_: GGMLType, src: []const u8, dst: []f32, num_elements: usize) !void {
+pub fn dequantize(
+    type_: GGMLType,
+    src: []const u8,
+    dst: []f32,
+    num_elements: usize,
+) !void {
     switch (type_) {
         .f32 => dequantizeF32(src, dst),
         .f16 => dequantizeF16(src, dst),
@@ -390,7 +425,9 @@ pub fn dequantize(type_: GGMLType, src: []const u8, dst: []f32, num_elements: us
 
 test "dequantize F32" {
     // f32 values: 1.0, -2.5, 3.14
-    const src = std.mem.toBytes(@as(f32, 1.0)) ++ std.mem.toBytes(@as(f32, -2.5)) ++ std.mem.toBytes(@as(f32, 3.14));
+    const src = std.mem.toBytes(@as(f32, 1.0)) ++
+        std.mem.toBytes(@as(f32, -2.5)) ++
+        std.mem.toBytes(@as(f32, 3.14));
     var dst: [3]f32 = undefined;
     dequantizeF32(&src, &dst);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), dst[0], 1e-6);
@@ -401,7 +438,8 @@ test "dequantize F32" {
 test "dequantize F16" {
     const val1: f16 = 1.0;
     const val2: f16 = -0.5;
-    const src = std.mem.toBytes(@as(u16, @bitCast(val1))) ++ std.mem.toBytes(@as(u16, @bitCast(val2)));
+    const src = std.mem.toBytes(@as(u16, @bitCast(val1))) ++
+        std.mem.toBytes(@as(u16, @bitCast(val2)));
     var dst: [2]f32 = undefined;
     dequantizeF16(&src, &dst);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), dst[0], 1e-3);

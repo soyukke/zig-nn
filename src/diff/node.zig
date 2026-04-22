@@ -44,7 +44,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 /// トポロジカルソート (DFS) — バックエンド非依存
-pub fn topoSort(comptime Node: type, node: *Node, buf: *std.ArrayListUnmanaged(*Node), allocator: Allocator) void {
+pub fn topoSort(
+    comptime Node: type,
+    node: *Node,
+    buf: *std.ArrayListUnmanaged(*Node),
+    allocator: Allocator,
+) void {
     if (node.visited) return;
     node.visited = true;
 
@@ -60,7 +65,11 @@ pub fn topoSort(comptime Node: type, node: *Node, buf: *std.ArrayListUnmanaged(*
 /// 逆伝播のステップ 2,4,5 を共通化。
 /// ステップ 1 (loss 勾配初期化) と 3 (中間ノードの勾配確保) はバックエンド依存のため
 /// 呼び出し側で行う。
-pub fn backwardPass(comptime Node: type, topo_buf: *std.ArrayListUnmanaged(*Node), param_nodes: []Node) void {
+pub fn backwardPass(
+    comptime Node: type,
+    topo_buf: *std.ArrayListUnmanaged(*Node),
+    param_nodes: []Node,
+) void {
     // 4. Reverse traversal: call backward_fn
     var idx = topo_buf.items.len;
     while (idx > 0) {

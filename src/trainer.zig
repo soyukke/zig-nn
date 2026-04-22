@@ -136,7 +136,15 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
         pub fn step(self: *@This()) void {
             const c = self.config;
             if (c.max_grad_norm) |max_norm| {
-                self.rt.applyAdamClipped(&self.adam, c.lr, c.beta1, c.beta2, c.eps, c.weight_decay, max_norm);
+                self.rt.applyAdamClipped(
+                    &self.adam,
+                    c.lr,
+                    c.beta1,
+                    c.beta2,
+                    c.eps,
+                    c.weight_decay,
+                    max_norm,
+                );
             } else {
                 self.rt.applyAdam(&self.adam, c.lr, c.beta1, c.beta2, c.eps, c.weight_decay);
             }
@@ -245,13 +253,32 @@ pub fn Trainer(comptime ModelType: type, comptime device: Device) type {
         }
 
         /// Cosine annealing LR scheduler step
-        pub fn cosineAnnealingStep(self: *@This(), current_step: u32, total_steps: u32, lr_min: f32, lr_max: f32) void {
+        pub fn cosineAnnealingStep(
+            self: *@This(),
+            current_step: u32,
+            total_steps: u32,
+            lr_min: f32,
+            lr_max: f32,
+        ) void {
             self.config.lr = compute.cosineAnnealingLR(current_step, total_steps, lr_min, lr_max);
         }
 
         /// Warmup + cosine decay LR scheduler step
-        pub fn warmupCosineStep(self: *@This(), current_step: u32, warmup_steps: u32, total_steps: u32, lr_min: f32, lr_max: f32) void {
-            self.config.lr = compute.warmupCosineDecayLR(current_step, warmup_steps, total_steps, lr_min, lr_max);
+        pub fn warmupCosineStep(
+            self: *@This(),
+            current_step: u32,
+            warmup_steps: u32,
+            total_steps: u32,
+            lr_min: f32,
+            lr_max: f32,
+        ) void {
+            self.config.lr = compute.warmupCosineDecayLR(
+                current_step,
+                warmup_steps,
+                total_steps,
+                lr_min,
+                lr_max,
+            );
         }
 
         // ── Utilities ──

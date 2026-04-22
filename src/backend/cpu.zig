@@ -1,6 +1,5 @@
 /// CPUバックエンド。f32 は CBLAS (macOS: Accelerate, Linux: OpenBLAS) を使用。
 /// f64 等は素朴なループ実装にフォールバック。
-
 const builtin = @import("builtin");
 const std = @import("std");
 const Timer = @import("../util/timer.zig").Timer;
@@ -40,7 +39,10 @@ pub fn printProfile() void {
         w.print("=== cpu.zig profile ===\n", .{}) catch return;
         w.print("  sgemm: {d} calls, {d:.1}ms\n", .{ sgemm_count, sgemm_ms }) catch return;
         w.print("  saxpy: {d} calls, {d:.1}ms\n", .{ saxpy_count, saxpy_ms }) catch return;
-        w.print("  other (add/sub/mul/relu/scale/bias/transpose): {d} calls, {d:.1}ms\n", .{ other_count, other_ms }) catch return;
+        w.print(
+            "  other (add/sub/mul/relu/scale/bias/transpose): {d} calls, {d:.1}ms\n",
+            .{ other_count, other_ms },
+        ) catch return;
         w.print("  --- total BLAS: {d:.1}ms ---\n", .{total_blas_ms}) catch return;
         log.info("profile written: {s}", .{artifact.path});
     }
@@ -62,14 +64,76 @@ const vDSP_Length = c_ulong;
 const vDSP_Stride = c_long;
 
 const accelerate = if (builtin.os.tag == .macos) struct {
-    pub extern "c" fn vDSP_vadd(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vsub(B: [*]const f32, IB: vDSP_Stride, A: [*]const f32, IA: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vmul(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vthres(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vsadd(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vsmul(A: [*]const f32, IA: vDSP_Stride, B: *const f32, C: [*]f32, IC: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_vma(A: [*]const f32, IA: vDSP_Stride, B: [*]const f32, IB: vDSP_Stride, C: [*]const f32, IC: vDSP_Stride, D: [*]f32, ID: vDSP_Stride, N: vDSP_Length) void;
-    pub extern "c" fn vDSP_mtrans(A: [*]const f32, IA: vDSP_Stride, C: [*]f32, IC: vDSP_Stride, M: vDSP_Length, N: vDSP_Length) void;
+    pub extern "c" fn vDSP_vadd(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: [*]const f32,
+        IB: vDSP_Stride,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vsub(
+        B: [*]const f32,
+        IB: vDSP_Stride,
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vmul(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: [*]const f32,
+        IB: vDSP_Stride,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vthres(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: *const f32,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vsadd(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: *const f32,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vsmul(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: *const f32,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_vma(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        B: [*]const f32,
+        IB: vDSP_Stride,
+        C: [*]const f32,
+        IC: vDSP_Stride,
+        D: [*]f32,
+        ID: vDSP_Stride,
+        N: vDSP_Length,
+    ) void;
+    pub extern "c" fn vDSP_mtrans(
+        A: [*]const f32,
+        IA: vDSP_Stride,
+        C: [*]f32,
+        IC: vDSP_Stride,
+        M: vDSP_Length,
+        N: vDSP_Length,
+    ) void;
 } else struct {};
 
 // CBLAS extern 宣言 (ヘッダファイル不要、リンク時に解決)
@@ -108,17 +172,32 @@ extern "c" fn cblas_saxpy(
 
 /// 行列積: C = A @ B (row-major)
 /// A: (m x k), B: (k x n), C: (m x n)
-pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmul(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     if (T == f32) {
         var timer = timerStart();
         cblas_sgemm(
             CblasRowMajor,
             CblasNoTrans,
             CblasNoTrans,
-            @intCast(m), @intCast(n), @intCast(k),
-            1.0, a, @intCast(k),
-            b, @intCast(n),
-            0.0, c, @intCast(n),
+            @intCast(m),
+            @intCast(n),
+            @intCast(k),
+            1.0,
+            a,
+            @intCast(k),
+            b,
+            @intCast(n),
+            0.0,
+            c,
+            @intCast(n),
         );
         sgemm_count += 1;
         sgemm_nanos += timerRead(&timer);
@@ -130,17 +209,32 @@ pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize,
 /// 転置なし行列積: C = A^T @ B (row-major)
 /// A: (k x m) stored, but treated as (m x k)^T → (k x m)
 /// B: (k x n), C: (m x n)
-pub fn matmulTransA(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmulTransA(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     if (T == f32) {
         var timer = timerStart();
         cblas_sgemm(
             CblasRowMajor,
             CblasTrans,
             CblasNoTrans,
-            @intCast(m), @intCast(n), @intCast(k),
-            1.0, a, @intCast(m),
-            b, @intCast(n),
-            0.0, c, @intCast(n),
+            @intCast(m),
+            @intCast(n),
+            @intCast(k),
+            1.0,
+            a,
+            @intCast(m),
+            b,
+            @intCast(n),
+            0.0,
+            c,
+            @intCast(n),
         );
         sgemm_count += 1;
         sgemm_nanos += timerRead(&timer);
@@ -161,17 +255,32 @@ pub fn matmulTransA(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: 
 /// 転置なし行列積: C = A @ B^T (row-major)
 /// A: (m x k), B: (n x k) stored, treated as (k x n)^T
 /// C: (m x n)
-pub fn matmulTransB(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmulTransB(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     if (T == f32) {
         var timer = timerStart();
         cblas_sgemm(
             CblasRowMajor,
             CblasNoTrans,
             CblasTrans,
-            @intCast(m), @intCast(n), @intCast(k),
-            1.0, a, @intCast(k),
-            b, @intCast(k),
-            0.0, c, @intCast(n),
+            @intCast(m),
+            @intCast(n),
+            @intCast(k),
+            1.0,
+            a,
+            @intCast(k),
+            b,
+            @intCast(k),
+            0.0,
+            c,
+            @intCast(n),
         );
         sgemm_count += 1;
         sgemm_nanos += timerRead(&timer);
@@ -190,17 +299,32 @@ pub fn matmulTransB(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: 
 
 /// C += A^T @ B (accumulate, beta=1.0)
 /// A: (k x m) stored, C: (m x n), B: (k x n)
-pub fn matmulTransAAccum(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmulTransAAccum(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     if (T == f32) {
         var timer = timerStart();
         cblas_sgemm(
             CblasRowMajor,
             CblasTrans,
             CblasNoTrans,
-            @intCast(m), @intCast(n), @intCast(k),
-            1.0, a, @intCast(m),
-            b, @intCast(n),
-            1.0, c, @intCast(n),
+            @intCast(m),
+            @intCast(n),
+            @intCast(k),
+            1.0,
+            a,
+            @intCast(m),
+            b,
+            @intCast(n),
+            1.0,
+            c,
+            @intCast(n),
         );
         sgemm_count += 1;
         sgemm_nanos += timerRead(&timer);
@@ -219,17 +343,32 @@ pub fn matmulTransAAccum(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T
 
 /// C += A @ B^T (accumulate, beta=1.0)
 /// A: (m x k), B: (n x k) stored, C: (m x n)
-pub fn matmulTransBAccum(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmulTransBAccum(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     if (T == f32) {
         var timer = timerStart();
         cblas_sgemm(
             CblasRowMajor,
             CblasNoTrans,
             CblasTrans,
-            @intCast(m), @intCast(n), @intCast(k),
-            1.0, a, @intCast(k),
-            b, @intCast(k),
-            1.0, c, @intCast(n),
+            @intCast(m),
+            @intCast(n),
+            @intCast(k),
+            1.0,
+            a,
+            @intCast(k),
+            b,
+            @intCast(k),
+            1.0,
+            c,
+            @intCast(n),
         );
         sgemm_count += 1;
         sgemm_nanos += timerRead(&timer);
@@ -246,7 +385,15 @@ pub fn matmulTransBAccum(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T
     }
 }
 
-fn matmulNaive(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+fn matmulNaive(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     for (0..m) |i| {
         for (0..n) |j| {
             var sum: T = 0;
@@ -348,7 +495,15 @@ pub fn scale(comptime T: type, a: [*]const T, scalar: T, c: [*]T, len: usize) vo
 /// Fused bias add: c[batch*S*D + s*D + d] = a[batch*S*D + s*D + d] + bias[batch*D + d]
 /// Shape semantics: a is [B*S, D] or [B, S, D], bias is [B, D] or [rows, D]
 /// When S=1, this is equivalent to per-row vadd (flat bias broadcast).
-pub fn addBias(comptime T: type, a: [*]const T, bias: [*]const T, c: [*]T, batches: usize, seq: usize, dim: usize) void {
+pub fn addBias(
+    comptime T: type,
+    a: [*]const T,
+    bias: [*]const T,
+    c: [*]T,
+    batches: usize,
+    seq: usize,
+    dim: usize,
+) void {
     var timer = timerStart();
     if (T == f32 and builtin.os.tag == .macos) {
         for (0..batches) |b| {
@@ -375,7 +530,15 @@ pub fn addBias(comptime T: type, a: [*]const T, bias: [*]const T, c: [*]T, batch
 /// Fused broadcast multiply: c[batch*S*D + s*D + d] = a[batch*S*D + s*D + d] * scale[batch*D + d]
 /// Shape semantics: a is [B, S, D], scale is [B, 1, D] (broadcast along dim 1)
 /// When S=1, this is equivalent to per-row vmul (flat broadcast).
-pub fn mulBroadcast(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, batches: usize, seq: usize, dim: usize) void {
+pub fn mulBroadcast(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    batches: usize,
+    seq: usize,
+    dim: usize,
+) void {
     var timer = timerStart();
     if (T == f32 and builtin.os.tag == .macos) {
         for (0..batches) |batch| {
@@ -401,7 +564,14 @@ pub fn mulBroadcast(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, bat
 
 /// Batched matrix transpose: B matrices of R×C → C×R
 /// Uses vDSP_mtrans on macOS for optimized transpose.
-pub fn transposeMatrices(comptime T: type, src: [*]const T, dst: [*]T, batches: usize, rows: usize, cols: usize) void {
+pub fn transposeMatrices(
+    comptime T: type,
+    src: [*]const T,
+    dst: [*]T,
+    batches: usize,
+    rows: usize,
+    cols: usize,
+) void {
     var timer = timerStart();
     if (T == f32 and builtin.os.tag == .macos) {
         const mat_size = rows * cols;
@@ -432,7 +602,8 @@ pub fn transposeMatrices(comptime T: type, src: [*]const T, dst: [*]T, batches: 
 }
 
 /// GELU using Accelerate vvtanhf: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-/// macOS only. 3パス: (1) inner = sqrt(2/π) * (x + 0.044715*x³), (2) vvtanhf(inner), (3) 0.5*x*(1+tanh)
+/// macOS only. 3パス:
+/// (1) inner = sqrt(2/π) * (x + 0.044715*x³), (2) vvtanhf(inner), (3) 0.5*x*(1+tanh)
 pub fn geluAccelerate(x: [*]const f32, out: [*]f32, len: usize, tmp1: [*]f32, tmp2: [*]f32) void {
     if (comptime builtin.os.tag == .macos) {
         var timer = timerStart();
@@ -465,7 +636,16 @@ pub fn geluAccelerate(x: [*]const f32, out: [*]f32, len: usize, tmp1: [*]f32, tm
 
 /// Fused AdaLN: out[b,s,d] = norm[b,s,d] * scale[b,1,d] + beta[b,1,d]
 /// vDSP_vma: C[i] = A[i] * B[i] + D[i] (multiply-add)
-pub fn modulateAdaLN(comptime T: type, norm: [*]const T, scale_data: [*]const T, beta_data: [*]const T, out: [*]T, batches: usize, seq: usize, dim: usize) void {
+pub fn modulateAdaLN(
+    comptime T: type,
+    norm: [*]const T,
+    scale_data: [*]const T,
+    beta_data: [*]const T,
+    out: [*]T,
+    batches: usize,
+    seq: usize,
+    dim: usize,
+) void {
     var timer = timerStart();
     if (T == f32 and builtin.os.tag == .macos) {
         for (0..batches) |b| {
@@ -473,7 +653,17 @@ pub fn modulateAdaLN(comptime T: type, norm: [*]const T, scale_data: [*]const T,
             const b_row = beta_data + b * dim;
             for (0..seq) |s| {
                 const offset = (b * seq + s) * dim;
-                accelerate.vDSP_vma(norm + offset, 1, s_row, 1, b_row, 1, out + offset, 1, @intCast(dim));
+                accelerate.vDSP_vma(
+                    norm + offset,
+                    1,
+                    s_row,
+                    1,
+                    b_row,
+                    1,
+                    out + offset,
+                    1,
+                    @intCast(dim),
+                );
             }
         }
     } else {
@@ -481,7 +671,8 @@ pub fn modulateAdaLN(comptime T: type, norm: [*]const T, scale_data: [*]const T,
             for (0..seq) |s| {
                 const offset = (b * seq + s) * dim;
                 for (0..dim) |d| {
-                    out[offset + d] = norm[offset + d] * scale_data[b * dim + d] + beta_data[b * dim + d];
+                    out[offset + d] =
+                        norm[offset + d] * scale_data[b * dim + d] + beta_data[b * dim + d];
                 }
             }
         }

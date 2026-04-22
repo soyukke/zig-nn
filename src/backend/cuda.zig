@@ -2,7 +2,6 @@
 ///
 /// CUDA Driver API + cuBLAS 経由で NVIDIA GPU を利用する。
 /// 各サブモジュールのシンボルを再エクスポートする facade モジュール。
-
 const cuda_driver = @import("cuda_driver.zig");
 const cuda_blas = @import("cuda_blas.zig");
 const cuda_context = @import("cuda_context.zig");

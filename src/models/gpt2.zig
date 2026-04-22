@@ -131,23 +131,63 @@ fn loadBlockWeights(
     var name_buf: [64]u8 = undefined;
 
     return .{
-        .ln1_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_norm.weight"), allocator),
-        .ln1_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_norm.bias"), allocator),
-        .attn_qkv_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_qkv.weight")),
-        .attn_qkv_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_qkv.bias"), allocator),
-        .attn_proj_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_output.weight")),
-        .attn_proj_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_output.bias"), allocator),
-        .ln2_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "ffn_norm.weight"), allocator),
-        .ln2_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "ffn_norm.bias"), allocator),
-        .mlp_fc_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "ffn_up.weight")),
-        .mlp_fc_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "ffn_up.bias"), allocator),
-        .mlp_proj_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "ffn_down.weight")),
-        .mlp_proj_bias = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "ffn_down.bias"), allocator),
+        .ln1_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_norm.weight"),
+            allocator,
+        ),
+        .ln1_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_norm.bias"),
+            allocator,
+        ),
+        .attn_qkv_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_qkv.weight"),
+        ),
+        .attn_qkv_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_qkv.bias"),
+            allocator,
+        ),
+        .attn_proj_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_output.weight"),
+        ),
+        .attn_proj_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_output.bias"),
+            allocator,
+        ),
+        .ln2_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "ffn_norm.weight"),
+            allocator,
+        ),
+        .ln2_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "ffn_norm.bias"),
+            allocator,
+        ),
+        .mlp_fc_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "ffn_up.weight"),
+        ),
+        .mlp_fc_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "ffn_up.bias"),
+            allocator,
+        ),
+        .mlp_proj_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "ffn_down.weight"),
+        ),
+        .mlp_proj_bias = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "ffn_down.bias"),
+            allocator,
+        ),
     };
 }
 
 fn fmtBlockName(buf: []u8, layer: usize, suffix: []const u8) ![]const u8 {
-    const result = std.fmt.bufPrint(buf, "blk.{d}.{s}", .{ layer, suffix }) catch return error.NameTooLong;
+    const result = std.fmt.bufPrint(
+        buf,
+        "blk.{d}.{s}",
+        .{ layer, suffix },
+    ) catch return error.NameTooLong;
     return result;
 }
 
@@ -240,18 +280,137 @@ pub fn GPT2(comptime C: type) type {
                 const blk = &w.blocks[layer];
                 layerNormRows(x, blk.ln1_weight, blk.ln1_bias, ln_out, seq_len, C.EMBED);
                 linearForwardQ(ln_out, blk.attn_qkv_weight, blk.attn_qkv_bias, qkv, seq_len);
-                causalSelfAttention(qkv, attn_out, attn_scores, seq_len, C.HEAD, C.HEAD_DIM, C.EMBED);
-                linearForwardQ(attn_out, blk.attn_proj_weight, blk.attn_proj_bias, proj_out, seq_len);
+                causalSelfAttention(
+                    qkv,
+                    attn_out,
+                    attn_scores,
+                    seq_len,
+                    C.HEAD,
+                    C.HEAD_DIM,
+                    C.EMBED,
+                );
+                linearForwardQ(
+                    attn_out,
+                    blk.attn_proj_weight,
+                    blk.attn_proj_bias,
+                    proj_out,
+                    seq_len,
+                );
                 addInPlace(x, proj_out, seq_len * C.EMBED);
                 layerNormRows(x, blk.ln2_weight, blk.ln2_bias, ln_out, seq_len, C.EMBED);
                 linearForwardQ(ln_out, blk.mlp_fc_weight, blk.mlp_fc_bias, mlp_hidden, seq_len);
                 geluInPlace(mlp_hidden, seq_len * C.FFN_DIM);
-                linearForwardQ(mlp_hidden, blk.mlp_proj_weight, blk.mlp_proj_bias, mlp_out, seq_len);
+                linearForwardQ(
+                    mlp_hidden,
+                    blk.mlp_proj_weight,
+                    blk.mlp_proj_bias,
+                    mlp_out,
+                    seq_len,
+                );
                 addInPlace(x, mlp_out, seq_len * C.EMBED);
             }
 
             layerNormRows(x, w.ln_f_weight, w.ln_f_bias, ln_out, seq_len, C.EMBED);
             return computeLogits(w, ln_out[(seq_len - 1) * C.EMBED ..][0..C.EMBED], arena);
+        }
+
+        const PrefillBufs = struct {
+            x: []f32,
+            ln_out: []f32,
+            qkv: []f32,
+            attn_out: []f32,
+            proj_out: []f32,
+            mlp_hidden: []f32,
+            mlp_out: []f32,
+            attn_scores: []f32,
+        };
+
+        fn prefillAllocBufs(arena: Allocator, seq_len: usize) !PrefillBufs {
+            return .{
+                .x = try arena.alloc(f32, seq_len * C.EMBED),
+                .ln_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .qkv = try arena.alloc(f32, seq_len * 3 * C.EMBED),
+                .attn_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .proj_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .mlp_hidden = try arena.alloc(f32, seq_len * C.FFN_DIM),
+                .mlp_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .attn_scores = try arena.alloc(f32, seq_len * seq_len),
+            };
+        }
+
+        /// Token + position embedding を合成して x に書き込む
+        fn prefillEmbed(
+            w: *const GPT2Weights(C),
+            tokens: []const u32,
+            x: []f32,
+            seq_len: usize,
+        ) void {
+            for (0..seq_len) |t| {
+                const tok: usize = tokens[t];
+                for (0..C.EMBED) |i| {
+                    x[t * C.EMBED + i] = w.wte[tok * C.EMBED + i] + w.wpe[t * C.EMBED + i];
+                }
+            }
+        }
+
+        /// prefill 1 レイヤ分 (LN+QKV+attention / LN+MLP + KV キャッシュ書き込み)
+        fn prefillLayer(
+            self: *Self,
+            bufs: PrefillBufs,
+            layer: usize,
+            seq_len: usize,
+        ) void {
+            const w = &self.weights;
+            const blk = &w.blocks[layer];
+            layerNormRows(bufs.x, blk.ln1_weight, blk.ln1_bias, bufs.ln_out, seq_len, C.EMBED);
+            linearForwardQ(bufs.ln_out, blk.attn_qkv_weight, blk.attn_qkv_bias, bufs.qkv, seq_len);
+
+            // K, V をキャッシュに格納
+            for (0..seq_len) |t| {
+                @memcpy(
+                    self.kv_cache.k[layer][t * C.EMBED ..][0..C.EMBED],
+                    bufs.qkv[t * 3 * C.EMBED + C.EMBED ..][0..C.EMBED],
+                );
+                @memcpy(
+                    self.kv_cache.v[layer][t * C.EMBED ..][0..C.EMBED],
+                    bufs.qkv[t * 3 * C.EMBED + 2 * C.EMBED ..][0..C.EMBED],
+                );
+            }
+
+            causalSelfAttention(
+                bufs.qkv,
+                bufs.attn_out,
+                bufs.attn_scores,
+                seq_len,
+                C.HEAD,
+                C.HEAD_DIM,
+                C.EMBED,
+            );
+            linearForwardQ(
+                bufs.attn_out,
+                blk.attn_proj_weight,
+                blk.attn_proj_bias,
+                bufs.proj_out,
+                seq_len,
+            );
+            addInPlace(bufs.x, bufs.proj_out, seq_len * C.EMBED);
+            layerNormRows(bufs.x, blk.ln2_weight, blk.ln2_bias, bufs.ln_out, seq_len, C.EMBED);
+            linearForwardQ(
+                bufs.ln_out,
+                blk.mlp_fc_weight,
+                blk.mlp_fc_bias,
+                bufs.mlp_hidden,
+                seq_len,
+            );
+            geluInPlace(bufs.mlp_hidden, seq_len * C.FFN_DIM);
+            linearForwardQ(
+                bufs.mlp_hidden,
+                blk.mlp_proj_weight,
+                blk.mlp_proj_bias,
+                bufs.mlp_out,
+                seq_len,
+            );
+            addInPlace(bufs.x, bufs.mlp_out, seq_len * C.EMBED);
         }
 
         /// Prefill: プロンプト全体を処理して KV キャッシュを埋める
@@ -262,47 +421,16 @@ pub fn GPT2(comptime C: type) type {
 
             self.kv_cache.reset();
             const w = &self.weights;
-
-            const x = try arena.alloc(f32, seq_len * C.EMBED);
-            for (0..seq_len) |t| {
-                const tok: usize = tokens[t];
-                for (0..C.EMBED) |i| {
-                    x[t * C.EMBED + i] = w.wte[tok * C.EMBED + i] + w.wpe[t * C.EMBED + i];
-                }
-            }
-
-            const ln_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const qkv = try arena.alloc(f32, seq_len * 3 * C.EMBED);
-            const attn_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const proj_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const mlp_hidden = try arena.alloc(f32, seq_len * C.FFN_DIM);
-            const mlp_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const attn_scores = try arena.alloc(f32, seq_len * seq_len);
+            const bufs = try prefillAllocBufs(arena, seq_len);
+            prefillEmbed(w, tokens, bufs.x, seq_len);
 
             for (0..C.LAYER) |layer| {
-                const blk = &w.blocks[layer];
-                layerNormRows(x, blk.ln1_weight, blk.ln1_bias, ln_out, seq_len, C.EMBED);
-                linearForwardQ(ln_out, blk.attn_qkv_weight, blk.attn_qkv_bias, qkv, seq_len);
-
-                // K, V をキャッシュに格納
-                for (0..seq_len) |t| {
-                    @memcpy(self.kv_cache.k[layer][t * C.EMBED ..][0..C.EMBED], qkv[t * 3 * C.EMBED + C.EMBED ..][0..C.EMBED]);
-                    @memcpy(self.kv_cache.v[layer][t * C.EMBED ..][0..C.EMBED], qkv[t * 3 * C.EMBED + 2 * C.EMBED ..][0..C.EMBED]);
-                }
-
-                causalSelfAttention(qkv, attn_out, attn_scores, seq_len, C.HEAD, C.HEAD_DIM, C.EMBED);
-                linearForwardQ(attn_out, blk.attn_proj_weight, blk.attn_proj_bias, proj_out, seq_len);
-                addInPlace(x, proj_out, seq_len * C.EMBED);
-                layerNormRows(x, blk.ln2_weight, blk.ln2_bias, ln_out, seq_len, C.EMBED);
-                linearForwardQ(ln_out, blk.mlp_fc_weight, blk.mlp_fc_bias, mlp_hidden, seq_len);
-                geluInPlace(mlp_hidden, seq_len * C.FFN_DIM);
-                linearForwardQ(mlp_hidden, blk.mlp_proj_weight, blk.mlp_proj_bias, mlp_out, seq_len);
-                addInPlace(x, mlp_out, seq_len * C.EMBED);
+                self.prefillLayer(bufs, layer, seq_len);
             }
 
             self.kv_cache.seq_len = seq_len;
-            layerNormRows(x, w.ln_f_weight, w.ln_f_bias, ln_out, seq_len, C.EMBED);
-            return computeLogits(w, ln_out[(seq_len - 1) * C.EMBED ..][0..C.EMBED], arena);
+            layerNormRows(bufs.x, w.ln_f_weight, w.ln_f_bias, bufs.ln_out, seq_len, C.EMBED);
+            return computeLogits(w, bufs.ln_out[(seq_len - 1) * C.EMBED ..][0..C.EMBED], arena);
         }
 
         /// DecodeNext: 1トークンのみ処理、KV キャッシュに追記
@@ -335,8 +463,14 @@ pub fn GPT2(comptime C: type) type {
                 linearForwardQ(ln_out, blk.attn_qkv_weight, blk.attn_qkv_bias, qkv_buf, 1);
 
                 // 新しい K, V をキャッシュに格納
-                @memcpy(self.kv_cache.k[layer][pos * C.EMBED ..][0..C.EMBED], qkv_buf[C.EMBED..][0..C.EMBED]);
-                @memcpy(self.kv_cache.v[layer][pos * C.EMBED ..][0..C.EMBED], qkv_buf[2 * C.EMBED ..][0..C.EMBED]);
+                @memcpy(
+                    self.kv_cache.k[layer][pos * C.EMBED ..][0..C.EMBED],
+                    qkv_buf[C.EMBED..][0..C.EMBED],
+                );
+                @memcpy(
+                    self.kv_cache.v[layer][pos * C.EMBED ..][0..C.EMBED],
+                    qkv_buf[2 * C.EMBED ..][0..C.EMBED],
+                );
 
                 // Cached attention: 新 Q が全キャッシュに attend
                 cachedAttention(
@@ -456,7 +590,8 @@ fn layerNormRows(
 }
 
 /// Linear forward: output = input @ weight^T + bias (SIMD)
-/// input: (rows, in_dim), weight: (out_dim, in_dim) row-major (GGUF layout), output: (rows, out_dim)
+/// input: (rows, in_dim), weight: (out_dim, in_dim) row-major (GGUF layout),
+/// output: (rows, out_dim)
 fn linearForward(
     input: []const f32,
     weight: []const f32,
@@ -501,7 +636,13 @@ fn linearForwardQ(
         const out_row = output[r * weight.out_dim ..][0..weight.out_dim];
 
         switch (weight.type_) {
-            .q4_0 => dequant_mod.matmulQ4_0_f32(weight.data, in_row, out_row, weight.out_dim, weight.in_dim),
+            .q4_0 => dequant_mod.matmulQ4_0_f32(
+                weight.data,
+                in_row,
+                out_row,
+                weight.out_dim,
+                weight.in_dim,
+            ),
             .f32 => {
                 // f32 重み: バイト列を f32 として再解釈 (SIMD)
                 const w: [*]const f32 = @ptrCast(@alignCast(weight.data.ptr));
@@ -510,7 +651,9 @@ fn linearForwardQ(
                     var k: usize = 0;
                     while (k + vl <= weight.in_dim) : (k += vl) {
                         const iv: @Vector(vl, f32) = in_row[k..][0..vl].*;
-                        const wv: @Vector(vl, f32) = @as([*]const f32, @ptrCast(@alignCast(weight.data.ptr)))[j * weight.in_dim + k ..][0..vl].*;
+                        const wv_ptr: [*]const f32 = @ptrCast(@alignCast(weight.data.ptr));
+                        const wv: @Vector(vl, f32) =
+                            wv_ptr[j * weight.in_dim + k ..][0..vl].*;
                         acc += iv * wv;
                     }
                     var sum: f32 = @reduce(.Add, acc);
@@ -634,7 +777,8 @@ fn causalSelfAttention(
                     output[qi * embed + h * head_dim + d ..][0..vl].* = ov;
                 }
                 while (d < head_dim) : (d += 1) {
-                    output[qi * embed + h * head_dim + d] += w_scalar * qkv[ki * 3 * embed + v_offset + d];
+                    output[qi * embed + h * head_dim + d] +=
+                        w_scalar * qkv[ki * 3 * embed + v_offset + d];
                 }
             }
         }
@@ -712,38 +856,38 @@ fn addInPlace(a: []f32, b: []const f32, n: usize) void {
     }
 }
 
-/// Temperature + top-k サンプリング
-pub fn sampleTopK(logits: []f32, top_k: usize, temperature: f32, rng: std.Random) u32 {
+const SAMPLE_MAX_K: usize = 256;
+
+/// 全要素 softmax → 累積分布からサンプリング (top_k 無効時のフォールバック)
+fn sampleFullSoftmax(logits: []f32, temperature: f32, rng: std.Random) u32 {
     const n = logits.len;
-    const k = if (top_k > 0 and top_k < n) top_k else n;
-
-    // top_k が無効なら全 logits でサンプリング (フォールバック)
-    if (k >= n) {
-        if (temperature > 0 and temperature != 1.0) {
-            const inv_temp = 1.0 / temperature;
-            for (0..n) |i| logits[i] *= inv_temp;
-        }
-        softmaxInPlace(logits, n);
-        const rand_val = rng.float(f32);
-        var cumsum: f32 = 0;
-        for (0..n) |i| {
-            cumsum += logits[i];
-            if (cumsum >= rand_val) return @intCast(i);
-        }
-        return @intCast(n - 1);
+    if (temperature > 0 and temperature != 1.0) {
+        const inv_temp = 1.0 / temperature;
+        for (0..n) |i| logits[i] *= inv_temp;
     }
+    softmaxInPlace(logits, n);
+    const rand_val = rng.float(f32);
+    var cumsum: f32 = 0;
+    for (0..n) |i| {
+        cumsum += logits[i];
+        if (cumsum >= rand_val) return @intCast(i);
+    }
+    return @intCast(n - 1);
+}
 
-    // O(n) 1パスで top-k を収集 (min-buffer)
-    // その後 k 要素だけで softmax + sampling → O(n + k) total
-    const MAX_K = 256;
-    const actual_k = if (k <= MAX_K) k else MAX_K;
-    var top_vals: [MAX_K]f32 = undefined;
-    var top_idxs: [MAX_K]u32 = undefined;
+/// min-buffer による O(n) top-k 収集。
+/// top_vals / top_idxs の先頭 actual_k 要素を埋める。
+fn sampleTopKCollect(
+    logits: []const f32,
+    actual_k: usize,
+    inv_temp: f32,
+    top_vals: *[SAMPLE_MAX_K]f32,
+    top_idxs: *[SAMPLE_MAX_K]u32,
+) void {
+    const n = logits.len;
     var top_count: usize = 0;
     var min_val: f32 = -std.math.inf(f32);
     var min_pos: usize = 0;
-
-    const inv_temp: f32 = if (temperature > 0 and temperature != 1.0) 1.0 / temperature else 1.0;
 
     for (0..n) |i| {
         const v = logits[i] * inv_temp;
@@ -774,8 +918,15 @@ pub fn sampleTopK(logits: []f32, top_k: usize, temperature: f32, rng: std.Random
             }
         }
     }
+}
 
-    // top-k 要素だけで softmax (k=40 要素、O(k))
+/// top_vals 先頭 actual_k 要素を softmax した後、累積分布からサンプリング。
+fn sampleTopKChoose(
+    top_vals: *[SAMPLE_MAX_K]f32,
+    top_idxs: *const [SAMPLE_MAX_K]u32,
+    actual_k: usize,
+    rng: std.Random,
+) u32 {
     var max_val: f32 = top_vals[0];
     for (1..actual_k) |j| {
         if (top_vals[j] > max_val) max_val = top_vals[j];
@@ -791,7 +942,6 @@ pub fn sampleTopK(logits: []f32, top_k: usize, temperature: f32, rng: std.Random
         top_vals[j] *= inv_sum;
     }
 
-    // 累積分布からサンプリング (k=40 要素のみ)
     const rand_val = rng.float(f32);
     var cumsum: f32 = 0;
     for (0..actual_k) |j| {
@@ -799,6 +949,25 @@ pub fn sampleTopK(logits: []f32, top_k: usize, temperature: f32, rng: std.Random
         if (cumsum >= rand_val) return top_idxs[j];
     }
     return top_idxs[actual_k - 1];
+}
+
+/// Temperature + top-k サンプリング
+pub fn sampleTopK(logits: []f32, top_k: usize, temperature: f32, rng: std.Random) u32 {
+    const n = logits.len;
+    const k = if (top_k > 0 and top_k < n) top_k else n;
+
+    // top_k が無効なら全 logits でサンプリング (フォールバック)
+    if (k >= n) return sampleFullSoftmax(logits, temperature, rng);
+
+    // O(n) 1パスで top-k を収集 (min-buffer)
+    // その後 k 要素だけで softmax + sampling → O(n + k) total
+    const actual_k = if (k <= SAMPLE_MAX_K) k else SAMPLE_MAX_K;
+    var top_vals: [SAMPLE_MAX_K]f32 = undefined;
+    var top_idxs: [SAMPLE_MAX_K]u32 = undefined;
+
+    const inv_temp: f32 = if (temperature > 0 and temperature != 1.0) 1.0 / temperature else 1.0;
+    sampleTopKCollect(logits, actual_k, inv_temp, &top_vals, &top_idxs);
+    return sampleTopKChoose(&top_vals, &top_idxs, actual_k, rng);
 }
 
 /// Argmax over logits

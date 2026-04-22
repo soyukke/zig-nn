@@ -96,7 +96,11 @@ pub const BPETokenizer = struct {
             var best_priority: u32 = std.math.maxInt(u32);
 
             for (0..tokens.items.len - 1) |i| {
-                const pair_key = mergePairKey(tokens.items[i], tokens.items[i + 1], allocator) catch continue;
+                const pair_key = mergePairKey(
+                    tokens.items[i],
+                    tokens.items[i + 1],
+                    allocator,
+                ) catch continue;
                 defer allocator.free(pair_key);
 
                 if (self.merge_map.get(pair_key)) |priority| {
@@ -111,7 +115,11 @@ pub const BPETokenizer = struct {
 
             // マージ実行: tokens[best_idx] と tokens[best_idx+1] を結合
             const idx = best_idx.?;
-            const merged = try std.mem.concat(allocator, u8, &[_][]const u8{ tokens.items[idx], tokens.items[idx + 1] });
+            const merged = try std.mem.concat(
+                allocator,
+                u8,
+                &[_][]const u8{ tokens.items[idx], tokens.items[idx + 1] },
+            );
             tokens.items[idx] = merged;
             _ = tokens.orderedRemove(idx + 1);
         }
@@ -232,7 +240,10 @@ fn init_byte_table() [256]TokenEntry {
         } else {
             // U+0100 + n → UTF-8 (2 bytes)
             const cp: u16 = 256 + n;
-            table[i] = .{ .data = .{ @intCast(0xC0 | (cp >> 6)), @intCast(0x80 | (cp & 0x3F)), 0 }, .len = 2 };
+            table[i] = .{
+                .data = .{ @intCast(0xC0 | (cp >> 6)), @intCast(0x80 | (cp & 0x3F)), 0 },
+                .len = 2,
+            };
             n += 1;
         }
     }

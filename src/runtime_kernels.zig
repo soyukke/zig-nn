@@ -81,7 +81,13 @@ pub fn softmaxForward(out_data: []f32, rows: usize, cols: usize) void {
 }
 
 /// LogSoftmax: in_data → out_data, オプションで softmax_cache にも書き出し
-pub fn logSoftmaxForward(in_data: []const f32, out_data: []f32, rows: usize, cols: usize, softmax_cache: ?[]f32) void {
+pub fn logSoftmaxForward(
+    in_data: []const f32,
+    out_data: []f32,
+    rows: usize,
+    cols: usize,
+    softmax_cache: ?[]f32,
+) void {
     for (0..rows) |i| {
         const row = in_data[i * cols ..][0..cols];
         const out_row = out_data[i * cols ..][0..cols];

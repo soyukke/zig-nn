@@ -77,7 +77,15 @@ pub const ThreadPool = struct {
 
             const w = &pool.work[id];
             if (w.row_end > w.row_start) {
-                matmulChunkQ8(w.weight, w.q8_input, w.output, w.row_start, w.row_end, w.row_bytes, w.quant_type);
+                matmulChunkQ8(
+                    w.weight,
+                    w.q8_input,
+                    w.output,
+                    w.row_start,
+                    w.row_end,
+                    w.row_bytes,
+                    w.quant_type,
+                );
             }
 
             _ = @atomicRmw(u32, &pool.pending, .Sub, 1, .release);
@@ -85,7 +93,15 @@ pub const ThreadPool = struct {
     }
 
     /// matmul: 入力を Q8 量子化 → 整数ドット積でマルチスレッド計算
-    pub fn matmul(pool: *ThreadPool, weight: []const u8, input: []const f32, output: []f32, out_dim: usize, in_dim: usize, qt: QuantType) void {
+    pub fn matmul(
+        pool: *ThreadPool,
+        weight: []const u8,
+        input: []const f32,
+        output: []f32,
+        out_dim: usize,
+        in_dim: usize,
+        qt: QuantType,
+    ) void {
         const row_bytes: usize = switch (qt) {
             .q4_0 => dequant.tensorBytes(.q4_0, in_dim),
             .q4_1 => dequant.tensorBytes(.q4_1, in_dim),

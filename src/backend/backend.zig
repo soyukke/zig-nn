@@ -16,7 +16,15 @@ pub fn Backend(comptime backend_type: BackendType) type {
     return struct {
         /// 行列積: C = A @ B
         /// A: (m x k), B: (k x n), C: (m x n)  row-major
-        pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+        pub fn matmul(
+            comptime T: type,
+            a: [*]const T,
+            b: [*]const T,
+            c: [*]T,
+            m: usize,
+            k: usize,
+            n: usize,
+        ) void {
             switch (backend_type) {
                 .cpu => cpu.matmul(T, a, b, c, m, k, n),
                 .simd => simd.matmul(T, a, b, c, m, k, n),

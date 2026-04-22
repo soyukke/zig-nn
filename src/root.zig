@@ -8,7 +8,6 @@
 /// `nn.unified.*` が唯一の公開 API。
 /// `DiffCpuRuntime` / `DiffCudaRuntime` / `DiffMpsRuntime` の duck-typed ops を
 /// `Trainer(Model, .cpu|.cuda)` で統一的に利用できる。
-
 const builtin = @import("builtin");
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -65,12 +64,17 @@ pub const unified = struct {
     pub const SelfAttention = @import("nn/graph_attention.zig").SelfAttention;
     pub const MultiHeadSelfAttention = @import("nn/graph_attention.zig").MultiHeadSelfAttention;
     pub const CausalSelfAttention = @import("nn/graph_attention.zig").CausalSelfAttention;
-    pub const MultiHeadCausalSelfAttention = @import("nn/graph_attention.zig").MultiHeadCausalSelfAttention;
+    pub const MultiHeadCausalSelfAttention =
+        @import("nn/graph_attention.zig").MultiHeadCausalSelfAttention;
     pub const CrossAttention = @import("nn/graph_attention.zig").CrossAttention;
-    pub const MultiHeadCrossAttention = @import("nn/graph_attention.zig").MultiHeadCrossAttention;
-    pub const DynamicCausalSelfAttention = @import("nn/graph_attention.zig").DynamicCausalSelfAttention;
-    pub const TransformerEncoderLayer = @import("nn/graph_transformer.zig").TransformerEncoderLayer;
-    pub const TransformerDecoderLayer = @import("nn/graph_transformer.zig").TransformerDecoderLayer;
+    pub const MultiHeadCrossAttention =
+        @import("nn/graph_attention.zig").MultiHeadCrossAttention;
+    pub const DynamicCausalSelfAttention =
+        @import("nn/graph_attention.zig").DynamicCausalSelfAttention;
+    pub const TransformerEncoderLayer =
+        @import("nn/graph_transformer.zig").TransformerEncoderLayer;
+    pub const TransformerDecoderLayer =
+        @import("nn/graph_transformer.zig").TransformerDecoderLayer;
     pub const Embedding = @import("nn/graph_embedding.zig").Embedding;
     pub const Dropout = @import("nn/graph_dropout.zig").Dropout;
     pub const Sequential = @import("nn/graph_sequential.zig").Sequential;
@@ -87,11 +91,26 @@ pub const unified = struct {
     pub const Trainer = @import("trainer.zig").Trainer;
     pub const DiffCpuRuntime = @import("diff/cpu_runtime.zig").DiffCpuRuntime;
     pub const DiffTensor = @import("diff/cpu_runtime.zig").DiffTensor;
-    pub const DiffMpsRuntime = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsRuntime else struct {};
-    pub const DiffMpsTensor = if (is_macos) @import("diff/mps_runtime.zig").DiffMpsTensor else struct {};
-    pub const DiffCudaRuntime = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaRuntime else struct {};
-    pub const DiffCudaTensor = if (is_linux) @import("diff/cuda_runtime.zig").DiffCudaTensor else struct {};
-    pub const GpuAdamState = if (is_linux) @import("diff/cuda_runtime.zig").GpuAdamState else struct {};
+    pub const DiffMpsRuntime = if (is_macos)
+        @import("diff/mps_runtime.zig").DiffMpsRuntime
+    else
+        struct {};
+    pub const DiffMpsTensor = if (is_macos)
+        @import("diff/mps_runtime.zig").DiffMpsTensor
+    else
+        struct {};
+    pub const DiffCudaRuntime = if (is_linux)
+        @import("diff/cuda_runtime.zig").DiffCudaRuntime
+    else
+        struct {};
+    pub const DiffCudaTensor = if (is_linux)
+        @import("diff/cuda_runtime.zig").DiffCudaTensor
+    else
+        struct {};
+    pub const GpuAdamState = if (is_linux)
+        @import("diff/cuda_runtime.zig").GpuAdamState
+    else
+        struct {};
 };
 
 // Diffusion utilities (pure helpers, used by examples/diffusion and seqdiffuseq)

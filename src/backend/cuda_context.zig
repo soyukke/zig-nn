@@ -108,7 +108,9 @@ pub const CudaContext = struct {
         if (cuda_driver.cuInit(0) != CUDA_SUCCESS) return error.InitFailed;
 
         var device: CUdevice = undefined;
-        if (cuda_driver.cuDeviceGet(&device, device_ordinal) != CUDA_SUCCESS) return error.DeviceNotFound;
+        if (cuda_driver.cuDeviceGet(&device, device_ordinal) != CUDA_SUCCESS) {
+            return error.DeviceNotFound;
+        }
 
         var name_buf: [256]u8 = undefined;
         if (cuda_driver.cuDeviceGetName(&name_buf, 256, device) == CUDA_SUCCESS) {
@@ -117,14 +119,22 @@ pub const CudaContext = struct {
         }
 
         var ctx: CUcontext = undefined;
-        if (cuda_driver.cuCtxCreate_v2(&ctx, 0, device) != CUDA_SUCCESS) return error.ContextCreationFailed;
+        if (cuda_driver.cuCtxCreate_v2(&ctx, 0, device) != CUDA_SUCCESS) {
+            return error.ContextCreationFailed;
+        }
 
         var stream: CUstream = undefined;
-        if (cuda_driver.cuStreamCreate(&stream, 0) != CUDA_SUCCESS) return error.StreamCreationFailed;
+        if (cuda_driver.cuStreamCreate(&stream, 0) != CUDA_SUCCESS) {
+            return error.StreamCreationFailed;
+        }
 
         var cublas: cublasHandle_t = undefined;
-        if (cuda_blas.cublasCreate_v2(&cublas) != CUBLAS_STATUS_SUCCESS) return error.CublasInitFailed;
-        if (cuda_blas.cublasSetStream_v2(cublas, stream) != CUBLAS_STATUS_SUCCESS) return error.CublasInitFailed;
+        if (cuda_blas.cublasCreate_v2(&cublas) != CUBLAS_STATUS_SUCCESS) {
+            return error.CublasInitFailed;
+        }
+        if (cuda_blas.cublasSetStream_v2(cublas, stream) != CUBLAS_STATUS_SUCCESS) {
+            return error.CublasInitFailed;
+        }
 
         return CudaContext{
             .device = device,
@@ -157,24 +167,41 @@ pub const CudaContext = struct {
     }
 
     /// ホスト → デバイスへメモリコピー
-    pub fn copyHostToDevice(_: *CudaContext, dst: CUdeviceptr, src: *const anyopaque, size: usize) CudaError!void {
+    pub fn copyHostToDevice(
+        _: *CudaContext,
+        dst: CUdeviceptr,
+        src: *const anyopaque,
+        size: usize,
+    ) CudaError!void {
         if (cuda_driver.cuMemcpyHtoD_v2(dst, src, size) != CUDA_SUCCESS) return error.MemcpyFailed;
     }
 
     /// デバイス → ホストへメモリコピー
-    pub fn copyDeviceToHost(_: *CudaContext, dst: *anyopaque, src: CUdeviceptr, size: usize) CudaError!void {
+    pub fn copyDeviceToHost(
+        _: *CudaContext,
+        dst: *anyopaque,
+        src: CUdeviceptr,
+        size: usize,
+    ) CudaError!void {
         if (cuda_driver.cuMemcpyDtoH_v2(dst, src, size) != CUDA_SUCCESS) return error.MemcpyFailed;
     }
 
     /// デバイス → デバイスへメモリコピー
-    pub fn copyDeviceToDevice(_: *CudaContext, dst: CUdeviceptr, src: CUdeviceptr, size: usize) CudaError!void {
+    pub fn copyDeviceToDevice(
+        _: *CudaContext,
+        dst: CUdeviceptr,
+        src: CUdeviceptr,
+        size: usize,
+    ) CudaError!void {
         if (cuda_driver.cuMemcpyDtoD_v2(dst, src, size) != CUDA_SUCCESS) return error.MemcpyFailed;
     }
 
     /// PTX モジュールをロードする
     pub fn loadModule(self: *CudaContext, ptx_image: *const anyopaque) CudaError!void {
         var module: CUmodule = undefined;
-        if (cuda_driver.cuModuleLoadData(&module, ptx_image) != CUDA_SUCCESS) return error.ModuleLoadFailed;
+        if (cuda_driver.cuModuleLoadData(&module, ptx_image) != CUDA_SUCCESS) {
+            return error.ModuleLoadFailed;
+        }
         self.module = module;
     }
 
@@ -182,7 +209,9 @@ pub const CudaContext = struct {
     pub fn getFunction(self: *CudaContext, name: [*:0]const u8) CudaError!CUfunction {
         const m = self.module orelse return error.ModuleLoadFailed;
         var func: CUfunction = undefined;
-        if (cuda_driver.cuModuleGetFunction(&func, m, name) != CUDA_SUCCESS) return error.ModuleLoadFailed;
+        if (cuda_driver.cuModuleGetFunction(&func, m, name) != CUDA_SUCCESS) {
+            return error.ModuleLoadFailed;
+        }
         return func;
     }
 
@@ -319,11 +348,19 @@ pub const CudaContext = struct {
 
     /// GPU メモリをゼロクリア
     pub fn memsetZero(_: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
-        if (cuda_driver.cuMemsetD32_v2(dptr, 0, num_floats) != CUDA_SUCCESS) return error.MemcpyFailed;
+        if (cuda_driver.cuMemsetD32_v2(dptr, 0, num_floats) != CUDA_SUCCESS) {
+            return error.MemcpyFailed;
+        }
     }
 
     /// GPU メモリをゼロクリア (非同期)
-    pub fn memsetZeroAsync(self: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
-        if (cuda_driver.cuMemsetD32Async(dptr, 0, num_floats, self.stream) != CUDA_SUCCESS) return error.MemcpyFailed;
+    pub fn memsetZeroAsync(
+        self: *CudaContext,
+        dptr: CUdeviceptr,
+        num_floats: usize,
+    ) CudaError!void {
+        if (cuda_driver.cuMemsetD32Async(dptr, 0, num_floats, self.stream) != CUDA_SUCCESS) {
+            return error.MemcpyFailed;
+        }
     }
 };

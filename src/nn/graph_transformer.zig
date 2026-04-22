@@ -28,7 +28,13 @@ pub fn TransformerEncoderLayer(comptime d_model: usize, comptime ff_dim: usize) 
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, input: anytype, batch_size: usize, seq_len: usize) @TypeOf(input) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            batch_size: usize,
+            seq_len: usize,
+        ) @TypeOf(input) {
             // Pre-norm self-attention + residual
             const ln1 = self.ln1.forward(ctx, input);
             const attn = self.self_attn.forward(ctx, ln1, batch_size, seq_len);
@@ -43,8 +49,13 @@ pub fn TransformerEncoderLayer(comptime d_model: usize, comptime ff_dim: usize) 
 }
 
 /// Pre-norm Transformer Decoder Layer
-/// LayerNorm → CausalSelfAttention → Residual → LayerNorm → CrossAttention → Residual → LayerNorm → FF (GELU) → Residual
-pub fn TransformerDecoderLayer(comptime d_model: usize, comptime ff_dim: usize, comptime tgt_len: usize) type {
+/// LayerNorm → CausalSelfAttention → Residual → LayerNorm → CrossAttention → Residual
+///   → LayerNorm → FF (GELU) → Residual
+pub fn TransformerDecoderLayer(
+    comptime d_model: usize,
+    comptime ff_dim: usize,
+    comptime tgt_len: usize,
+) type {
     return struct {
         ln1: LayerNorm(d_model),
         self_attn: graph_attention.CausalSelfAttention(d_model, tgt_len),

@@ -19,7 +19,12 @@
 ///        pub const Runtime = DiffMpsRuntime;
 ///        pub const Tensor = DiffMpsTensor;
 ///
-///        pub fn makeInput(rt: *Runtime, data: []f32, shape: []const usize, requires_grad: bool) Tensor {
+///        pub fn makeInput(
+///            rt: *Runtime,
+///            data: []f32,
+///            shape: []const usize,
+///            requires_grad: bool,
+///        ) Tensor {
 ///            const node = rt.makeTensor(data, shape); // H2D コピー
 ///            node.requires_grad = requires_grad;
 ///            return node;
@@ -76,10 +81,7 @@ pub fn GradientChecker(comptime Adapter: type) type {
             defer allocator.free(num_grad);
 
             // Probe run: 出力サイズ取得 + deterministic な重みを生成
-            runtime.resetArena();
-            const probe_input = Adapter.makeInput(runtime, x_data, shape, true);
-            const probe_out = f(runtime, probe_input);
-            const out_n = probe_out.totalElements();
+            const out_n = probeOutputSize(f, runtime, x_data, shape);
             const weights = try allocator.alloc(f32, out_n);
             defer allocator.free(weights);
             for (weights, 0..) |*w, idx| {
@@ -92,6 +94,57 @@ pub fn GradientChecker(comptime Adapter: type) type {
 
             // ── 数値勾配 ──
             // loss = sum(weights * f(x))、f64 精度で有限差分
+            computeNumericalGrad(
+                f,
+                runtime,
+                x_data,
+                shape,
+                eps,
+                weights,
+                out_buf,
+                num_grad,
+            );
+
+            // ── 解析的勾配 ──
+            // 勾配を読み取って比較
+            const ana_grad_buf = try allocator.alloc(f32, n);
+            defer allocator.free(ana_grad_buf);
+            const ana_grad = computeAnalyticalGrad(
+                f,
+                runtime,
+                x_data,
+                shape,
+                weights,
+                out_n,
+                ana_grad_buf,
+            ) orelse return error.TestExpectedApproxEqAbs;
+
+            try compareGrads(ana_grad, num_grad, tol);
+        }
+
+        fn probeOutputSize(
+            comptime f: fn (*Runtime, Tensor) Tensor,
+            runtime: *Runtime,
+            x_data: []f32,
+            shape: []const usize,
+        ) usize {
+            runtime.resetArena();
+            const probe_input = Adapter.makeInput(runtime, x_data, shape, true);
+            const probe_out = f(runtime, probe_input);
+            return probe_out.totalElements();
+        }
+
+        fn computeNumericalGrad(
+            comptime f: fn (*Runtime, Tensor) Tensor,
+            runtime: *Runtime,
+            x_data: []f32,
+            shape: []const usize,
+            eps: f32,
+            weights: []const f32,
+            out_buf: []f32,
+            num_grad: []f32,
+        ) void {
+            const n = x_data.len;
             for (0..n) |i| {
                 const orig = x_data[i];
 
@@ -112,8 +165,17 @@ pub fn GradientChecker(comptime Adapter: type) type {
                 num_grad[i] = @floatCast((loss_plus - loss_minus) / (2.0 * @as(f64, eps)));
                 x_data[i] = orig;
             }
+        }
 
-            // ── 解析的勾配 ──
+        fn computeAnalyticalGrad(
+            comptime f: fn (*Runtime, Tensor) Tensor,
+            runtime: *Runtime,
+            x_data: []f32,
+            shape: []const usize,
+            weights: []f32,
+            out_n: usize,
+            ana_grad_buf: []f32,
+        ) ?[]f32 {
             // loss = sum(y * weights) を runtime ops で構築 → backward
             runtime.resetArena();
             const x_node = Adapter.makeInput(runtime, x_data, shape, true);
@@ -127,18 +189,19 @@ pub fn GradientChecker(comptime Adapter: type) type {
             const loss = runtime.reductionSum(flat, 0);
             runtime.backward(loss);
 
-            // 勾配を読み取って比較
-            const ana_grad_buf = try allocator.alloc(f32, n);
-            defer allocator.free(ana_grad_buf);
-            const ana_grad = Adapter.readGrad(runtime, x_node, ana_grad_buf) orelse
-                return error.TestExpectedApproxEqAbs;
+            return Adapter.readGrad(runtime, x_node, ana_grad_buf);
+        }
 
-            for (0..n) |i| {
+        fn compareGrads(ana_grad: []const f32, num_grad: []const f32, tol: f32) !void {
+            for (0..ana_grad.len) |i| {
                 const diff = @abs(ana_grad[i] - num_grad[i]);
                 const scale = @max(@abs(ana_grad[i]), @abs(num_grad[i]));
                 const abs_tol: f32 = 3e-3;
                 if (diff > @max(tol * scale, abs_tol)) {
-                    log.err("mismatch at [{d}]: analytical={d:.6}, numerical={d:.6}, diff={d:.6}", .{ i, ana_grad[i], num_grad[i], diff });
+                    log.err(
+                        "mismatch at [{d}]: analytical={d:.6}, numerical={d:.6}, diff={d:.6}",
+                        .{ i, ana_grad[i], num_grad[i], diff },
+                    );
                     return error.TestExpectedApproxEqAbs;
                 }
             }
@@ -375,7 +438,13 @@ pub fn testGeluBoundary(comptime A: type, rt: *A.Runtime, comptime n: usize) !vo
     );
 }
 
-pub fn testMatmulBoundary(comptime A: type, rt: *A.Runtime, comptime M: usize, comptime K: usize, comptime N: usize) !void {
+pub fn testMatmulBoundary(
+    comptime A: type,
+    rt: *A.Runtime,
+    comptime M: usize,
+    comptime K: usize,
+    comptime N: usize,
+) !void {
     var data: [M * K]f32 = undefined;
     makeRandomData(&data, M * K + N);
     try GradientChecker(A).checkGrad(
@@ -393,7 +462,12 @@ pub fn testMatmulBoundary(comptime A: type, rt: *A.Runtime, comptime M: usize, c
     );
 }
 
-pub fn testSoftmaxBoundary(comptime A: type, rt: *A.Runtime, comptime rows: usize, comptime cols: usize) !void {
+pub fn testSoftmaxBoundary(
+    comptime A: type,
+    rt: *A.Runtime,
+    comptime rows: usize,
+    comptime cols: usize,
+) !void {
     var data: [rows * cols]f32 = undefined;
     makeRandomData(&data, rows * cols);
     try GradientChecker(A).checkGrad(

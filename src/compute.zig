@@ -117,7 +117,18 @@ pub const AdamState = struct {
 };
 
 /// Adam step (CPU実装、1パラメータ分) — SIMD 最適化
-pub fn adamStep(param: []f32, grad: []const f32, m: []f32, v: []f32, lr: f32, beta1: f32, beta2: f32, eps: f32, wd: f32, step: u32) void {
+pub fn adamStep(
+    param: []f32,
+    grad: []const f32,
+    m: []f32,
+    v: []f32,
+    lr: f32,
+    beta1: f32,
+    beta2: f32,
+    eps: f32,
+    wd: f32,
+    step: u32,
+) void {
     const t_f: f32 = @floatFromInt(step);
     const bc1 = 1.0 - std.math.pow(f32, beta1, t_f);
     const bc2 = 1.0 - std.math.pow(f32, beta2, t_f);
@@ -182,7 +193,13 @@ pub fn linearWarmupLR(step: u32, warmup_steps: u32, lr_max: f32) f32 {
 }
 
 /// Warmup + cosine decay
-pub fn warmupCosineDecayLR(step: u32, warmup_steps: u32, total_steps: u32, lr_min: f32, lr_max: f32) f32 {
+pub fn warmupCosineDecayLR(
+    step: u32,
+    warmup_steps: u32,
+    total_steps: u32,
+    lr_min: f32,
+    lr_max: f32,
+) f32 {
     if (step < warmup_steps) return linearWarmupLR(step, warmup_steps, lr_max);
     const decay_step = step - warmup_steps;
     const decay_total = if (total_steps > warmup_steps) total_steps - warmup_steps else 1;

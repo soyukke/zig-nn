@@ -1,7 +1,6 @@
 /// SIMDバックエンド。
 /// Zigの@Vectorを使い、ARM NEON / x86 AVX を自動選択する。
 /// std.simd.suggestVectorLength で最適なベクトル幅を取得。
-
 const std = @import("std");
 
 /// SIMD演算のベクトル長を取得。SIMDが利用できない場合はスカラーfallback。
@@ -14,7 +13,15 @@ fn vecLen(comptime T: type) usize {
 ///
 /// Aの各行に対し、Bの列方向をSIMDでvec_len個ずつ処理する。
 /// A[i,p]をsplatし、B[p, j..j+vec_len]とベクトル積を取り累積する。
-pub fn matmul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, m: usize, k: usize, n: usize) void {
+pub fn matmul(
+    comptime T: type,
+    a: [*]const T,
+    b: [*]const T,
+    c: [*]T,
+    m: usize,
+    k: usize,
+    n: usize,
+) void {
     const vl = comptime vecLen(T);
 
     if (vl == 1) {
@@ -146,7 +153,11 @@ const cpu = @import("cpu.zig");
 
 test "simd matmul matches cpu" {
     const a = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-    const b = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
+    const b = [_]f32{
+        1,  2,  3,  4,  5,  6,  7,  8,
+        9,  10, 11, 12, 13, 14, 15, 16,
+        17, 18, 19, 20, 21, 22, 23, 24,
+    };
     var c_cpu: [18]f32 = undefined;
     var c_simd: [18]f32 = undefined;
 

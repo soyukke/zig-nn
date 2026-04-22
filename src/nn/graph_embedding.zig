@@ -17,7 +17,11 @@ pub fn Embedding(comptime vocab_size: usize, comptime embed_dim: usize) type {
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, indices: []const u32) @TypeOf(ctx.param(self.w)) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            indices: []const u32,
+        ) @TypeOf(ctx.param(self.w)) {
             return ctx.gather(ctx.param(self.w), indices);
         }
     };

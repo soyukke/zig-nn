@@ -168,24 +168,67 @@ fn loadBlockWeights(
     var name_buf: [64]u8 = undefined;
 
     return .{
-        .attn_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_norm.weight"), allocator),
-        .post_attention_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "post_attention_norm.weight"), allocator),
-        .attn_q_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_q.weight")),
-        .attn_k_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_k.weight")),
-        .attn_v_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_v.weight")),
-        .attn_output_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "attn_output.weight")),
-        .attn_q_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_q_norm.weight"), allocator),
-        .attn_k_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "attn_k_norm.weight"), allocator),
-        .ffn_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "ffn_norm.weight"), allocator),
-        .post_ffw_norm_weight = try gguf_file.loadTensorF32(try fmtBlockName(&name_buf, layer_idx, "post_ffw_norm.weight"), allocator),
-        .ffn_gate_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "ffn_gate.weight")),
-        .ffn_up_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "ffn_up.weight")),
-        .ffn_down_weight = try loadQuantizedWeight(gguf_file, try fmtBlockName(&name_buf, layer_idx, "ffn_down.weight")),
+        .attn_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_norm.weight"),
+            allocator,
+        ),
+        .post_attention_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "post_attention_norm.weight"),
+            allocator,
+        ),
+        .attn_q_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_q.weight"),
+        ),
+        .attn_k_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_k.weight"),
+        ),
+        .attn_v_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_v.weight"),
+        ),
+        .attn_output_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "attn_output.weight"),
+        ),
+        .attn_q_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_q_norm.weight"),
+            allocator,
+        ),
+        .attn_k_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "attn_k_norm.weight"),
+            allocator,
+        ),
+        .ffn_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "ffn_norm.weight"),
+            allocator,
+        ),
+        .post_ffw_norm_weight = try gguf_file.loadTensorF32(
+            try fmtBlockName(&name_buf, layer_idx, "post_ffw_norm.weight"),
+            allocator,
+        ),
+        .ffn_gate_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "ffn_gate.weight"),
+        ),
+        .ffn_up_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "ffn_up.weight"),
+        ),
+        .ffn_down_weight = try loadQuantizedWeight(
+            gguf_file,
+            try fmtBlockName(&name_buf, layer_idx, "ffn_down.weight"),
+        ),
     };
 }
 
 fn fmtBlockName(buf: []u8, layer: usize, suffix: []const u8) ![]const u8 {
-    const result = std.fmt.bufPrint(buf, "blk.{d}.{s}", .{ layer, suffix }) catch return error.NameTooLong;
+    const result = std.fmt.bufPrint(
+        buf,
+        "blk.{d}.{s}",
+        .{ layer, suffix },
+    ) catch return error.NameTooLong;
     return result;
 }
 
@@ -262,6 +305,244 @@ pub fn Gemma3(comptime C: type) type {
             self.kv_cache.reset();
         }
 
+        const PrefillBufs = struct {
+            x: []f32,
+            h: []f32,
+            q_buf: []f32,
+            k_buf: []f32,
+            v_buf: []f32,
+            attn_out: []f32,
+            proj_out: []f32,
+            gate_buf: []f32,
+            up_buf: []f32,
+            ffn_out: []f32,
+            norm_buf: []f32,
+        };
+
+        /// prefill 用の中間バッファをまとめて確保する
+        fn prefillAllocBufs(arena: Allocator, seq_len: usize) !PrefillBufs {
+            return .{
+                .x = try arena.alloc(f32, seq_len * C.EMBED),
+                .h = try arena.alloc(f32, seq_len * C.EMBED),
+                .q_buf = try arena.alloc(f32, seq_len * C.Q_DIM),
+                .k_buf = try arena.alloc(f32, seq_len * C.KV_DIM),
+                .v_buf = try arena.alloc(f32, seq_len * C.KV_DIM),
+                .attn_out = try arena.alloc(f32, seq_len * C.Q_DIM),
+                .proj_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .gate_buf = try arena.alloc(f32, seq_len * C.FFN_DIM),
+                .up_buf = try arena.alloc(f32, seq_len * C.FFN_DIM),
+                .ffn_out = try arena.alloc(f32, seq_len * C.EMBED),
+                .norm_buf = try arena.alloc(f32, seq_len * C.EMBED),
+            };
+        }
+
+        /// Embedding: 各トークンを Q8_0 から逆量子化して scale 適用
+        fn prefillEmbed(
+            self: *Self,
+            tokens: []const u32,
+            x: []f32,
+            seq_len: usize,
+            embed_scale: f32,
+        ) void {
+            const w = &self.weights;
+            for (0..seq_len) |t| {
+                dequantRow(w.token_embd, tokens[t], x[t * C.EMBED ..][0..C.EMBED]);
+                for (0..C.EMBED) |i| {
+                    x[t * C.EMBED + i] *= embed_scale;
+                }
+            }
+        }
+
+        /// Q/K に per-head RMSNorm と RoPE を適用し、KV キャッシュに書き込む
+        fn prefillQKNormRope(
+            self: *Self,
+            blk: *const GemmaBlockWeights,
+            bufs: PrefillBufs,
+            layer: usize,
+            seq_len: usize,
+        ) void {
+            for (0..seq_len) |t| {
+                for (0..C.HEAD) |hd| {
+                    rmsNormInPlace(
+                        bufs.q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
+                        blk.attn_q_norm_weight,
+                        C.RMS_EPS,
+                    );
+                }
+                rmsNormInPlace(
+                    bufs.k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
+                    blk.attn_k_norm_weight,
+                    C.RMS_EPS,
+                );
+
+                for (0..C.HEAD) |hd| {
+                    applyRoPEPrecomputed(
+                        bufs.q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
+                        t,
+                        &self.rope_freqs,
+                    );
+                }
+                applyRoPEPrecomputed(
+                    bufs.k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
+                    t,
+                    &self.rope_freqs,
+                );
+
+                @memcpy(
+                    self.kv_cache.k[layer][t * C.KV_DIM ..][0..C.KV_DIM],
+                    bufs.k_buf[t * C.KV_DIM ..][0..C.KV_DIM],
+                );
+                @memcpy(
+                    self.kv_cache.v[layer][t * C.KV_DIM ..][0..C.KV_DIM],
+                    bufs.v_buf[t * C.KV_DIM ..][0..C.KV_DIM],
+                );
+            }
+        }
+
+        /// prefill レイヤの attention ブロック (pre-norm + QKV + attention + post-norm + residual)
+        fn prefillAttentionBlock(
+            self: *Self,
+            bufs: PrefillBufs,
+            layer: usize,
+            seq_len: usize,
+            arena: Allocator,
+            timer: *Timer,
+        ) void {
+            const blk = &self.weights.blocks[layer];
+            const p = &self.profile;
+            var t0 = timer.read();
+
+            rmsNormRows(bufs.x, blk.attn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
+            var t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            linearForwardQ(bufs.h, blk.attn_q_weight, bufs.q_buf, seq_len, self.pool);
+            linearForwardQ(bufs.h, blk.attn_k_weight, bufs.k_buf, seq_len, self.pool);
+            linearForwardQ(bufs.h, blk.attn_v_weight, bufs.v_buf, seq_len, self.pool);
+            t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            self.prefillQKNormRope(blk, bufs, layer, seq_len);
+            t1 = timer.read();
+            p.rope_ns += t1 - t0;
+            t0 = t1;
+
+            const is_global = isGlobalLayer(layer);
+            gqaCausalAttentionPrefill(
+                bufs.q_buf,
+                self.kv_cache.k[layer],
+                self.kv_cache.v[layer],
+                bufs.attn_out,
+                seq_len,
+                C.HEAD,
+                C.HEAD_DIM,
+                C.Q_DIM,
+                C.KV_DIM,
+                if (is_global) seq_len else C.SLIDING_WINDOW,
+                arena,
+            );
+            t1 = timer.read();
+            p.attention_ns += t1 - t0;
+            t0 = t1;
+
+            self.prefillProjNormResidual(blk, bufs, seq_len, timer);
+        }
+
+        /// attn_out → 出力 projection + post-attn RMSNorm + residual add
+        fn prefillProjNormResidual(
+            self: *Self,
+            blk: *const GemmaBlockWeights,
+            bufs: PrefillBufs,
+            seq_len: usize,
+            timer: *Timer,
+        ) void {
+            const p = &self.profile;
+            var t0 = timer.read();
+            linearForwardQ(
+                bufs.attn_out,
+                blk.attn_output_weight,
+                bufs.proj_out,
+                seq_len,
+                self.pool,
+            );
+            var t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            rmsNormRows(
+                bufs.proj_out,
+                blk.post_attention_norm_weight,
+                bufs.norm_buf,
+                seq_len,
+                C.EMBED,
+                C.RMS_EPS,
+            );
+            t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            addInPlace(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
+            p.elementwise_ns += timer.read() - t0;
+        }
+
+        /// prefill レイヤの FFN ブロック (pre-norm + GeGLU + post-norm + residual)
+        fn prefillFfnBlock(
+            self: *Self,
+            bufs: PrefillBufs,
+            layer: usize,
+            seq_len: usize,
+            timer: *Timer,
+        ) void {
+            const blk = &self.weights.blocks[layer];
+            const p = &self.profile;
+            var t0 = timer.read();
+
+            rmsNormRows(bufs.x, blk.ffn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
+            var t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            linearForwardQ(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, seq_len, self.pool);
+            geluInPlace(bufs.gate_buf, seq_len * C.FFN_DIM);
+            linearForwardQ(bufs.h, blk.ffn_up_weight, bufs.up_buf, seq_len, self.pool);
+            mulInPlace(bufs.gate_buf, bufs.up_buf, seq_len * C.FFN_DIM);
+            linearForwardQ(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, seq_len, self.pool);
+            t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            rmsNormRows(
+                bufs.ffn_out,
+                blk.post_ffw_norm_weight,
+                bufs.norm_buf,
+                seq_len,
+                C.EMBED,
+                C.RMS_EPS,
+            );
+            t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            addInPlace(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
+            t1 = timer.read();
+            p.elementwise_ns += t1 - t0;
+        }
+
+        /// prefill 1 レイヤ分の forward (attention + FFN + residual)
+        fn prefillLayer(
+            self: *Self,
+            bufs: PrefillBufs,
+            layer: usize,
+            seq_len: usize,
+            arena: Allocator,
+            timer: *Timer,
+        ) !void {
+            self.prefillAttentionBlock(bufs, layer, seq_len, arena, timer);
+            self.prefillFfnBlock(bufs, layer, seq_len, timer);
+        }
+
         /// Prefill: プロンプト全体を処理して KV キャッシュを埋める
         pub fn prefill(self: *Self, tokens: []const u32, arena: Allocator) ![]f32 {
             const seq_len = tokens.len;
@@ -277,165 +558,227 @@ pub fn Gemma3(comptime C: type) type {
             var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
-            // Embedding: 各トークンを Q8_0 から逆量子化
-            const x = try arena.alloc(f32, seq_len * C.EMBED);
-            for (0..seq_len) |t| {
-                dequantRow(w.token_embd, tokens[t], x[t * C.EMBED ..][0..C.EMBED]);
-                for (0..C.EMBED) |i| {
-                    x[t * C.EMBED + i] *= embed_scale;
-                }
-            }
+            const bufs = try prefillAllocBufs(arena, seq_len);
+            self.prefillEmbed(tokens, bufs.x, seq_len, embed_scale);
 
             var t1 = timer.read();
             p.embedding_ns += t1 - t0;
             t0 = t1;
 
-            // 中間バッファ
-            const h = try arena.alloc(f32, seq_len * C.EMBED);
-            const q_buf = try arena.alloc(f32, seq_len * C.Q_DIM);
-            const k_buf = try arena.alloc(f32, seq_len * C.KV_DIM);
-            const v_buf = try arena.alloc(f32, seq_len * C.KV_DIM);
-            const attn_out = try arena.alloc(f32, seq_len * C.Q_DIM);
-            const proj_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const gate_buf = try arena.alloc(f32, seq_len * C.FFN_DIM);
-            const up_buf = try arena.alloc(f32, seq_len * C.FFN_DIM);
-            const ffn_out = try arena.alloc(f32, seq_len * C.EMBED);
-            const norm_buf = try arena.alloc(f32, seq_len * C.EMBED);
-
             for (0..C.LAYER) |layer| {
-                const blk = &w.blocks[layer];
-
-                // Pre-attention RMSNorm
-                t0 = timer.read();
-                rmsNormRows(x, blk.attn_norm_weight, h, seq_len, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Q/K/V projections
-                linearForwardQ(h, blk.attn_q_weight, q_buf, seq_len, self.pool);
-                linearForwardQ(h, blk.attn_k_weight, k_buf, seq_len, self.pool);
-                linearForwardQ(h, blk.attn_v_weight, v_buf, seq_len, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Per-head Q/K norms + RoPE
-                for (0..seq_len) |t| {
-                    for (0..C.HEAD) |hd| {
-                        rmsNormInPlace(
-                            q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
-                            blk.attn_q_norm_weight,
-                            C.RMS_EPS,
-                        );
-                    }
-                    rmsNormInPlace(
-                        k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
-                        blk.attn_k_norm_weight,
-                        C.RMS_EPS,
-                    );
-
-                    for (0..C.HEAD) |hd| {
-                        applyRoPEPrecomputed(
-                            q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
-                            t,
-                            &self.rope_freqs,
-                        );
-                    }
-                    applyRoPEPrecomputed(
-                        k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
-                        t,
-                        &self.rope_freqs,
-                    );
-
-                    @memcpy(self.kv_cache.k[layer][t * C.KV_DIM ..][0..C.KV_DIM], k_buf[t * C.KV_DIM ..][0..C.KV_DIM]);
-                    @memcpy(self.kv_cache.v[layer][t * C.KV_DIM ..][0..C.KV_DIM], v_buf[t * C.KV_DIM ..][0..C.KV_DIM]);
-                }
-                t1 = timer.read();
-                p.rope_ns += t1 - t0;
-                t0 = t1;
-
-                // GQA causal self-attention (prefill)
-                const is_global = isGlobalLayer(layer);
-                gqaCausalAttentionPrefill(
-                    q_buf,
-                    self.kv_cache.k[layer],
-                    self.kv_cache.v[layer],
-                    attn_out,
-                    seq_len,
-                    C.HEAD,
-                    C.HEAD_DIM,
-                    C.Q_DIM,
-                    C.KV_DIM,
-                    if (is_global) seq_len else C.SLIDING_WINDOW,
-                    arena,
-                );
-                t1 = timer.read();
-                p.attention_ns += t1 - t0;
-                t0 = t1;
-
-                // Output projection
-                linearForwardQ(attn_out, blk.attn_output_weight, proj_out, seq_len, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Post-attention norm
-                rmsNormRows(proj_out, blk.post_attention_norm_weight, norm_buf, seq_len, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Residual add
-                addInPlace(x, norm_buf, seq_len * C.EMBED);
-                t1 = timer.read();
-                p.elementwise_ns += t1 - t0;
-                t0 = t1;
-
-                // Pre-FFN RMSNorm
-                rmsNormRows(x, blk.ffn_norm_weight, h, seq_len, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // GeGLU MLP
-                linearForwardQ(h, blk.ffn_gate_weight, gate_buf, seq_len, self.pool);
-                geluInPlace(gate_buf, seq_len * C.FFN_DIM);
-                linearForwardQ(h, blk.ffn_up_weight, up_buf, seq_len, self.pool);
-                mulInPlace(gate_buf, up_buf, seq_len * C.FFN_DIM);
-                linearForwardQ(gate_buf, blk.ffn_down_weight, ffn_out, seq_len, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Post-FFN norm
-                rmsNormRows(ffn_out, blk.post_ffw_norm_weight, norm_buf, seq_len, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Residual add
-                addInPlace(x, norm_buf, seq_len * C.EMBED);
-                t1 = timer.read();
-                p.elementwise_ns += t1 - t0;
-                t0 = t1;
+                try self.prefillLayer(bufs, layer, seq_len, arena, &timer);
             }
+            t0 = timer.read();
 
             self.kv_cache.seq_len = seq_len;
 
-            // Final RMSNorm
-            rmsNormRows(x, w.output_norm_weight, h, seq_len, C.EMBED, C.RMS_EPS);
+            rmsNormRows(bufs.x, w.output_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
             t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            // Logits: hidden @ token_embd^T (weight-tied, Q8_0)
-            const result = try computeLogits(w, h[(seq_len - 1) * C.EMBED ..][0..C.EMBED], arena, self.pool);
+            const result = try computeLogits(
+                w,
+                bufs.h[(seq_len - 1) * C.EMBED ..][0..C.EMBED],
+                arena,
+                self.pool,
+            );
             t1 = timer.read();
             p.logits_ns += t1 - t0;
 
             p.call_count += 1;
             return result;
+        }
+
+        const DecodeBufs = struct {
+            x: []f32,
+            h: []f32,
+            q_buf: []f32,
+            k_buf: []f32,
+            v_buf: []f32,
+            attn_out: []f32,
+            proj_out: []f32,
+            gate_buf: []f32,
+            up_buf: []f32,
+            ffn_out: []f32,
+            norm_buf: []f32,
+        };
+
+        /// decode 1 トークン用の中間バッファ
+        fn decodeAllocBufs(arena: Allocator) !DecodeBufs {
+            return .{
+                .x = try arena.alloc(f32, C.EMBED),
+                .h = try arena.alloc(f32, C.EMBED),
+                .q_buf = try arena.alloc(f32, C.Q_DIM),
+                .k_buf = try arena.alloc(f32, C.KV_DIM),
+                .v_buf = try arena.alloc(f32, C.KV_DIM),
+                .attn_out = try arena.alloc(f32, C.Q_DIM),
+                .proj_out = try arena.alloc(f32, C.EMBED),
+                .gate_buf = try arena.alloc(f32, C.FFN_DIM),
+                .up_buf = try arena.alloc(f32, C.FFN_DIM),
+                .ffn_out = try arena.alloc(f32, C.EMBED),
+                .norm_buf = try arena.alloc(f32, C.EMBED),
+            };
+        }
+
+        /// 1 トークンの Q/K に per-head RMSNorm + RoPE を適用
+        fn decodeQKNormRope(
+            self: *Self,
+            blk: *const GemmaBlockWeights,
+            bufs: DecodeBufs,
+            layer: usize,
+            pos: usize,
+        ) void {
+            for (0..C.HEAD) |hd| {
+                rmsNormInPlace(
+                    bufs.q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
+                    blk.attn_q_norm_weight,
+                    C.RMS_EPS,
+                );
+                applyRoPEPrecomputed(
+                    bufs.q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
+                    pos,
+                    &self.rope_freqs,
+                );
+            }
+            rmsNormInPlace(bufs.k_buf[0..C.HEAD_DIM], blk.attn_k_norm_weight, C.RMS_EPS);
+            applyRoPEPrecomputed(bufs.k_buf[0..C.HEAD_DIM], pos, &self.rope_freqs);
+
+            @memcpy(
+                self.kv_cache.k[layer][pos * C.KV_DIM ..][0..C.KV_DIM],
+                bufs.k_buf[0..C.KV_DIM],
+            );
+            @memcpy(
+                self.kv_cache.v[layer][pos * C.KV_DIM ..][0..C.KV_DIM],
+                bufs.v_buf[0..C.KV_DIM],
+            );
+        }
+
+        /// decode レイヤの attention ブロック (pre-norm + QKV + cached attention + post-norm + residual)
+        fn decodeAttentionBlock(
+            self: *Self,
+            bufs: DecodeBufs,
+            layer: usize,
+            pos: usize,
+            arena: Allocator,
+            timer: *Timer,
+        ) !void {
+            const blk = &self.weights.blocks[layer];
+            const p = &self.profile;
+            var t0 = timer.read();
+
+            rmsNormRows(bufs.x, blk.attn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
+            var t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            linearForwardQ(bufs.h, blk.attn_q_weight, bufs.q_buf, 1, self.pool);
+            linearForwardQ(bufs.h, blk.attn_k_weight, bufs.k_buf, 1, self.pool);
+            linearForwardQ(bufs.h, blk.attn_v_weight, bufs.v_buf, 1, self.pool);
+            t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            self.decodeQKNormRope(blk, bufs, layer, pos);
+            t1 = timer.read();
+            p.rope_ns += t1 - t0;
+            t0 = t1;
+
+            const is_global = isGlobalLayer(layer);
+            const kv_len = pos + 1;
+            const window = if (is_global) kv_len else @min(kv_len, C.SLIDING_WINDOW);
+            const kv_start = if (kv_len > window) kv_len - window else 0;
+            const scores_buf = try arena.alloc(f32, window);
+            gqaCachedAttention(
+                bufs.q_buf,
+                self.kv_cache.k[layer],
+                self.kv_cache.v[layer],
+                bufs.attn_out,
+                scores_buf,
+                kv_start,
+                kv_len,
+                C.HEAD,
+                C.HEAD_DIM,
+                C.Q_DIM,
+                C.KV_DIM,
+            );
+            t1 = timer.read();
+            p.attention_ns += t1 - t0;
+            t0 = t1;
+
+            linearForwardQ(bufs.attn_out, blk.attn_output_weight, bufs.proj_out, 1, self.pool);
+            t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            rmsNormRows(
+                bufs.proj_out,
+                blk.post_attention_norm_weight,
+                bufs.norm_buf,
+                1,
+                C.EMBED,
+                C.RMS_EPS,
+            );
+            t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+            addInPlace(bufs.x, bufs.norm_buf, C.EMBED);
+            p.elementwise_ns += timer.read() - t1;
+        }
+
+        /// decode レイヤの FFN ブロック (pre-norm + GeGLU + post-norm + residual)
+        fn decodeFfnBlock(
+            self: *Self,
+            bufs: DecodeBufs,
+            layer: usize,
+            timer: *Timer,
+        ) void {
+            const blk = &self.weights.blocks[layer];
+            const p = &self.profile;
+            var t0 = timer.read();
+
+            rmsNormRows(bufs.x, blk.ffn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
+            var t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            linearForwardQ(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, 1, self.pool);
+            geluInPlace(bufs.gate_buf, C.FFN_DIM);
+            linearForwardQ(bufs.h, blk.ffn_up_weight, bufs.up_buf, 1, self.pool);
+            mulInPlace(bufs.gate_buf, bufs.up_buf, C.FFN_DIM);
+            linearForwardQ(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, 1, self.pool);
+            t1 = timer.read();
+            p.linear_ns += t1 - t0;
+            t0 = t1;
+
+            rmsNormRows(
+                bufs.ffn_out,
+                blk.post_ffw_norm_weight,
+                bufs.norm_buf,
+                1,
+                C.EMBED,
+                C.RMS_EPS,
+            );
+            t1 = timer.read();
+            p.rms_norm_ns += t1 - t0;
+            t0 = t1;
+
+            addInPlace(bufs.x, bufs.norm_buf, C.EMBED);
+            t1 = timer.read();
+            p.elementwise_ns += t1 - t0;
+        }
+
+        /// decode 1 レイヤ分の forward
+        fn decodeLayer(
+            self: *Self,
+            bufs: DecodeBufs,
+            layer: usize,
+            pos: usize,
+            arena: Allocator,
+            timer: *Timer,
+        ) !void {
+            try self.decodeAttentionBlock(bufs, layer, pos, arena, timer);
+            self.decodeFfnBlock(bufs, layer, timer);
         }
 
         /// DecodeNext: 1トークンのみ処理、KV キャッシュに追記
@@ -449,152 +792,29 @@ pub fn Gemma3(comptime C: type) type {
             var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
-            // Embedding
-            const x = try arena.alloc(f32, C.EMBED);
-            dequantRow(w.token_embd, token, x);
+            const bufs = try decodeAllocBufs(arena);
+            dequantRow(w.token_embd, token, bufs.x);
             for (0..C.EMBED) |i| {
-                x[i] *= embed_scale;
+                bufs.x[i] *= embed_scale;
             }
 
             var t1 = timer.read();
             p.embedding_ns += t1 - t0;
             t0 = t1;
 
-            // 1行分のバッファ
-            const h = try arena.alloc(f32, C.EMBED);
-            const q_buf = try arena.alloc(f32, C.Q_DIM);
-            const k_buf = try arena.alloc(f32, C.KV_DIM);
-            const v_buf = try arena.alloc(f32, C.KV_DIM);
-            const attn_out = try arena.alloc(f32, C.Q_DIM);
-            const proj_out = try arena.alloc(f32, C.EMBED);
-            const gate_buf = try arena.alloc(f32, C.FFN_DIM);
-            const up_buf = try arena.alloc(f32, C.FFN_DIM);
-            const ffn_out = try arena.alloc(f32, C.EMBED);
-            const norm_buf = try arena.alloc(f32, C.EMBED);
-
             for (0..C.LAYER) |layer| {
-                const blk = &w.blocks[layer];
-
-                // Pre-attention RMSNorm
-                t0 = timer.read();
-                rmsNormRows(x, blk.attn_norm_weight, h, 1, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Q/K/V projections
-                linearForwardQ(h, blk.attn_q_weight, q_buf, 1, self.pool);
-                linearForwardQ(h, blk.attn_k_weight, k_buf, 1, self.pool);
-                linearForwardQ(h, blk.attn_v_weight, v_buf, 1, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Per-head Q norm + RoPE
-                for (0..C.HEAD) |hd| {
-                    rmsNormInPlace(
-                        q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
-                        blk.attn_q_norm_weight,
-                        C.RMS_EPS,
-                    );
-                    applyRoPEPrecomputed(
-                        q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
-                        pos,
-                        &self.rope_freqs,
-                    );
-                }
-                // K norm + RoPE
-                rmsNormInPlace(k_buf[0..C.HEAD_DIM], blk.attn_k_norm_weight, C.RMS_EPS);
-                applyRoPEPrecomputed(k_buf[0..C.HEAD_DIM], pos, &self.rope_freqs);
-
-                // KV cache
-                @memcpy(self.kv_cache.k[layer][pos * C.KV_DIM ..][0..C.KV_DIM], k_buf[0..C.KV_DIM]);
-                @memcpy(self.kv_cache.v[layer][pos * C.KV_DIM ..][0..C.KV_DIM], v_buf[0..C.KV_DIM]);
-                t1 = timer.read();
-                p.rope_ns += t1 - t0;
-                t0 = t1;
-
-                // GQA cached attention
-                const is_global = isGlobalLayer(layer);
-                const kv_len = pos + 1;
-                const window = if (is_global) kv_len else @min(kv_len, C.SLIDING_WINDOW);
-                const kv_start = if (kv_len > window) kv_len - window else 0;
-
-                const scores_buf = try arena.alloc(f32, window);
-
-                gqaCachedAttention(
-                    q_buf,
-                    self.kv_cache.k[layer],
-                    self.kv_cache.v[layer],
-                    attn_out,
-                    scores_buf,
-                    kv_start,
-                    kv_len,
-                    C.HEAD,
-                    C.HEAD_DIM,
-                    C.Q_DIM,
-                    C.KV_DIM,
-                );
-                t1 = timer.read();
-                p.attention_ns += t1 - t0;
-                t0 = t1;
-
-                // Output projection
-                linearForwardQ(attn_out, blk.attn_output_weight, proj_out, 1, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Post-attention norm
-                rmsNormRows(proj_out, blk.post_attention_norm_weight, norm_buf, 1, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Residual add
-                addInPlace(x, norm_buf, C.EMBED);
-                t1 = timer.read();
-                p.elementwise_ns += t1 - t0;
-                t0 = t1;
-
-                // Pre-FFN RMSNorm
-                rmsNormRows(x, blk.ffn_norm_weight, h, 1, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // GeGLU MLP
-                linearForwardQ(h, blk.ffn_gate_weight, gate_buf, 1, self.pool);
-                geluInPlace(gate_buf, C.FFN_DIM);
-                linearForwardQ(h, blk.ffn_up_weight, up_buf, 1, self.pool);
-                mulInPlace(gate_buf, up_buf, C.FFN_DIM);
-                linearForwardQ(gate_buf, blk.ffn_down_weight, ffn_out, 1, self.pool);
-                t1 = timer.read();
-                p.linear_ns += t1 - t0;
-                t0 = t1;
-
-                // Post-FFN norm
-                rmsNormRows(ffn_out, blk.post_ffw_norm_weight, norm_buf, 1, C.EMBED, C.RMS_EPS);
-                t1 = timer.read();
-                p.rms_norm_ns += t1 - t0;
-                t0 = t1;
-
-                // Residual add
-                addInPlace(x, norm_buf, C.EMBED);
-                t1 = timer.read();
-                p.elementwise_ns += t1 - t0;
-                t0 = t1;
+                try self.decodeLayer(bufs, layer, pos, arena, &timer);
             }
+            t0 = timer.read();
 
-            // Final RMSNorm
-            rmsNormRows(x, w.output_norm_weight, h, 1, C.EMBED, C.RMS_EPS);
+            rmsNormRows(bufs.x, w.output_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
             t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
             self.kv_cache.seq_len = pos + 1;
 
-            const result = try computeLogits(w, h, arena, self.pool);
+            const result = try computeLogits(w, bufs.h, arena, self.pool);
             t1 = timer.read();
             p.logits_ns += t1 - t0;
 
@@ -603,7 +823,12 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// hidden → logits (weight-tied with token_embd, Q8_0 matmul)
-        fn computeLogits(w: *const Gemma3Weights(C), hidden: []const f32, arena: Allocator, pool: *thread_pool_mod.ThreadPool) ![]f32 {
+        fn computeLogits(
+            w: *const Gemma3Weights(C),
+            hidden: []const f32,
+            arena: Allocator,
+            pool: *thread_pool_mod.ThreadPool,
+        ) ![]f32 {
             const logits = try arena.alloc(f32, C.VOCAB);
             pool.matmul(
                 w.token_embd.data,

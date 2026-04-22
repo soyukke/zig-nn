@@ -32,7 +32,13 @@ pub fn MultiHeadSelfAttention(comptime d_model: usize, comptime n_heads: usize) 
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, input: anytype, batch_size: usize, seq_len: usize) @TypeOf(input) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            batch_size: usize,
+            seq_len: usize,
+        ) @TypeOf(input) {
             const total = batch_size * seq_len;
             const bh = batch_size * n_heads;
 
@@ -63,7 +69,11 @@ pub fn CausalSelfAttention(comptime d_model: usize, comptime tgt_len: usize) typ
 }
 
 /// Multi-head causal self-attention (decoder用)
-pub fn MultiHeadCausalSelfAttention(comptime d_model: usize, comptime n_heads: usize, comptime tgt_len: usize) type {
+pub fn MultiHeadCausalSelfAttention(
+    comptime d_model: usize,
+    comptime n_heads: usize,
+    comptime tgt_len: usize,
+) type {
     const d_head = d_model / n_heads;
     return struct {
         q_proj: Linear(d_model, d_model),
@@ -80,7 +90,12 @@ pub fn MultiHeadCausalSelfAttention(comptime d_model: usize, comptime n_heads: u
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, input: anytype, batch_size: usize) @TypeOf(input) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            batch_size: usize,
+        ) @TypeOf(input) {
             const total = batch_size * tgt_len;
             const bh = batch_size * n_heads;
 
@@ -199,7 +214,13 @@ pub fn DynamicCausalSelfAttention(comptime d_model: usize, comptime n_heads: usi
             };
         }
 
-        pub fn forward(self: @This(), ctx: anytype, input: anytype, batch_size: usize, seq_len: usize) @TypeOf(input) {
+        pub fn forward(
+            self: @This(),
+            ctx: anytype,
+            input: anytype,
+            batch_size: usize,
+            seq_len: usize,
+        ) @TypeOf(input) {
             const total = batch_size * seq_len;
             const bh = batch_size * n_heads;
 
