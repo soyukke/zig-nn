@@ -60,3 +60,36 @@ download-model:
 # クリーン
 clean:
     rm -rf .zig-cache zig-out
+
+# --- Zig style checker (installed from ~/dotfiles/zig-tools) ---
+#
+# `just lint` は src/ の現状を scripts/style_baseline.txt と比較し、
+# 増えた違反だけで失敗する (ratcheting baseline)。既存違反を直した後は
+# `just lint-update-baseline` で baseline を更新する。
+# ZIG_STYLE_CHECKER 環境変数で checker 本体のパスを差し替え可能。
+
+style_checker := env("ZIG_STYLE_CHECKER", env("HOME") + "/dotfiles/zig-tools/check_style.zig")
+
+# zig fmt でフォーマット崩れを検出 (書き換えはしない)
+fmt-check:
+    NIX_CFLAGS_COMPILE="" zig fmt --check src
+
+# zig fmt でフォーマットを書き換え
+fmt:
+    NIX_CFLAGS_COMPILE="" zig fmt src
+
+# baseline と比較して新規違反があれば fail
+lint:
+    NIX_CFLAGS_COMPILE="" zig run {{style_checker}} -- --root src
+
+# baseline を無視して全違反を列挙
+lint-strict:
+    NIX_CFLAGS_COMPILE="" zig run {{style_checker}} -- --root src --strict
+
+# baseline を現在の違反で再スナップショット
+lint-update-baseline:
+    NIX_CFLAGS_COMPILE="" zig run {{style_checker}} -- --root src --update-baseline
+
+# fmt-check + lint をまとめて実行 (PR 前の最低限チェック)
+check: fmt-check lint
+# --- end zig-tools linter ---
