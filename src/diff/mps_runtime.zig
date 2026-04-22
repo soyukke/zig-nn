@@ -18,6 +18,8 @@ const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
 const unary = @import("common/unary.zig");
 const binary = @import("common/binary.zig");
+const reduce = @import("common/reduce.zig");
+const softmax_common = @import("common/softmax.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -442,19 +444,13 @@ pub const DiffMpsRuntime = struct {
         if (pa.grad) |ga_buf| {
             const rows = pa.numRows();
             const cols = pa.lastDim();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const sm = bufPtr(self_node.data); // softmax output
-            for (0..rows) |r| {
-                var dot: f32 = 0;
-                for (0..cols) |c| {
-                    dot += go[r * cols + c] * sm[r * cols + c];
-                }
-                for (0..cols) |c| {
-                    const idx = r * cols + c;
-                    ga[idx] += sm[idx] * (go[idx] - dot);
-                }
-            }
+            softmax_common.softmaxBackward(
+                bufPtr(ga_buf),
+                bufPtr(self_node.grad.?),
+                bufPtr(self_node.data),
+                rows,
+                cols,
+            );
         }
     }
 
@@ -679,10 +675,7 @@ pub const DiffMpsRuntime = struct {
                     dst[i] = s;
                 }
                 const node = self.makeNode(out_buf, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionSumAxis1;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleSum());
                 return node;
             } else {
                 const out_buf = self.allocBuf(cols);
@@ -692,10 +685,7 @@ pub const DiffMpsRuntime = struct {
                     for (0..cols) |j| dst[j] += src[i * cols + j];
                 }
                 const node = self.makeNode(out_buf, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionSumAxis0;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleSum());
                 return node;
             }
         }
@@ -708,10 +698,7 @@ pub const DiffMpsRuntime = struct {
             for (0..n) |i| s += src[i];
             bufPtr(out_buf)[0] = s;
             const node = self.makeNode(out_buf, &.{1}, x.requires_grad);
-            if (x.requires_grad) {
-                node.parents[0] = x;
-                node.backward_fn = &backwardReductionSum1D;
-            }
+            if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleSum());
             return node;
         }
 
@@ -750,39 +737,38 @@ pub const DiffMpsRuntime = struct {
         @panic("reductionSum: unsupported ndim/axis");
     }
 
-    fn backwardReductionSumAxis1(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            for (0..rows) |i| {
-                for (0..cols) |j| ga[i * cols + j] += go[i];
-            }
-        }
+    // ── Reduction backward 共通基盤 (数式は diff/common/reduce.zig) ──
+
+    const ReduceContext = struct {
+        case: reduce.Case,
+        scale: f32,
+    };
+
+    fn setReduceBackward(
+        self: *DiffMpsRuntime,
+        node: *DiffMpsNode,
+        parent: DiffMpsTensor,
+        case: reduce.Case,
+        scale: f32,
+    ) void {
+        node.parents[0] = parent;
+        const ctx = self.allocContext(ReduceContext);
+        ctx.* = .{ .case = case, .scale = scale };
+        node.context = @ptrCast(ctx);
+        node.backward_fn = &backwardReduction;
     }
 
-    fn backwardReductionSumAxis0(self_node: *DiffMpsNode) void {
+    fn backwardReduction(self_node: *DiffMpsNode) void {
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga_buf| {
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            for (0..rows) |i| {
-                for (0..cols) |j| ga[i * cols + j] += go[j];
-            }
-        }
-    }
-
-    fn backwardReductionSum1D(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const total = pa.totalElements();
-            for (0..total) |i| ga[i] += go[0];
+            const ctx: *const ReduceContext = @ptrCast(@alignCast(self_node.context.?));
+            reduce.scatter(
+                bufPtr(ga_buf),
+                bufPtr(self_node.grad.?),
+                pa.shape[0..pa.ndim],
+                ctx.case,
+                ctx.scale,
+            );
         }
     }
 
@@ -803,10 +789,7 @@ pub const DiffMpsRuntime = struct {
                     dst[i] = s / cols_f;
                 }
                 const node = self.makeNode(out_buf, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionMeanAxis1;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleMean(cols));
                 return node;
             } else {
                 const out_buf = self.allocBuf(cols);
@@ -818,43 +801,11 @@ pub const DiffMpsRuntime = struct {
                 }
                 for (0..cols) |j| dst[j] /= rows_f;
                 const node = self.makeNode(out_buf, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionMeanAxis0;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleMean(rows));
                 return node;
             }
         }
         @panic("reductionMean: only 2D supported");
-    }
-
-    fn backwardReductionMeanAxis1(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            const cols_f: f32 = @floatFromInt(cols);
-            for (0..rows) |i| {
-                const g = go[i] / cols_f;
-                for (0..cols) |j| ga[i * cols + j] += g;
-            }
-        }
-    }
-
-    fn backwardReductionMeanAxis0(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            const rows_f: f32 = @floatFromInt(rows);
-            for (0..rows) |i| {
-                for (0..cols) |j| ga[i * cols + j] += go[j] / rows_f;
-            }
-        }
     }
 
     // ════════════════════════════════════════════════════════════════
