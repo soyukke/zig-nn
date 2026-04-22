@@ -20,6 +20,7 @@ const unary = @import("common/unary.zig");
 const binary = @import("common/binary.zig");
 const reduce = @import("common/reduce.zig");
 const softmax_common = @import("common/softmax.zig");
+const matmul_common = @import("common/matmul.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -526,36 +527,25 @@ pub const DiffMpsRuntime = struct {
     }
 
     fn backwardMatmul2D(self_node: *DiffMpsNode) void {
+        // 数式は diff/common/matmul.zig:
+        //   ga = go @ b^T,  gb = a^T @ go
+        // UMA buf を [*]f32 に変換し、CPU 側 BLAS (Accelerate) で計算。
+        // 従来の手書き三重ループより高速。
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[1];
-        // dA += go @ B^T
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            const bd = bufPtr(pb.data);
-            for (0..M) |i| {
-                for (0..K) |j| {
-                    var s: f32 = 0;
-                    for (0..N) |k| s += go[i * N + k] * bd[j * N + k];
-                    ga[i * K + j] += s;
-                }
-            }
-        }
-        // dB += A^T @ go
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            const ad = bufPtr(pa.data);
-            for (0..K) |i| {
-                for (0..N) |j| {
-                    var s: f32 = 0;
-                    for (0..M) |k| s += ad[k * K + i] * go[k * N + j];
-                    gb[i * N + j] += s;
-                }
-            }
-        }
+        matmul_common.backward2D(
+            bufPtr(self_node.grad.?),
+            bufPtr(pa.data),
+            bufPtr(pb.data),
+            if (pa.grad) |g| bufPtr(g) else null,
+            if (pb.grad) |g| bufPtr(g) else null,
+            M,
+            K,
+            N,
+        );
     }
 
     // ════════════════════════════════════════════════════════════════
