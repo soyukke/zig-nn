@@ -20,7 +20,7 @@ const diff_node = @import("node.zig");
 
 pub const MAX_NDIM = ops.MAX_NDIM;
 
-pub const DiffCudaNode = diff_node.DiffNodeGeneric(CUdeviceptr, ops.MAX_NDIM);
+pub const DiffCudaNode = diff_node.diff_node_generic(CUdeviceptr, ops.MAX_NDIM);
 
 // ── Backward function type ──
 const BackwardFn = *const fn (*DiffCudaNode) void;
@@ -45,10 +45,10 @@ pub const GpuAdamState = struct {
         const m_dptrs = try allocator.alloc(CUdeviceptr, count);
         const v_dptrs = try allocator.alloc(CUdeviceptr, count);
         for (param_sizes, 0..) |size, i| {
-            m_dptrs[i] = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
-            try cuda_ctx.memsetZero(m_dptrs[i], size);
-            v_dptrs[i] = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
-            try cuda_ctx.memsetZero(v_dptrs[i], size);
+            m_dptrs[i] = try cuda_ctx.alloc_buffer(size * @sizeOf(f32));
+            try cuda_ctx.memset_zero(m_dptrs[i], size);
+            v_dptrs[i] = try cuda_ctx.alloc_buffer(size * @sizeOf(f32));
+            try cuda_ctx.memset_zero(v_dptrs[i], size);
         }
         return .{
             .m_dptrs = m_dptrs,
@@ -60,8 +60,8 @@ pub const GpuAdamState = struct {
     }
 
     pub fn deinit(self: *GpuAdamState) void {
-        for (self.m_dptrs) |d| self.cuda_ctx.freeBuffer(d);
-        for (self.v_dptrs) |d| self.cuda_ctx.freeBuffer(d);
+        for (self.m_dptrs) |d| self.cuda_ctx.free_buffer(d);
+        for (self.v_dptrs) |d| self.cuda_ctx.free_buffer(d);
         self.allocator.free(self.m_dptrs);
         self.allocator.free(self.v_dptrs);
     }
@@ -144,89 +144,89 @@ const KernelHandles = struct {
 
 /// PTX にロード済みの cuda_ctx から KernelHandles を一括で取り出す。
 /// グループ別のヘルパーに委譲して 70 行制限を守る。
-fn loadKernelHandles(cuda_ctx: *CudaContext) !KernelHandles {
+fn load_kernel_handles(cuda_ctx: *CudaContext) !KernelHandles {
     var k: KernelHandles = undefined;
-    try loadKernelsForward(cuda_ctx, &k);
-    try loadKernelsBackward(cuda_ctx, &k);
-    try loadKernelsLossAndMisc(cuda_ctx, &k);
+    try load_kernels_forward(cuda_ctx, &k);
+    try load_kernels_backward(cuda_ctx, &k);
+    try load_kernels_loss_and_misc(cuda_ctx, &k);
     return k;
 }
 
-fn loadKernelsForward(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
+fn load_kernels_forward(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
     // Forward elementwise
-    k.fn_add = try cuda_ctx.getFunction("add_broadcast");
-    k.fn_mul = try cuda_ctx.getFunction("mul_broadcast");
-    k.fn_sub = try cuda_ctx.getFunction("sub_broadcast");
-    k.fn_gelu = try cuda_ctx.getFunction("gelu_kernel");
-    k.fn_silu_fwd_cache = try cuda_ctx.getFunction("silu_fwd_cache_kernel");
-    k.fn_add_silu_fwd_cache = try cuda_ctx.getFunction("add_silu_fwd_cache_kernel");
-    k.fn_relu = try cuda_ctx.getFunction("relu_kernel");
-    k.fn_sigmoid = try cuda_ctx.getFunction("sigmoid_kernel");
-    k.fn_tanh = try cuda_ctx.getFunction("tanh_kernel");
-    k.fn_exp = try cuda_ctx.getFunction("exp_kernel");
-    k.fn_log = try cuda_ctx.getFunction("log_kernel");
-    k.fn_square = try cuda_ctx.getFunction("square_kernel");
-    k.fn_sqrt = try cuda_ctx.getFunction("sqrt_kernel");
-    k.fn_abs = try cuda_ctx.getFunction("abs_kernel");
-    k.fn_clamp = try cuda_ctx.getFunction("clamp_kernel");
-    k.fn_negative = try cuda_ctx.getFunction("negative_kernel");
-    k.fn_scale = try cuda_ctx.getFunction("scale_kernel");
+    k.fn_add = try cuda_ctx.get_function("add_broadcast");
+    k.fn_mul = try cuda_ctx.get_function("mul_broadcast");
+    k.fn_sub = try cuda_ctx.get_function("sub_broadcast");
+    k.fn_gelu = try cuda_ctx.get_function("gelu_kernel");
+    k.fn_silu_fwd_cache = try cuda_ctx.get_function("silu_fwd_cache_kernel");
+    k.fn_add_silu_fwd_cache = try cuda_ctx.get_function("add_silu_fwd_cache_kernel");
+    k.fn_relu = try cuda_ctx.get_function("relu_kernel");
+    k.fn_sigmoid = try cuda_ctx.get_function("sigmoid_kernel");
+    k.fn_tanh = try cuda_ctx.get_function("tanh_kernel");
+    k.fn_exp = try cuda_ctx.get_function("exp_kernel");
+    k.fn_log = try cuda_ctx.get_function("log_kernel");
+    k.fn_square = try cuda_ctx.get_function("square_kernel");
+    k.fn_sqrt = try cuda_ctx.get_function("sqrt_kernel");
+    k.fn_abs = try cuda_ctx.get_function("abs_kernel");
+    k.fn_clamp = try cuda_ctx.get_function("clamp_kernel");
+    k.fn_negative = try cuda_ctx.get_function("negative_kernel");
+    k.fn_scale = try cuda_ctx.get_function("scale_kernel");
     // Forward structured
-    k.fn_softmax_out = try cuda_ctx.getFunction("softmax_out_kernel");
-    k.fn_layernorm_fwd = try cuda_ctx.getFunction("layernorm_fwd_kernel");
-    k.fn_transpose = try cuda_ctx.getFunction("transpose_2d_kernel");
-    k.fn_gather = try cuda_ctx.getFunction("gather_kernel");
+    k.fn_softmax_out = try cuda_ctx.get_function("softmax_out_kernel");
+    k.fn_layernorm_fwd = try cuda_ctx.get_function("layernorm_fwd_kernel");
+    k.fn_transpose = try cuda_ctx.get_function("transpose_2d_kernel");
+    k.fn_gather = try cuda_ctx.get_function("gather_kernel");
 }
 
-fn loadKernelsBackward(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
+fn load_kernels_backward(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
     // Backward elementwise
-    k.fn_gelu_bw = try cuda_ctx.getFunction("gelu_backward_kernel");
-    k.fn_silu_bw = try cuda_ctx.getFunction("silu_backward_kernel");
-    k.fn_relu_bw = try cuda_ctx.getFunction("relu_backward_kernel");
-    k.fn_sigmoid_bw = try cuda_ctx.getFunction("sigmoid_backward_kernel");
-    k.fn_tanh_bw = try cuda_ctx.getFunction("tanh_backward_kernel");
-    k.fn_exp_bw = try cuda_ctx.getFunction("exp_backward_kernel");
-    k.fn_log_bw = try cuda_ctx.getFunction("log_backward_kernel");
-    k.fn_square_bw = try cuda_ctx.getFunction("square_backward_kernel");
-    k.fn_sqrt_bw = try cuda_ctx.getFunction("sqrt_backward_kernel");
-    k.fn_abs_bw = try cuda_ctx.getFunction("abs_backward_kernel");
-    k.fn_clamp_bw = try cuda_ctx.getFunction("clamp_backward_kernel");
-    k.fn_dropout_bw = try cuda_ctx.getFunction("dropout_backward_kernel");
-    k.fn_add_silu_bw_same = try cuda_ctx.getFunction("add_silu_backward_same_kernel");
-    k.fn_add_silu_bw_bcast = try cuda_ctx.getFunction("add_silu_backward_bcast_kernel");
+    k.fn_gelu_bw = try cuda_ctx.get_function("gelu_backward_kernel");
+    k.fn_silu_bw = try cuda_ctx.get_function("silu_backward_kernel");
+    k.fn_relu_bw = try cuda_ctx.get_function("relu_backward_kernel");
+    k.fn_sigmoid_bw = try cuda_ctx.get_function("sigmoid_backward_kernel");
+    k.fn_tanh_bw = try cuda_ctx.get_function("tanh_backward_kernel");
+    k.fn_exp_bw = try cuda_ctx.get_function("exp_backward_kernel");
+    k.fn_log_bw = try cuda_ctx.get_function("log_backward_kernel");
+    k.fn_square_bw = try cuda_ctx.get_function("square_backward_kernel");
+    k.fn_sqrt_bw = try cuda_ctx.get_function("sqrt_backward_kernel");
+    k.fn_abs_bw = try cuda_ctx.get_function("abs_backward_kernel");
+    k.fn_clamp_bw = try cuda_ctx.get_function("clamp_backward_kernel");
+    k.fn_dropout_bw = try cuda_ctx.get_function("dropout_backward_kernel");
+    k.fn_add_silu_bw_same = try cuda_ctx.get_function("add_silu_backward_same_kernel");
+    k.fn_add_silu_bw_bcast = try cuda_ctx.get_function("add_silu_backward_bcast_kernel");
     // Backward structured
-    k.fn_mul_bw_same = try cuda_ctx.getFunction("mul_backward_same_kernel");
-    k.fn_mul_bw_bcast_ga = try cuda_ctx.getFunction("mul_backward_broadcast_b_ga_kernel");
-    k.fn_mul_bw_bcast_gb = try cuda_ctx.getFunction("mul_backward_broadcast_b_gb_kernel");
-    k.fn_reduce_add_bcast = try cuda_ctx.getFunction("reduce_add_to_broadcast_kernel");
-    k.fn_reduce_sub_bcast = try cuda_ctx.getFunction("reduce_sub_to_broadcast_kernel");
-    k.fn_div_bw = try cuda_ctx.getFunction("div_backward_kernel");
-    k.fn_softmax_bw = try cuda_ctx.getFunction("softmax_backward_kernel");
-    k.fn_ln_bw_dx = try cuda_ctx.getFunction("layernorm_backward_dx_kernel");
-    k.fn_ln_bw_dg_db = try cuda_ctx.getFunction("layernorm_backward_dgamma_dbeta_kernel");
-    k.fn_scatter_add = try cuda_ctx.getFunction("scatter_add_kernel");
+    k.fn_mul_bw_same = try cuda_ctx.get_function("mul_backward_same_kernel");
+    k.fn_mul_bw_bcast_ga = try cuda_ctx.get_function("mul_backward_broadcast_b_ga_kernel");
+    k.fn_mul_bw_bcast_gb = try cuda_ctx.get_function("mul_backward_broadcast_b_gb_kernel");
+    k.fn_reduce_add_bcast = try cuda_ctx.get_function("reduce_add_to_broadcast_kernel");
+    k.fn_reduce_sub_bcast = try cuda_ctx.get_function("reduce_sub_to_broadcast_kernel");
+    k.fn_div_bw = try cuda_ctx.get_function("div_backward_kernel");
+    k.fn_softmax_bw = try cuda_ctx.get_function("softmax_backward_kernel");
+    k.fn_ln_bw_dx = try cuda_ctx.get_function("layernorm_backward_dx_kernel");
+    k.fn_ln_bw_dg_db = try cuda_ctx.get_function("layernorm_backward_dgamma_dbeta_kernel");
+    k.fn_scatter_add = try cuda_ctx.get_function("scatter_add_kernel");
 }
 
-fn loadKernelsLossAndMisc(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
+fn load_kernels_loss_and_misc(cuda_ctx: *CudaContext, k: *KernelHandles) !void {
     // Loss
-    k.fn_ce_fwd = try cuda_ctx.getFunction("cross_entropy_forward_kernel");
-    k.fn_ce_bw = try cuda_ctx.getFunction("cross_entropy_backward_kernel");
-    k.fn_mse_fwd = try cuda_ctx.getFunction("mse_forward_kernel");
-    k.fn_mse_bw = try cuda_ctx.getFunction("mse_backward_kernel");
-    k.fn_bce_fwd = try cuda_ctx.getFunction("bce_forward_kernel");
-    k.fn_bce_bw = try cuda_ctx.getFunction("bce_backward_kernel");
+    k.fn_ce_fwd = try cuda_ctx.get_function("cross_entropy_forward_kernel");
+    k.fn_ce_bw = try cuda_ctx.get_function("cross_entropy_backward_kernel");
+    k.fn_mse_fwd = try cuda_ctx.get_function("mse_forward_kernel");
+    k.fn_mse_bw = try cuda_ctx.get_function("mse_backward_kernel");
+    k.fn_bce_fwd = try cuda_ctx.get_function("bce_forward_kernel");
+    k.fn_bce_bw = try cuda_ctx.get_function("bce_backward_kernel");
     // Utility
-    k.fn_fill = try cuda_ctx.getFunction("fill_kernel");
-    k.fn_accum_grad = try cuda_ctx.getFunction("accum_grad_kernel");
-    k.fn_dropout = try cuda_ctx.getFunction("dropout_kernel");
+    k.fn_fill = try cuda_ctx.get_function("fill_kernel");
+    k.fn_accum_grad = try cuda_ctx.get_function("accum_grad_kernel");
+    k.fn_dropout = try cuda_ctx.get_function("dropout_kernel");
     // Reduction
-    k.fn_reduce_sum_rows = try cuda_ctx.getFunction("reduction_sum_rows_kernel");
-    k.fn_reduce_sum_cols = try cuda_ctx.getFunction("reduction_sum_cols_kernel");
-    k.fn_reduce_sum_1d = try cuda_ctx.getFunction("reduction_sum_1d_kernel");
+    k.fn_reduce_sum_rows = try cuda_ctx.get_function("reduction_sum_rows_kernel");
+    k.fn_reduce_sum_cols = try cuda_ctx.get_function("reduction_sum_cols_kernel");
+    k.fn_reduce_sum_1d = try cuda_ctx.get_function("reduction_sum_1d_kernel");
     // Optimizer
-    k.fn_adam_step = try cuda_ctx.getFunction("adam_step_kernel");
-    k.fn_norm_sq = try cuda_ctx.getFunction("norm_sq_kernel");
-    k.fn_scale_grad = try cuda_ctx.getFunction("scale_grad_kernel");
+    k.fn_adam_step = try cuda_ctx.get_function("adam_step_kernel");
+    k.fn_norm_sq = try cuda_ctx.get_function("norm_sq_kernel");
+    k.fn_scale_grad = try cuda_ctx.get_function("scale_grad_kernel");
 }
 
 /// allocParamBuffers の戻り値: パラメータノード + 連続勾配バッファの情報。
@@ -239,12 +239,12 @@ const ParamAllocResult = struct {
 
 /// パラメータノードと連続勾配バッファを GPU 上に確保する。
 /// 呼び出し側 (init) が成功時の所有権を引き受ける。
-fn allocParamBuffers(
+fn alloc_param_buffers(
     cuda_ctx: *CudaContext,
     allocator: Allocator,
     module: *const Module,
 ) !ParamAllocResult {
-    const count = module.paramCount();
+    const count = module.param_count();
     const param_nodes = try allocator.alloc(DiffCudaNode, count);
     errdefer allocator.free(param_nodes);
     const param_grad_dptrs = try allocator.alloc(CUdeviceptr, count);
@@ -252,25 +252,25 @@ fn allocParamBuffers(
 
     // Compute total gradient size and allocate one contiguous buffer
     var total_grad_floats: usize = 0;
-    for (0..count) |i| total_grad_floats += module.paramSize(.{ .index = i });
+    for (0..count) |i| total_grad_floats += module.param_size(.{ .index = i });
     const grad_base_dptr = if (total_grad_floats > 0)
-        try cuda_ctx.allocBuffer(total_grad_floats * @sizeOf(f32))
+        try cuda_ctx.alloc_buffer(total_grad_floats * @sizeOf(f32))
     else
         @as(CUdeviceptr, 0);
-    errdefer if (total_grad_floats > 0) cuda_ctx.freeBuffer(grad_base_dptr);
-    if (total_grad_floats > 0) try cuda_ctx.memsetZero(grad_base_dptr, total_grad_floats);
+    errdefer if (total_grad_floats > 0) cuda_ctx.free_buffer(grad_base_dptr);
+    if (total_grad_floats > 0) try cuda_ctx.memset_zero(grad_base_dptr, total_grad_floats);
 
     var grad_offset: usize = 0;
     var alloc_count: usize = 0;
-    errdefer for (param_nodes[0..alloc_count]) |node| cuda_ctx.freeBuffer(node.data);
+    errdefer for (param_nodes[0..alloc_count]) |node| cuda_ctx.free_buffer(node.data);
     for (module.params.items, 0..) |meta, i| {
-        const size = module.paramSize(.{ .index = i });
-        const dptr = try cuda_ctx.allocBuffer(size * @sizeOf(f32));
+        const size = module.param_size(.{ .index = i });
+        const dptr = try cuda_ctx.alloc_buffer(size * @sizeOf(f32));
         const grad_dptr = grad_base_dptr + grad_offset * @sizeOf(f32);
 
         param_nodes[i] = .{
             .data = dptr,
-            .shape = ops.initShapeArray(meta.shape),
+            .shape = ops.init_shape_array(meta.shape),
             .ndim = meta.shape.len,
             .grad = grad_dptr,
             .backward_fn = null,
@@ -320,10 +320,10 @@ pub const DiffCudaRuntime = struct {
     ) !DiffCudaRuntime {
         // Load PTX module
         const ptx_data = @embedFile("backend/cuda_kernels.ptx");
-        try cuda_ctx.loadModule(@ptrCast(ptx_data.ptr));
+        try cuda_ctx.load_module(@ptrCast(ptx_data.ptr));
 
-        const k = try loadKernelHandles(cuda_ctx);
-        const params = try allocParamBuffers(cuda_ctx, allocator, module);
+        const k = try load_kernel_handles(cuda_ctx);
+        const params = try alloc_param_buffers(cuda_ctx, allocator, module);
 
         return .{
             .allocator = allocator,
@@ -345,21 +345,21 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn deinit(self: *DiffCudaRuntime) void {
-        self.freeArenaGpuBuffers();
+        self.free_arena_gpu_buffers();
         self.arena_gpu_bufs.deinit(self.allocator);
         self.arena_gpu_sizes.deinit(self.allocator);
         self.gpu_pool.deinit();
         self.arena.deinit();
         for (self.param_nodes) |node| {
-            self.cuda_ctx.freeBuffer(node.data);
+            self.cuda_ctx.free_buffer(node.data);
         }
-        if (self.total_grad_floats > 0) self.cuda_ctx.freeBuffer(self.grad_base_dptr);
+        if (self.total_grad_floats > 0) self.cuda_ctx.free_buffer(self.grad_base_dptr);
         self.allocator.free(self.param_nodes);
         self.allocator.free(self.param_grad_dptrs);
         self.topo_buf.deinit(self.allocator);
     }
 
-    fn freeArenaGpuBuffers(self: *DiffCudaRuntime) void {
+    fn free_arena_gpu_buffers(self: *DiffCudaRuntime) void {
         for (self.arena_gpu_bufs.items, self.arena_gpu_sizes.items) |dptr, size_bytes| {
             self.gpu_pool.release(dptr, size_bytes);
         }
@@ -367,18 +367,18 @@ pub const DiffCudaRuntime = struct {
         self.arena_gpu_sizes.clearRetainingCapacity();
     }
 
-    pub fn resetArena(self: *DiffCudaRuntime) void {
-        self.freeArenaGpuBuffers();
+    pub fn reset_arena(self: *DiffCudaRuntime) void {
+        self.free_arena_gpu_buffers();
         _ = self.arena.reset(.retain_capacity);
         for (self.param_nodes) |*node| {
             node.visited = false;
         }
     }
 
-    pub fn zeroGrad(self: *DiffCudaRuntime) void {
+    pub fn zero_grad(self: *DiffCudaRuntime) void {
         // Single async memset for the entire contiguous gradient buffer
         if (self.total_grad_floats > 0)
-            self.cuda_ctx.memsetZeroAsync(
+            self.cuda_ctx.memset_zero_async(
                 self.grad_base_dptr,
                 self.total_grad_floats,
             ) catch unreachable;
@@ -387,15 +387,15 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    fn arenaAlloc(self: *DiffCudaRuntime) Allocator {
+    fn arena_alloc(self: *DiffCudaRuntime) Allocator {
         return self.arena.allocator();
     }
 
     /// GPU メモリ確保 (arena tracked, pool 優先)
-    fn allocGpuBuf(self: *DiffCudaRuntime, num_floats: usize) CUdeviceptr {
+    fn alloc_gpu_buf(self: *DiffCudaRuntime, num_floats: usize) CUdeviceptr {
         const size_bytes = num_floats * @sizeOf(f32);
-        const dptr = self.gpu_pool.acquire(size_bytes) orelse (self.cuda_ctx.allocBuffer(
-            cuda.GpuMemPool.bucketSize(cuda.GpuMemPool.bucketIndex(size_bytes)),
+        const dptr = self.gpu_pool.acquire(size_bytes) orelse (self.cuda_ctx.alloc_buffer(
+            cuda.GpuMemPool.bucket_size(cuda.GpuMemPool.bucket_index(size_bytes)),
         ) catch unreachable);
         self.arena_gpu_bufs.append(self.allocator, dptr) catch unreachable;
         self.arena_gpu_sizes.append(self.allocator, size_bytes) catch unreachable;
@@ -403,28 +403,28 @@ pub const DiffCudaRuntime = struct {
     }
 
     /// GPU メモリ確保 + ゼロ初期化
-    fn allocGpuBufZeroed(self: *DiffCudaRuntime, num_floats: usize) CUdeviceptr {
-        const dptr = self.allocGpuBuf(num_floats);
-        self.cuda_ctx.memsetZero(dptr, num_floats) catch unreachable;
+    fn alloc_gpu_buf_zeroed(self: *DiffCudaRuntime, num_floats: usize) CUdeviceptr {
+        const dptr = self.alloc_gpu_buf(num_floats);
+        self.cuda_ctx.memset_zero(dptr, num_floats) catch unreachable;
         return dptr;
     }
 
-    fn allocContext(self: *DiffCudaRuntime, comptime T: type) *T {
-        return self.arenaAlloc().create(T) catch unreachable;
+    fn alloc_context(self: *DiffCudaRuntime, comptime T: type) *T {
+        return self.arena_alloc().create(T) catch unreachable;
     }
 
     // ── Node creation ──
 
-    pub fn makeNode(
+    pub fn make_node(
         self: *DiffCudaRuntime,
         dptr: CUdeviceptr,
         shape_slice: []const usize,
         requires_grad: bool,
     ) *DiffCudaNode {
-        const node = self.arenaAlloc().create(DiffCudaNode) catch unreachable;
+        const node = self.arena_alloc().create(DiffCudaNode) catch unreachable;
         node.* = .{
             .data = dptr,
-            .shape = ops.initShapeArray(shape_slice),
+            .shape = ops.init_shape_array(shape_slice),
             .ndim = shape_slice.len,
             .grad = null,
             .backward_fn = null,
@@ -438,21 +438,21 @@ pub const DiffCudaRuntime = struct {
         return node;
     }
 
-    pub fn makeTensor(self: *DiffCudaRuntime, data: []f32, shape: []const usize) DiffCudaTensor {
+    pub fn make_tensor(self: *DiffCudaRuntime, data: []f32, shape: []const usize) DiffCudaTensor {
         var total: usize = 1;
         for (shape) |s| total *= s;
-        const dptr = self.allocGpuBuf(total);
-        self.cuda_ctx.copyHostToDevice(
+        const dptr = self.alloc_gpu_buf(total);
+        self.cuda_ctx.copy_host_to_device(
             dptr,
             @ptrCast(data.ptr),
             total * @sizeOf(f32),
         ) catch unreachable;
-        return self.makeNode(dptr, shape, false);
+        return self.make_node(dptr, shape, false);
     }
 
     /// allocData returns CPU arena memory (for host-side metadata/indices)
-    pub fn allocData(self: *DiffCudaRuntime, size: usize) []f32 {
-        return self.arenaAlloc().alloc(f32, size) catch unreachable;
+    pub fn alloc_data(self: *DiffCudaRuntime, size: usize) []f32 {
+        return self.arena_alloc().alloc(f32, size) catch unreachable;
     }
 
     // ── Param access ──
@@ -462,10 +462,10 @@ pub const DiffCudaRuntime = struct {
     }
 
     /// D2H copy: パラメータデータを CPU スライスとして返す (デバッグ用)
-    pub fn paramData(self: *DiffCudaRuntime, index: usize) []f32 {
-        const size = self.module.paramSize(.{ .index = index });
-        const buf = self.allocData(size);
-        self.cuda_ctx.copyDeviceToHost(
+    pub fn param_data(self: *DiffCudaRuntime, index: usize) []f32 {
+        const size = self.module.param_size(.{ .index = index });
+        const buf = self.alloc_data(size);
+        self.cuda_ctx.copy_device_to_host(
             @ptrCast(buf.ptr),
             self.param_nodes[index].data,
             size * @sizeOf(f32),
@@ -474,10 +474,10 @@ pub const DiffCudaRuntime = struct {
     }
 
     /// D2H copy: パラメータ勾配を CPU スライスとして返す (デバッグ用)
-    pub fn paramGrad(self: *DiffCudaRuntime, index: usize) []f32 {
-        const size = self.module.paramSize(.{ .index = index });
-        const buf = self.allocData(size);
-        self.cuda_ctx.copyDeviceToHost(
+    pub fn param_grad(self: *DiffCudaRuntime, index: usize) []f32 {
+        const size = self.module.param_size(.{ .index = index });
+        const buf = self.alloc_data(size);
+        self.cuda_ctx.copy_device_to_host(
             @ptrCast(buf.ptr),
             self.param_grad_dptrs[index],
             size * @sizeOf(f32),
@@ -486,16 +486,16 @@ pub const DiffCudaRuntime = struct {
     }
 
     /// GPU スカラー値を CPU にコピー
-    pub fn copyScalarToHost(self: *DiffCudaRuntime, t: DiffCudaTensor) f32 {
+    pub fn copy_scalar_to_host(self: *DiffCudaRuntime, t: DiffCudaTensor) f32 {
         var val: f32 = 0;
-        self.cuda_ctx.copyDeviceToHost(@ptrCast(&val), t.data, @sizeOf(f32)) catch unreachable;
+        self.cuda_ctx.copy_device_to_host(@ptrCast(&val), t.data, @sizeOf(f32)) catch unreachable;
         return val;
     }
 
     /// GPU テンソルを CPU バッファにコピー
-    pub fn copyToHost(self: *DiffCudaRuntime, t: DiffCudaTensor, dst: []f32) void {
-        const total = t.totalElements();
-        self.cuda_ctx.copyDeviceToHost(
+    pub fn copy_to_host(self: *DiffCudaRuntime, t: DiffCudaTensor, dst: []f32) void {
+        const total = t.total_elements();
+        self.cuda_ctx.copy_device_to_host(
             @ptrCast(dst.ptr),
             t.data,
             total * @sizeOf(f32),
@@ -504,15 +504,15 @@ pub const DiffCudaRuntime = struct {
 
     // ── Leaf ops ──
 
-    pub fn constantScalar(self: *DiffCudaRuntime, val: f64, dtype: u32) DiffCudaTensor {
+    pub fn constant_scalar(self: *DiffCudaRuntime, val: f64, dtype: u32) DiffCudaTensor {
         _ = dtype;
-        const dptr = self.allocGpuBuf(1);
+        const dptr = self.alloc_gpu_buf(1);
         var v: f32 = @floatCast(val);
-        self.cuda_ctx.copyHostToDevice(dptr, @ptrCast(&v), @sizeOf(f32)) catch unreachable;
-        return self.makeNode(dptr, &.{1}, false);
+        self.cuda_ctx.copy_host_to_device(dptr, @ptrCast(&v), @sizeOf(f32)) catch unreachable;
+        return self.make_node(dptr, &.{1}, false);
     }
 
-    pub fn constantData(
+    pub fn constant_data(
         self: *DiffCudaRuntime,
         data: [*]const u8,
         len: usize,
@@ -521,17 +521,17 @@ pub const DiffCudaRuntime = struct {
     ) DiffCudaTensor {
         _ = dtype;
         const n_floats = len / @sizeOf(f32);
-        const dptr = self.allocGpuBuf(n_floats);
-        self.cuda_ctx.copyHostToDevice(
+        const dptr = self.alloc_gpu_buf(n_floats);
+        self.cuda_ctx.copy_host_to_device(
             dptr,
             @ptrCast(data),
             n_floats * @sizeOf(f32),
         ) catch unreachable;
-        return self.makeNode(dptr, new_shape, false);
+        return self.make_node(dptr, new_shape, false);
     }
 
-    pub fn stopGradient(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        return self.makeNode(x.data, x.shape[0..x.ndim], false);
+    pub fn stop_gradient(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
+        return self.make_node(x.data, x.shape[0..x.ndim], false);
     }
 
     // ── Training mode ──
@@ -549,16 +549,16 @@ pub const DiffCudaRuntime = struct {
     // ════════════════════════════════════════════════════════════════
 
     pub fn negative(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_negative, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_negative, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardNegative;
+            node.backward_fn = &backward_negative;
         }
         return node;
     }
@@ -567,32 +567,32 @@ pub const DiffCudaRuntime = struct {
         rt: *DiffCudaRuntime,
     };
 
-    fn backwardNegative(self_node: *DiffCudaNode) void {
+    fn backward_negative(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
+            const total = self_node.total_elements();
             // ga -= go → accum_scaled(ga, go, -1.0)
             const go = self_node.grad.?;
             // Use scale kernel: tmp = -go, then accum
-            const tmp = rt.allocGpuBuf(total);
-            ops.dispatchElementwise(rt.cuda_ctx, rt.kernels.fn_negative, tmp, go, total);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, total);
+            const tmp = rt.alloc_gpu_buf(total);
+            ops.dispatch_elementwise(rt.cuda_ctx, rt.kernels.fn_negative, tmp, go, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, total);
         }
     }
 
     pub fn gelu(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_gelu, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_gelu, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = x.data }; // cache input x
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardGelu;
+            node.backward_fn = &backward_gelu;
         }
         return node;
     }
@@ -602,27 +602,27 @@ pub const DiffCudaRuntime = struct {
         cache_dptr: CUdeviceptr,
     };
 
-    fn backwardGelu(self_node: *DiffCudaNode) void {
+    fn backward_gelu(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_gelu_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn silu(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        const sig_cache = self.allocGpuBuf(total);
-        ops.dispatchSiluFwdCache(
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        const sig_cache = self.alloc_gpu_buf(total);
+        ops.dispatch_silu_fwd_cache(
             self.cuda_ctx,
             self.kernels.fn_silu_fwd_cache,
             out_dptr,
@@ -630,13 +630,13 @@ pub const DiffCudaRuntime = struct {
             x.data,
             total,
         );
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(SiluContext);
+            const ctx = self.alloc_context(SiluContext);
             ctx.* = .{ .rt = self, .sig_cache_dptr = sig_cache };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSilu;
+            node.backward_fn = &backward_silu;
         }
         return node;
     }
@@ -646,32 +646,32 @@ pub const DiffCudaRuntime = struct {
         sig_cache_dptr: CUdeviceptr,
     };
 
-    fn backwardSilu(self_node: *DiffCudaNode) void {
+    fn backward_silu(self_node: *DiffCudaNode) void {
         const ctx: *SiluContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchSiluBackward(
+            ops.dispatch_silu_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_silu_bw,
                 ga,
                 self_node.grad.?,
                 pa.data,
                 ctx.sig_cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     // ── Fused Add + SiLU ──
 
-    pub fn addSilu(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
+    pub fn add_silu(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
+        const a_total = a.total_elements();
+        const b_total = b.total_elements();
         const rg = a.requires_grad or b.requires_grad;
-        const out_dptr = self.allocGpuBuf(a_total);
-        const sig_cache = self.allocGpuBuf(a_total);
-        ops.dispatchAddSiluFwdCache(
+        const out_dptr = self.alloc_gpu_buf(a_total);
+        const sig_cache = self.alloc_gpu_buf(a_total);
+        ops.dispatch_add_silu_fwd_cache(
             self.cuda_ctx,
             self.kernels.fn_add_silu_fwd_cache,
             out_dptr,
@@ -681,17 +681,17 @@ pub const DiffCudaRuntime = struct {
             a_total,
             b_total,
         );
-        const node = self.makeNode(out_dptr, a.shape[0..a.ndim], rg);
+        const node = self.make_node(out_dptr, a.shape[0..a.ndim], rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            const ctx = self.allocContext(AddSiluContext);
+            const ctx = self.alloc_context(AddSiluContext);
             ctx.* = .{ .rt = self, .sig_cache_dptr = sig_cache };
             node.context = @ptrCast(ctx);
             if (a_total == b_total) {
-                node.backward_fn = &backwardAddSiluSame;
+                node.backward_fn = &backward_add_silu_same;
             } else {
-                node.backward_fn = &backwardAddSiluBcast;
+                node.backward_fn = &backward_add_silu_bcast;
             }
         }
         return node;
@@ -702,16 +702,16 @@ pub const DiffCudaRuntime = struct {
         sig_cache_dptr: CUdeviceptr,
     };
 
-    fn backwardAddSiluSame(self_node: *DiffCudaNode) void {
+    fn backward_add_silu_same(self_node: *DiffCudaNode) void {
         const ctx: *AddSiluContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const n = self_node.totalElements();
-        const ga = pa.grad orelse rt.allocGpuBufZeroed(n);
-        const gb = pb.grad orelse rt.allocGpuBufZeroed(n);
-        ops.dispatchAddSiluBackwardSame(
+        const n = self_node.total_elements();
+        const ga = pa.grad orelse rt.alloc_gpu_buf_zeroed(n);
+        const gb = pb.grad orelse rt.alloc_gpu_buf_zeroed(n);
+        ops.dispatch_add_silu_backward_same(
             rt.cuda_ctx,
             rt.kernels.fn_add_silu_bw_same,
             ga,
@@ -724,17 +724,17 @@ pub const DiffCudaRuntime = struct {
         );
     }
 
-    fn backwardAddSiluBcast(self_node: *DiffCudaNode) void {
+    fn backward_add_silu_bcast(self_node: *DiffCudaNode) void {
         const ctx: *AddSiluContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        const ga = pa.grad orelse rt.allocGpuBufZeroed(a_total);
-        const gb = pb.grad orelse rt.allocGpuBufZeroed(b_total);
-        ops.dispatchAddSiluBackwardBcast(
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
+        const ga = pa.grad orelse rt.alloc_gpu_buf_zeroed(a_total);
+        const gb = pb.grad orelse rt.alloc_gpu_buf_zeroed(b_total);
+        ops.dispatch_add_silu_backward_bcast(
             rt.cuda_ctx,
             rt.kernels.fn_add_silu_bw_bcast,
             ga,
@@ -749,249 +749,249 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn relu(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_relu, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_relu, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = x.data };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardRelu;
+            node.backward_fn = &backward_relu;
         }
         return node;
     }
 
-    fn backwardRelu(self_node: *DiffCudaNode) void {
+    fn backward_relu(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_relu_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn sigmoid(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_sigmoid, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_sigmoid, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = out_dptr }; // cache output
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSigmoid;
+            node.backward_fn = &backward_sigmoid;
         }
         return node;
     }
 
-    fn backwardSigmoid(self_node: *DiffCudaNode) void {
+    fn backward_sigmoid(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_sigmoid_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
-    pub fn tanh_(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_tanh, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+    pub fn tanh(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_tanh, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = out_dptr };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardTanh;
+            node.backward_fn = &backward_tanh;
         }
         return node;
     }
 
-    fn backwardTanh(self_node: *DiffCudaNode) void {
+    fn backward_tanh(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_tanh_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn exp(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_exp, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_exp, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = out_dptr };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardExp;
+            node.backward_fn = &backward_exp;
         }
         return node;
     }
 
-    fn backwardExp(self_node: *DiffCudaNode) void {
+    fn backward_exp(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_exp_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn log(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_log, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_log, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = x.data };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardLog;
+            node.backward_fn = &backward_log;
         }
         return node;
     }
 
-    fn backwardLog(self_node: *DiffCudaNode) void {
+    fn backward_log(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_log_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn square(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_square, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_square, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = x.data };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSquare;
+            node.backward_fn = &backward_square;
         }
         return node;
     }
 
-    fn backwardSquare(self_node: *DiffCudaNode) void {
+    fn backward_square(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_square_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn abs(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_abs, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_abs, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = x.data };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardAbs;
+            node.backward_fn = &backward_abs;
         }
         return node;
     }
 
-    fn backwardAbs(self_node: *DiffCudaNode) void {
+    fn backward_abs(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_abs_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
 
     pub fn sqrt(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchElementwise(self.cuda_ctx, self.kernels.fn_sqrt, out_dptr, x.data, total);
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_elementwise(self.cuda_ctx, self.kernels.fn_sqrt, out_dptr, x.data, total);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(UnaryBwContext);
+            const ctx = self.alloc_context(UnaryBwContext);
             ctx.* = .{ .rt = self, .cache_dptr = out_dptr }; // cache output
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSqrt;
+            node.backward_fn = &backward_sqrt;
         }
         return node;
     }
 
-    fn backwardSqrt(self_node: *DiffCudaNode) void {
+    fn backward_sqrt(self_node: *DiffCudaNode) void {
         const ctx: *UnaryBwContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchBackwardElementwise3(
+            ops.dispatch_backward_elementwise3(
                 rt.cuda_ctx,
                 rt.kernels.fn_sqrt_bw,
                 ga,
                 self_node.grad.?,
                 ctx.cache_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
@@ -1002,8 +1002,8 @@ pub const DiffCudaRuntime = struct {
         min_val: f32,
         max_val: f32,
     ) DiffCudaTensor {
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
         // clamp_kernel(out, x, min, max, n)
         var n_i: c_int = @intCast(total);
         var mn: f32 = min_val;
@@ -1015,20 +1015,20 @@ pub const DiffCudaRuntime = struct {
             @ptrCast(&mx),
             @ptrCast(&n_i),
         };
-        self.cuda_ctx.launchKernel(
+        self.cuda_ctx.launch_kernel(
             self.kernels.fn_clamp,
-            .{ ops.gridFor(total), 1, 1 },
+            .{ ops.grid_for(total), 1, 1 },
             .{ ops.BLOCK_SIZE, 1, 1 },
             0,
             &params,
         ) catch unreachable;
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(ClampContext);
+            const ctx = self.alloc_context(ClampContext);
             ctx.* = .{ .rt = self, .min_val = min_val, .max_val = max_val };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardClamp;
+            node.backward_fn = &backward_clamp;
         }
         return node;
     }
@@ -1039,12 +1039,12 @@ pub const DiffCudaRuntime = struct {
         max_val: f32,
     };
 
-    fn backwardClamp(self_node: *DiffCudaNode) void {
+    fn backward_clamp(self_node: *DiffCudaNode) void {
         const ctx: *ClampContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchClampBackward(
+            ops.dispatch_clamp_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_clamp_bw,
                 ga,
@@ -1052,7 +1052,7 @@ pub const DiffCudaRuntime = struct {
                 pa.data,
                 ctx.min_val,
                 ctx.max_val,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
@@ -1064,7 +1064,7 @@ pub const DiffCudaRuntime = struct {
     /// 放送対応の二項演算ノードを構築する共通ヘルパー。
     /// out_dptr はすでに計算済みのバッファ、shape_src は出力形状を提供するテンソル、
     /// backward_fn は rg=true の場合に設定される backward 関数。
-    fn makeBinopNode(
+    fn make_binop_node(
         self: *DiffCudaRuntime,
         out_dptr: CUdeviceptr,
         shape_src: DiffCudaTensor,
@@ -1073,11 +1073,11 @@ pub const DiffCudaRuntime = struct {
         rg: bool,
         backward_fn: BackwardFn,
     ) DiffCudaTensor {
-        const node = self.makeNode(out_dptr, shape_src.shape[0..shape_src.ndim], rg);
+        const node = self.make_node(out_dptr, shape_src.shape[0..shape_src.ndim], rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
             node.backward_fn = backward_fn;
@@ -1086,13 +1086,13 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn add(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
+        const a_total = a.total_elements();
+        const b_total = b.total_elements();
         const rg = a.requires_grad or b.requires_grad;
 
         if (a_total == b_total) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_add,
                 out_dptr,
@@ -1101,12 +1101,12 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            return self.makeBinopNode(out_dptr, a, a, b, rg, &backwardAddSame);
+            return self.make_binop_node(out_dptr, a, a, b, rg, &backward_add_same);
         }
 
         if (b_total < a_total and a_total % b_total == 0) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_add,
                 out_dptr,
@@ -1115,12 +1115,12 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            return self.makeBinopNode(out_dptr, a, a, b, rg, &backwardAddBroadcastB);
+            return self.make_binop_node(out_dptr, a, a, b, rg, &backward_add_broadcast_b);
         }
 
         if (a_total < b_total and b_total % a_total == 0) {
-            const out_dptr = self.allocGpuBuf(b_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(b_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_add,
                 out_dptr,
@@ -1129,39 +1129,39 @@ pub const DiffCudaRuntime = struct {
                 b_total,
                 a_total,
             );
-            return self.makeBinopNode(out_dptr, b, a, b, rg, &backwardAddBroadcastA);
+            return self.make_binop_node(out_dptr, b, a, b, rg, &backward_add_broadcast_a);
         }
 
         @panic("add: incompatible shapes for broadcast");
     }
 
-    fn backwardAddSame(self_node: *DiffCudaNode) void {
+    fn backward_add_same(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const total = self_node.totalElements();
+        const total = self_node.total_elements();
         if (pa.grad) |ga| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, total);
         }
         if (pb.grad) |gb| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, go, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, go, total);
         }
     }
 
-    fn backwardAddBroadcastB(self_node: *DiffCudaNode) void {
+    fn backward_add_broadcast_b(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
         if (pa.grad) |ga| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, a_total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, a_total);
         }
-        if (pb.grad) |gb| ops.dispatchReduceToBroadcast(
+        if (pb.grad) |gb| ops.dispatch_reduce_to_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_reduce_add_bcast,
             gb,
@@ -1171,15 +1171,15 @@ pub const DiffCudaRuntime = struct {
         );
     }
 
-    fn backwardAddBroadcastA(self_node: *DiffCudaNode) void {
+    fn backward_add_broadcast_a(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| ops.dispatchReduceToBroadcast(
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
+        if (pa.grad) |ga| ops.dispatch_reduce_to_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_reduce_add_bcast,
             ga,
@@ -1188,18 +1188,18 @@ pub const DiffCudaRuntime = struct {
             a_total,
         );
         if (pb.grad) |gb| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, go, b_total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, go, b_total);
         }
     }
 
     pub fn sub(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
+        const a_total = a.total_elements();
+        const b_total = b.total_elements();
         const rg = a.requires_grad or b.requires_grad;
 
         if (a_total == b_total) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_sub,
                 out_dptr,
@@ -1208,21 +1208,21 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            const node = self.makeNode(out_dptr, a.shape[0..a.ndim], rg);
+            const node = self.make_node(out_dptr, a.shape[0..a.ndim], rg);
             if (rg) {
                 node.parents[0] = a;
                 node.parents[1] = b;
-                const ctx = self.allocContext(RtContext);
+                const ctx = self.alloc_context(RtContext);
                 ctx.* = .{ .rt = self };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardSubSame;
+                node.backward_fn = &backward_sub_same;
             }
             return node;
         }
 
         if (b_total < a_total and a_total % b_total == 0) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_sub,
                 out_dptr,
@@ -1231,14 +1231,14 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            const node = self.makeNode(out_dptr, a.shape[0..a.ndim], rg);
+            const node = self.make_node(out_dptr, a.shape[0..a.ndim], rg);
             if (rg) {
                 node.parents[0] = a;
                 node.parents[1] = b;
-                const ctx = self.allocContext(RtContext);
+                const ctx = self.alloc_context(RtContext);
                 ctx.* = .{ .rt = self };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardSubBroadcastB;
+                node.backward_fn = &backward_sub_broadcast_b;
             }
             return node;
         }
@@ -1246,36 +1246,36 @@ pub const DiffCudaRuntime = struct {
         @panic("sub: incompatible shapes for broadcast");
     }
 
-    fn backwardSubSame(self_node: *DiffCudaNode) void {
+    fn backward_sub_same(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const total = self_node.totalElements();
+        const total = self_node.total_elements();
         if (pa.grad) |ga| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, total);
         }
         if (pb.grad) |gb| {
             // gb -= go
-            const tmp = rt.allocGpuBuf(total);
-            ops.dispatchElementwise(rt.cuda_ctx, rt.kernels.fn_negative, tmp, go, total);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, tmp, total);
+            const tmp = rt.alloc_gpu_buf(total);
+            ops.dispatch_elementwise(rt.cuda_ctx, rt.kernels.fn_negative, tmp, go, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, tmp, total);
         }
     }
 
-    fn backwardSubBroadcastB(self_node: *DiffCudaNode) void {
+    fn backward_sub_broadcast_b(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
         if (pa.grad) |ga| {
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, a_total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, go, a_total);
         }
-        if (pb.grad) |gb| ops.dispatchReduceToBroadcast(
+        if (pb.grad) |gb| ops.dispatch_reduce_to_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_reduce_sub_bcast,
             gb,
@@ -1286,13 +1286,13 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn mul(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
+        const a_total = a.total_elements();
+        const b_total = b.total_elements();
         const rg = a.requires_grad or b.requires_grad;
 
         if (a_total == b_total) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_mul,
                 out_dptr,
@@ -1301,12 +1301,12 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            return self.makeBinopNode(out_dptr, a, a, b, rg, &backwardMulSame);
+            return self.make_binop_node(out_dptr, a, a, b, rg, &backward_mul_same);
         }
 
         if (b_total <= a_total and a_total % b_total == 0) {
-            const out_dptr = self.allocGpuBuf(a_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(a_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_mul,
                 out_dptr,
@@ -1315,12 +1315,12 @@ pub const DiffCudaRuntime = struct {
                 a_total,
                 b_total,
             );
-            return self.makeBinopNode(out_dptr, a, a, b, rg, &backwardMulBroadcastB);
+            return self.make_binop_node(out_dptr, a, a, b, rg, &backward_mul_broadcast_b);
         }
 
         if (a_total < b_total and b_total % a_total == 0) {
-            const out_dptr = self.allocGpuBuf(b_total);
-            ops.dispatchBroadcastBinop(
+            const out_dptr = self.alloc_gpu_buf(b_total);
+            ops.dispatch_broadcast_binop(
                 self.cuda_ctx,
                 self.kernels.fn_mul,
                 out_dptr,
@@ -1329,22 +1329,22 @@ pub const DiffCudaRuntime = struct {
                 b_total,
                 a_total,
             );
-            return self.makeBinopNode(out_dptr, b, a, b, rg, &backwardMulBroadcastA);
+            return self.make_binop_node(out_dptr, b, a, b, rg, &backward_mul_broadcast_a);
         }
 
         @panic("mul: incompatible shapes for broadcast");
     }
 
-    fn backwardMulSame(self_node: *DiffCudaNode) void {
+    fn backward_mul_same(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const n = self_node.totalElements();
+        const n = self_node.total_elements();
         // Use a zero buffer for the grad we don't need, or dispatch individually
         if (pa.grad != null and pb.grad != null) {
-            ops.dispatchMulBackwardSame(
+            ops.dispatch_mul_backward_same(
                 rt.cuda_ctx,
                 rt.kernels.fn_mul_bw_same,
                 pa.grad.?,
@@ -1356,25 +1356,25 @@ pub const DiffCudaRuntime = struct {
             );
         } else if (pa.grad) |ga| {
             // ga += go * b
-            const tmp = rt.allocGpuBuf(n);
-            ops.dispatchBroadcastBinop(rt.cuda_ctx, rt.kernels.fn_mul, tmp, go, pb.data, n, n);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, n);
+            const tmp = rt.alloc_gpu_buf(n);
+            ops.dispatch_broadcast_binop(rt.cuda_ctx, rt.kernels.fn_mul, tmp, go, pb.data, n, n);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, n);
         } else if (pb.grad) |gb| {
-            const tmp = rt.allocGpuBuf(n);
-            ops.dispatchBroadcastBinop(rt.cuda_ctx, rt.kernels.fn_mul, tmp, go, pa.data, n, n);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, tmp, n);
+            const tmp = rt.alloc_gpu_buf(n);
+            ops.dispatch_broadcast_binop(rt.cuda_ctx, rt.kernels.fn_mul, tmp, go, pa.data, n, n);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, gb, tmp, n);
         }
     }
 
-    fn backwardMulBroadcastB(self_node: *DiffCudaNode) void {
+    fn backward_mul_broadcast_b(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |ga| ops.dispatchMulBackwardBroadcast(
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
+        if (pa.grad) |ga| ops.dispatch_mul_backward_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_mul_bw_bcast_ga,
             ga,
@@ -1383,7 +1383,7 @@ pub const DiffCudaRuntime = struct {
             a_total,
             b_total,
         );
-        if (pb.grad) |gb| ops.dispatchMulBackwardBroadcast(
+        if (pb.grad) |gb| ops.dispatch_mul_backward_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_mul_bw_bcast_gb,
             gb,
@@ -1394,16 +1394,16 @@ pub const DiffCudaRuntime = struct {
         );
     }
 
-    fn backwardMulBroadcastA(self_node: *DiffCudaNode) void {
+    fn backward_mul_broadcast_a(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
         // a is smaller, b is larger. Swap roles.
-        if (pa.grad) |ga| ops.dispatchMulBackwardBroadcast(
+        if (pa.grad) |ga| ops.dispatch_mul_backward_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_mul_bw_bcast_gb,
             ga,
@@ -1412,7 +1412,7 @@ pub const DiffCudaRuntime = struct {
             b_total,
             a_total,
         );
-        if (pb.grad) |gb| ops.dispatchMulBackwardBroadcast(
+        if (pb.grad) |gb| ops.dispatch_mul_backward_broadcast(
             rt.cuda_ctx,
             rt.kernels.fn_mul_bw_bcast_ga,
             gb,
@@ -1424,8 +1424,8 @@ pub const DiffCudaRuntime = struct {
     }
 
     pub fn div(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
-        const total = a.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
+        const total = a.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
         // div = a * (1/b), but we can compute directly on CPU-side or use a kernel
         // For now, implement as: out[i] = a[i] / b[i] using a two-step approach
         // Actually, there's no div forward kernel. Use scale approach: compute b_inv, then mul.
@@ -1435,52 +1435,52 @@ pub const DiffCudaRuntime = struct {
         // Better: just compute a * (1/b) using existing kernels.
         // But we don't have a reciprocal kernel.
         // For now, fall back to host-side computation for div forward.
-        const a_data = self.allocData(total);
-        const b_data = self.allocData(total);
-        self.cuda_ctx.copyDeviceToHost(
+        const a_data = self.alloc_data(total);
+        const b_data = self.alloc_data(total);
+        self.cuda_ctx.copy_device_to_host(
             @ptrCast(a_data.ptr),
             a.data,
             total * @sizeOf(f32),
         ) catch unreachable;
-        self.cuda_ctx.copyDeviceToHost(
+        self.cuda_ctx.copy_device_to_host(
             @ptrCast(b_data.ptr),
             b.data,
             total * @sizeOf(f32),
         ) catch unreachable;
-        const out_data = self.allocData(total);
+        const out_data = self.alloc_data(total);
         for (0..total) |i| out_data[i] = a_data[i] / b_data[i];
-        self.cuda_ctx.copyHostToDevice(
+        self.cuda_ctx.copy_host_to_device(
             out_dptr,
             @ptrCast(out_data.ptr),
             total * @sizeOf(f32),
         ) catch unreachable;
 
         const rg = a.requires_grad or b.requires_grad;
-        const node = self.makeNode(out_dptr, a.shape[0..a.ndim], rg);
+        const node = self.make_node(out_dptr, a.shape[0..a.ndim], rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardDiv;
+            node.backward_fn = &backward_div;
         }
         return node;
     }
 
-    fn backwardDiv(self_node: *DiffCudaNode) void {
+    fn backward_div(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
-        const n = self_node.totalElements();
+        const n = self_node.total_elements();
         const ga = pa.grad orelse @as(CUdeviceptr, 0);
         const gb = pb.grad orelse @as(CUdeviceptr, 0);
         if (pa.grad != null or pb.grad != null) {
             // Use temp buffers for grads we don't track
-            const real_ga = if (pa.grad != null) ga else rt.allocGpuBufZeroed(n);
-            const real_gb = if (pb.grad != null) gb else rt.allocGpuBufZeroed(n);
-            ops.dispatchDivBackward(
+            const real_ga = if (pa.grad != null) ga else rt.alloc_gpu_buf_zeroed(n);
+            const real_gb = if (pb.grad != null) gb else rt.alloc_gpu_buf_zeroed(n);
+            ops.dispatch_div_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_div_bw,
                 real_ga,
@@ -1498,7 +1498,7 @@ pub const DiffCudaRuntime = struct {
     // ════════════════════════════════════════════════════════════════
 
     /// matmul の出力ノードを構築する共通ヘルパー。
-    fn makeMatmulNode(
+    fn make_matmul_node(
         self: *DiffCudaRuntime,
         out_dptr: CUdeviceptr,
         out_shape: []const usize,
@@ -1507,11 +1507,11 @@ pub const DiffCudaRuntime = struct {
         rg: bool,
         backward_fn: BackwardFn,
     ) DiffCudaTensor {
-        const node = self.makeNode(out_dptr, out_shape, rg);
+        const node = self.make_node(out_dptr, out_shape, rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
             node.backward_fn = backward_fn;
@@ -1519,7 +1519,7 @@ pub const DiffCudaRuntime = struct {
         return node;
     }
 
-    fn matmul2D(
+    fn matmul2d(
         self: *DiffCudaRuntime,
         a: DiffCudaTensor,
         b: DiffCudaTensor,
@@ -1528,7 +1528,7 @@ pub const DiffCudaRuntime = struct {
         const M = a.shape[0];
         const K = a.shape[1];
         const N = b.shape[1];
-        const out_dptr = self.allocGpuBuf(M * N);
+        const out_dptr = self.alloc_gpu_buf(M * N);
         self.cuda_ctx.sgemm(
             CUBLAS_OP_N,
             CUBLAS_OP_N,
@@ -1544,10 +1544,10 @@ pub const DiffCudaRuntime = struct {
             out_dptr,
             @intCast(N),
         ) catch unreachable;
-        return self.makeMatmulNode(out_dptr, &.{ M, N }, a, b, rg, &backwardMatmul2D);
+        return self.make_matmul_node(out_dptr, &.{ M, N }, a, b, rg, &backward_matmul2d);
     }
 
-    fn matmul3D(
+    fn matmul3d(
         self: *DiffCudaRuntime,
         a: DiffCudaTensor,
         b: DiffCudaTensor,
@@ -1557,8 +1557,8 @@ pub const DiffCudaRuntime = struct {
         const M = a.shape[1];
         const K = a.shape[2];
         const N = b.shape[2];
-        const out_dptr = self.allocGpuBuf(B * M * N);
-        self.cuda_ctx.sgemmStridedBatched(
+        const out_dptr = self.alloc_gpu_buf(B * M * N);
+        self.cuda_ctx.sgemm_strided_batched(
             CUBLAS_OP_N,
             CUBLAS_OP_N,
             @intCast(N),
@@ -1577,10 +1577,10 @@ pub const DiffCudaRuntime = struct {
             @intCast(M * N),
             @intCast(B),
         ) catch unreachable;
-        return self.makeMatmulNode(out_dptr, &.{ B, M, N }, a, b, rg, &backwardMatmul3D);
+        return self.make_matmul_node(out_dptr, &.{ B, M, N }, a, b, rg, &backward_matmul3d);
     }
 
-    fn matmul2D3D(
+    fn matmul2_d3d(
         self: *DiffCudaRuntime,
         a: DiffCudaTensor,
         b: DiffCudaTensor,
@@ -1590,7 +1590,7 @@ pub const DiffCudaRuntime = struct {
         const M = a.shape[0];
         const K = a.shape[1];
         const N = b.shape[2];
-        const out_dptr = self.allocGpuBuf(B * M * N);
+        const out_dptr = self.alloc_gpu_buf(B * M * N);
         for (0..B) |batch| {
             const b_off = batch * K * N;
             const o_off = batch * M * N;
@@ -1610,20 +1610,20 @@ pub const DiffCudaRuntime = struct {
                 @intCast(N),
             ) catch unreachable;
         }
-        return self.makeMatmulNode(out_dptr, &.{ B, M, N }, a, b, rg, &backwardMatmul2D3D);
+        return self.make_matmul_node(out_dptr, &.{ B, M, N }, a, b, rg, &backward_matmul2_d3d);
     }
 
     pub fn matmul(self: *DiffCudaRuntime, a: DiffCudaTensor, b: DiffCudaTensor) DiffCudaTensor {
         const rg = a.requires_grad or b.requires_grad;
 
-        if (a.ndim == 2 and b.ndim == 2) return self.matmul2D(a, b, rg);
-        if (a.ndim == 3 and b.ndim == 3) return self.matmul3D(a, b, rg);
-        if (a.ndim == 2 and b.ndim == 3) return self.matmul2D3D(a, b, rg);
+        if (a.ndim == 2 and b.ndim == 2) return self.matmul2d(a, b, rg);
+        if (a.ndim == 3 and b.ndim == 3) return self.matmul3d(a, b, rg);
+        if (a.ndim == 2 and b.ndim == 3) return self.matmul2_d3d(a, b, rg);
 
         @panic("matmul: unsupported shape combination (expected 2D or 3D)");
     }
 
-    fn backwardMatmul2D(self_node: *DiffCudaNode) void {
+    fn backward_matmul2d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
@@ -1633,7 +1633,7 @@ pub const DiffCudaRuntime = struct {
         const K = pa.shape[1];
         const N = pb.shape[1];
         // dA += go @ B^T: sgemm(N=K, M=M, K=N, B^T, go)
-        if (pa.grad) |ga| rt.cuda_ctx.sgemmAccum(
+        if (pa.grad) |ga| rt.cuda_ctx.sgemm_accum(
             CUBLAS_OP_T,
             CUBLAS_OP_N,
             @intCast(K),
@@ -1648,7 +1648,7 @@ pub const DiffCudaRuntime = struct {
             @intCast(K),
         ) catch unreachable;
         // dB += A^T @ go: sgemm(N=N, M=K, K=M, go, A^T)
-        if (pb.grad) |gb| rt.cuda_ctx.sgemmAccum(
+        if (pb.grad) |gb| rt.cuda_ctx.sgemm_accum(
             CUBLAS_OP_N,
             CUBLAS_OP_T,
             @intCast(N),
@@ -1664,7 +1664,7 @@ pub const DiffCudaRuntime = struct {
         ) catch unreachable;
     }
 
-    fn backwardMatmul3D(self_node: *DiffCudaNode) void {
+    fn backward_matmul3d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
@@ -1675,7 +1675,7 @@ pub const DiffCudaRuntime = struct {
         const K = pa.shape[2];
         const N = pb.shape[2];
         // dA += go @ B^T: batched sgemm
-        if (pa.grad) |ga| rt.cuda_ctx.sgemmStridedBatched(
+        if (pa.grad) |ga| rt.cuda_ctx.sgemm_strided_batched(
             CUBLAS_OP_T,
             CUBLAS_OP_N,
             @intCast(K),
@@ -1695,7 +1695,7 @@ pub const DiffCudaRuntime = struct {
             @intCast(B),
         ) catch unreachable;
         // dB += A^T @ go: batched sgemm
-        if (pb.grad) |gb| rt.cuda_ctx.sgemmStridedBatched(
+        if (pb.grad) |gb| rt.cuda_ctx.sgemm_strided_batched(
             CUBLAS_OP_N,
             CUBLAS_OP_T,
             @intCast(N),
@@ -1716,7 +1716,7 @@ pub const DiffCudaRuntime = struct {
         ) catch unreachable;
     }
 
-    fn backwardMatmul2D3D(self_node: *DiffCudaNode) void {
+    fn backward_matmul2_d3d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
@@ -1729,8 +1729,8 @@ pub const DiffCudaRuntime = struct {
         // dA (2D) += sum_b(go_b @ B_b^T): compute batched into temp 3D, then reduce
         if (pa.grad) |ga| {
             // Use batched sgemm into a temp [B, M, K] buffer, then reduce-sum over B
-            const tmp = rt.allocGpuBufZeroed(B * M * K);
-            rt.cuda_ctx.sgemmStridedBatched(
+            const tmp = rt.alloc_gpu_buf_zeroed(B * M * K);
+            rt.cuda_ctx.sgemm_strided_batched(
                 CUBLAS_OP_T,
                 CUBLAS_OP_N,
                 @intCast(K),
@@ -1751,7 +1751,7 @@ pub const DiffCudaRuntime = struct {
             ) catch unreachable;
             // Reduce: ga += sum over batch dimension
             for (0..B) |batch| {
-                ops.dispatchAccumGrad(
+                ops.dispatch_accum_grad(
                     rt.cuda_ctx,
                     rt.kernels.fn_accum_grad,
                     ga,
@@ -1761,7 +1761,7 @@ pub const DiffCudaRuntime = struct {
             }
         }
         // dB (3D) += A^T @ go_b: batched sgemm (A is shared across batches, stride_a=0)
-        if (pb.grad) |gb| rt.cuda_ctx.sgemmStridedBatched(
+        if (pb.grad) |gb| rt.cuda_ctx.sgemm_strided_batched(
             CUBLAS_OP_N,
             CUBLAS_OP_T,
             @intCast(N),
@@ -1791,30 +1791,30 @@ pub const DiffCudaRuntime = struct {
         x: DiffCudaTensor,
         new_shape: []const usize,
     ) DiffCudaTensor {
-        const node = self.makeNode(x.data, new_shape, x.requires_grad);
+        const node = self.make_node(x.data, new_shape, x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardReshape;
+            node.backward_fn = &backward_reshape;
         }
         return node;
     }
 
-    fn backwardReshape(self_node: *DiffCudaNode) void {
+    fn backward_reshape(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
             if (ga == go) return; // same buffer, no-op
-            ops.dispatchAccumGrad(
+            ops.dispatch_accum_grad(
                 rt.cuda_ctx,
                 rt.kernels.fn_accum_grad,
                 ga,
                 go,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
@@ -1828,11 +1828,11 @@ pub const DiffCudaRuntime = struct {
             const R = x.shape[1];
             const C = x.shape[2];
             const total = B * R * C;
-            const out_dptr = self.allocGpuBuf(total);
+            const out_dptr = self.alloc_gpu_buf(total);
             for (0..B) |b| {
                 const in_off = b * R * C;
                 const out_off = b * C * R;
-                ops.dispatchTranspose2d(
+                ops.dispatch_transpose2d(
                     self.cuda_ctx,
                     self.kernels.fn_transpose,
                     out_dptr + out_off * @sizeOf(f32),
@@ -1841,13 +1841,13 @@ pub const DiffCudaRuntime = struct {
                     C,
                 );
             }
-            const node = self.makeNode(out_dptr, &.{ B, C, R }, x.requires_grad);
+            const node = self.make_node(out_dptr, &.{ B, C, R }, x.requires_grad);
             if (x.requires_grad) {
                 node.parents[0] = x;
-                const ctx = self.allocContext(RtContext);
+                const ctx = self.alloc_context(RtContext);
                 ctx.* = .{ .rt = self };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardTranspose3D;
+                node.backward_fn = &backward_transpose3d;
             }
             return node;
         }
@@ -1855,8 +1855,8 @@ pub const DiffCudaRuntime = struct {
         if (x.ndim == 2 and dim1 == 0 and dim2 == 1) {
             const R = x.shape[0];
             const C = x.shape[1];
-            const out_dptr = self.allocGpuBuf(R * C);
-            ops.dispatchTranspose2d(
+            const out_dptr = self.alloc_gpu_buf(R * C);
+            ops.dispatch_transpose2d(
                 self.cuda_ctx,
                 self.kernels.fn_transpose,
                 out_dptr,
@@ -1864,13 +1864,13 @@ pub const DiffCudaRuntime = struct {
                 R,
                 C,
             );
-            const node = self.makeNode(out_dptr, &.{ C, R }, x.requires_grad);
+            const node = self.make_node(out_dptr, &.{ C, R }, x.requires_grad);
             if (x.requires_grad) {
                 node.parents[0] = x;
-                const ctx = self.allocContext(RtContext);
+                const ctx = self.alloc_context(RtContext);
                 ctx.* = .{ .rt = self };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardTranspose2D;
+                node.backward_fn = &backward_transpose2d;
             }
             return node;
         }
@@ -1878,7 +1878,7 @@ pub const DiffCudaRuntime = struct {
         @panic("transpose: unsupported ndim (expected 2D or 3D)");
     }
 
-    fn backwardTranspose3D(self_node: *DiffCudaNode) void {
+    fn backward_transpose3d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
@@ -1888,9 +1888,9 @@ pub const DiffCudaRuntime = struct {
             const R = pa.shape[1];
             const C = pa.shape[2];
             // go is [B, C, R], transpose back to [B, R, C]
-            const tmp = rt.allocGpuBuf(B * R * C);
+            const tmp = rt.alloc_gpu_buf(B * R * C);
             for (0..B) |b| {
-                ops.dispatchTranspose2d(
+                ops.dispatch_transpose2d(
                     rt.cuda_ctx,
                     rt.kernels.fn_transpose,
                     tmp + b * R * C * @sizeOf(f32),
@@ -1899,11 +1899,11 @@ pub const DiffCudaRuntime = struct {
                     R,
                 );
             }
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, B * R * C);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, B * R * C);
         }
     }
 
-    fn backwardTranspose2D(self_node: *DiffCudaNode) void {
+    fn backward_transpose2d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
@@ -1911,9 +1911,9 @@ pub const DiffCudaRuntime = struct {
         if (pa.grad) |ga| {
             const R = pa.shape[0];
             const C = pa.shape[1];
-            const tmp = rt.allocGpuBuf(R * C);
-            ops.dispatchTranspose2d(rt.cuda_ctx, rt.kernels.fn_transpose, tmp, go, C, R);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, R * C);
+            const tmp = rt.alloc_gpu_buf(R * C);
+            ops.dispatch_transpose2d(rt.cuda_ctx, rt.kernels.fn_transpose, tmp, go, C, R);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, R * C);
         }
     }
 
@@ -1923,11 +1923,11 @@ pub const DiffCudaRuntime = struct {
 
     pub fn softmax(self: *DiffCudaRuntime, x: DiffCudaTensor, axis: i64) DiffCudaTensor {
         _ = axis;
-        const total = x.totalElements();
-        const cols = x.lastDim();
+        const total = x.total_elements();
+        const cols = x.last_dim();
         const rows = total / cols;
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchSoftmaxOut(
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_softmax_out(
             self.cuda_ctx,
             self.kernels.fn_softmax_out,
             out_dptr,
@@ -1935,26 +1935,26 @@ pub const DiffCudaRuntime = struct {
             rows,
             cols,
         );
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardSoftmax;
+            node.backward_fn = &backward_softmax;
         }
         return node;
     }
 
-    fn backwardSoftmax(self_node: *DiffCudaNode) void {
+    fn backward_softmax(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
-            const cols = self_node.lastDim();
+            const total = self_node.total_elements();
+            const cols = self_node.last_dim();
             const rows = total / cols;
-            ops.dispatchSoftmaxBackward(
+            ops.dispatch_softmax_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_softmax_bw,
                 ga,
@@ -1971,17 +1971,17 @@ pub const DiffCudaRuntime = struct {
     // ════════════════════════════════════════════════════════════════
 
     /// reductionSum の出力ノードを構築する共通ヘルパー。
-    fn makeReductionSumNode(
+    fn make_reduction_sum_node(
         self: *DiffCudaRuntime,
         out_dptr: CUdeviceptr,
         out_shape: []const usize,
         x: DiffCudaTensor,
         backward_fn: BackwardFn,
     ) DiffCudaTensor {
-        const node = self.makeNode(out_dptr, out_shape, x.requires_grad);
+        const node = self.make_node(out_dptr, out_shape, x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(RtContext);
+            const ctx = self.alloc_context(RtContext);
             ctx.* = .{ .rt = self };
             node.context = @ptrCast(ctx);
             node.backward_fn = backward_fn;
@@ -1989,7 +1989,7 @@ pub const DiffCudaRuntime = struct {
         return node;
     }
 
-    fn reductionSum2D(
+    fn reduction_sum2d(
         self: *DiffCudaRuntime,
         x: DiffCudaTensor,
         actual_axis: usize,
@@ -1997,8 +1997,8 @@ pub const DiffCudaRuntime = struct {
         const rows = x.shape[0];
         const cols = x.shape[1];
         if (actual_axis == 1) {
-            const out_dptr = self.allocGpuBuf(rows);
-            ops.dispatchReductionSumRows(
+            const out_dptr = self.alloc_gpu_buf(rows);
+            ops.dispatch_reduction_sum_rows(
                 self.cuda_ctx,
                 self.kernels.fn_reduce_sum_rows,
                 out_dptr,
@@ -2006,15 +2006,15 @@ pub const DiffCudaRuntime = struct {
                 rows,
                 cols,
             );
-            return self.makeReductionSumNode(
+            return self.make_reduction_sum_node(
                 out_dptr,
                 &.{ rows, 1 },
                 x,
-                &backwardReductionSumAxis1,
+                &backward_reduction_sum_axis1,
             );
         } else {
-            const out_dptr = self.allocGpuBuf(cols);
-            ops.dispatchReductionSumCols(
+            const out_dptr = self.alloc_gpu_buf(cols);
+            ops.dispatch_reduction_sum_cols(
                 self.cuda_ctx,
                 self.kernels.fn_reduce_sum_cols,
                 out_dptr,
@@ -2022,47 +2022,47 @@ pub const DiffCudaRuntime = struct {
                 rows,
                 cols,
             );
-            return self.makeReductionSumNode(
+            return self.make_reduction_sum_node(
                 out_dptr,
                 &.{ 1, cols },
                 x,
-                &backwardReductionSumAxis0,
+                &backward_reduction_sum_axis0,
             );
         }
     }
 
-    fn reductionSum1D(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
-        const out_dptr = self.allocGpuBuf(1);
-        ops.dispatchReductionSum1d(
+    fn reduction_sum1d(self: *DiffCudaRuntime, x: DiffCudaTensor) DiffCudaTensor {
+        const out_dptr = self.alloc_gpu_buf(1);
+        ops.dispatch_reduction_sum1d(
             self.cuda_ctx,
             self.kernels.fn_reduce_sum_1d,
             out_dptr,
             x.data,
-            x.totalElements(),
+            x.total_elements(),
         );
-        return self.makeReductionSumNode(out_dptr, &.{1}, x, &backwardReductionSum1D);
+        return self.make_reduction_sum_node(out_dptr, &.{1}, x, &backward_reduction_sum1d);
     }
 
     // ndim >= 3: flatten around the reduction axis (same as CPU)
-    fn reductionSumND(
+    fn reduction_sum_nd(
         self: *DiffCudaRuntime,
         x: DiffCudaTensor,
         actual_axis: usize,
     ) DiffCudaTensor {
-        const total = x.totalElements();
+        const total = x.total_elements();
         var before: usize = 1;
         for (0..actual_axis) |d| before *= x.shape[d];
         const axis_dim = x.shape[actual_axis];
         if (actual_axis == x.ndim - 1) {
             const flat = self.reshape(x, &.{ total / axis_dim, axis_dim });
-            const reduced = self.reductionSum(flat, 1);
+            const reduced = self.reduction_sum(flat, 1);
             var new_shape: [8]usize = undefined;
             for (0..x.ndim - 1) |d| new_shape[d] = x.shape[d];
             new_shape[x.ndim - 1] = 1;
             return self.reshape(reduced, new_shape[0..x.ndim]);
         } else if (actual_axis == 0) {
             const flat = self.reshape(x, &.{ axis_dim, total / axis_dim });
-            const reduced = self.reductionSum(flat, 0);
+            const reduced = self.reduction_sum(flat, 0);
             var new_shape: [8]usize = undefined;
             new_shape[0] = 1;
             for (1..x.ndim) |d| new_shape[d] = x.shape[d];
@@ -2073,7 +2073,7 @@ pub const DiffCudaRuntime = struct {
             const r3 = self.reshape(x, &.{ before, axis_dim, after });
             const t3 = self.transpose(r3, 1, 2);
             const flat = self.reshape(t3, &.{ before * after, axis_dim });
-            const reduced = self.reductionSum(flat, 1);
+            const reduced = self.reduction_sum(flat, 1);
             var new_shape: [8]usize = undefined;
             for (0..x.ndim) |d| new_shape[d] = x.shape[d];
             new_shape[actual_axis] = 1;
@@ -2081,20 +2081,20 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    pub fn reductionSum(self: *DiffCudaRuntime, x: DiffCudaTensor, axis: i64) DiffCudaTensor {
+    pub fn reduction_sum(self: *DiffCudaRuntime, x: DiffCudaTensor, axis: i64) DiffCudaTensor {
         const actual_axis: usize = if (axis < 0)
             @intCast(@as(i64, @intCast(x.ndim)) + axis)
         else
             @intCast(axis);
 
-        if (x.ndim == 2) return self.reductionSum2D(x, actual_axis);
-        if (x.ndim == 1) return self.reductionSum1D(x);
-        if (x.ndim >= 3) return self.reductionSumND(x, actual_axis);
+        if (x.ndim == 2) return self.reduction_sum2d(x, actual_axis);
+        if (x.ndim == 1) return self.reduction_sum1d(x);
+        if (x.ndim >= 3) return self.reduction_sum_nd(x, actual_axis);
 
         @panic("reductionSum: unsupported ndim/axis combination");
     }
 
-    fn backwardReductionSumAxis1(self_node: *DiffCudaNode) void {
+    fn backward_reduction_sum_axis1(self_node: *DiffCudaNode) void {
         // [rows, cols] → [rows, 1]: go has rows elements
         // Need: ga[r*cols + c] += go[r] for all r, c
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
@@ -2108,7 +2108,7 @@ pub const DiffCudaRuntime = struct {
             for (0..rows) |r| {
                 const ga_row = ga + r * cols * @sizeOf(f32);
                 const go_r = go + r * @sizeOf(f32);
-                ops.dispatchBroadcastBinop(
+                ops.dispatch_broadcast_binop(
                     rt.cuda_ctx,
                     rt.kernels.fn_add,
                     ga_row,
@@ -2121,7 +2121,7 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    fn backwardReductionSumAxis0(self_node: *DiffCudaNode) void {
+    fn backward_reduction_sum_axis0(self_node: *DiffCudaNode) void {
         // [rows, cols] → [1, cols]: go has cols elements
         // Need: ga[r*cols + c] += go[c] for all r, c
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
@@ -2131,7 +2131,7 @@ pub const DiffCudaRuntime = struct {
             const rows = pa.shape[0];
             const cols = pa.shape[1];
             // go[i % cols] = go[c], so broadcast-add works directly
-            ops.dispatchBroadcastBinop(
+            ops.dispatch_broadcast_binop(
                 rt.cuda_ctx,
                 rt.kernels.fn_add,
                 ga,
@@ -2143,14 +2143,14 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    fn backwardReductionSum1D(self_node: *DiffCudaNode) void {
+    fn backward_reduction_sum1d(self_node: *DiffCudaNode) void {
         const ctx: *RtContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const total = pa.totalElements();
+            const total = pa.total_elements();
             // go is scalar [1], broadcast-add to all elements: ga[i] += go[0]
-            ops.dispatchBroadcastBinop(
+            ops.dispatch_broadcast_binop(
                 rt.cuda_ctx,
                 rt.kernels.fn_add,
                 ga,
@@ -2162,25 +2162,25 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    pub fn reductionMean(self: *DiffCudaRuntime, x: DiffCudaTensor, axis: i64) DiffCudaTensor {
+    pub fn reduction_mean(self: *DiffCudaRuntime, x: DiffCudaTensor, axis: i64) DiffCudaTensor {
         // mean = sum / count
-        const s = self.reductionSum(x, axis);
+        const s = self.reduction_sum(x, axis);
         const actual_axis: usize = if (axis < 0)
             @intCast(@as(i64, @intCast(x.ndim)) + axis)
         else
             @intCast(axis);
         const count = x.shape[actual_axis];
         const scale = 1.0 / @as(f32, @floatFromInt(count));
-        const total = s.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        ops.dispatchScale(self.cuda_ctx, self.kernels.fn_scale, out_dptr, s.data, scale, total);
-        const node = self.makeNode(out_dptr, s.shape[0..s.ndim], s.requires_grad);
+        const total = s.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        ops.dispatch_scale(self.cuda_ctx, self.kernels.fn_scale, out_dptr, s.data, scale, total);
+        const node = self.make_node(out_dptr, s.shape[0..s.ndim], s.requires_grad);
         if (s.requires_grad) {
             node.parents[0] = s;
-            const ctx = self.allocContext(ScaleCtx);
+            const ctx = self.alloc_context(ScaleCtx);
             ctx.* = .{ .rt = self, .scale = scale };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardScale;
+            node.backward_fn = &backward_scale;
         }
         return node;
     }
@@ -2190,17 +2190,17 @@ pub const DiffCudaRuntime = struct {
         scale: f32,
     };
 
-    fn backwardScale(self_node: *DiffCudaNode) void {
+    fn backward_scale(self_node: *DiffCudaNode) void {
         const ctx: *ScaleCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
+            const total = self_node.total_elements();
             const go = self_node.grad.?;
             // ga += go * scale
-            const tmp = rt.allocGpuBuf(total);
-            ops.dispatchScale(rt.cuda_ctx, rt.kernels.fn_scale, tmp, go, ctx.scale, total);
-            ops.dispatchAccumGrad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, total);
+            const tmp = rt.alloc_gpu_buf(total);
+            ops.dispatch_scale(rt.cuda_ctx, rt.kernels.fn_scale, tmp, go, ctx.scale, total);
+            ops.dispatch_accum_grad(rt.cuda_ctx, rt.kernels.fn_accum_grad, ga, tmp, total);
         }
     }
 
@@ -2208,7 +2208,7 @@ pub const DiffCudaRuntime = struct {
     // LayerNorm
     // ════════════════════════════════════════════════════════════════
 
-    pub fn layerNorm(
+    pub fn layer_norm(
         self: *DiffCudaRuntime,
         x: DiffCudaTensor,
         gamma: DiffCudaTensor,
@@ -2217,13 +2217,13 @@ pub const DiffCudaRuntime = struct {
         axis: i64,
     ) DiffCudaTensor {
         _ = axis;
-        const total = x.totalElements();
-        const dim = x.lastDim();
+        const total = x.total_elements();
+        const dim = x.last_dim();
         const rows = total / dim;
-        const out_dptr = self.allocGpuBuf(total);
-        const x_norm_dptr = self.allocGpuBuf(total);
-        const inv_stds_dptr = self.allocGpuBuf(rows);
-        ops.dispatchLayerNormFwd(
+        const out_dptr = self.alloc_gpu_buf(total);
+        const x_norm_dptr = self.alloc_gpu_buf(total);
+        const inv_stds_dptr = self.alloc_gpu_buf(rows);
+        ops.dispatch_layer_norm_fwd(
             self.cuda_ctx,
             self.kernels.fn_layernorm_fwd,
             out_dptr,
@@ -2237,15 +2237,15 @@ pub const DiffCudaRuntime = struct {
             eps,
         );
         const rg = x.requires_grad or gamma.requires_grad or beta.requires_grad;
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], rg);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], rg);
         if (rg) {
             node.parents[0] = x;
             node.parents[1] = gamma;
             node.parents[2] = beta;
-            const ctx = self.allocContext(LayerNormContext);
+            const ctx = self.alloc_context(LayerNormContext);
             ctx.* = .{ .rt = self, .x_norm_dptr = x_norm_dptr, .inv_stds_dptr = inv_stds_dptr };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardLayerNorm;
+            node.backward_fn = &backward_layer_norm;
         }
         return node;
     }
@@ -2256,21 +2256,21 @@ pub const DiffCudaRuntime = struct {
         inv_stds_dptr: CUdeviceptr,
     };
 
-    fn backwardLayerNorm(self_node: *DiffCudaNode) void {
+    fn backward_layer_norm(self_node: *DiffCudaNode) void {
         const ctx: *LayerNormContext = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const px = self_node.parents[0].?;
         const pgamma = self_node.parents[1].?;
         const pbeta = self_node.parents[2].?;
         const go = self_node.grad.?;
-        const total = self_node.totalElements();
-        const dim = self_node.lastDim();
+        const total = self_node.total_elements();
+        const dim = self_node.last_dim();
         const rows = total / dim;
 
         if (pbeta.grad != null or pgamma.grad != null) {
-            const gg = pgamma.grad orelse rt.allocGpuBufZeroed(dim);
-            const gb = pbeta.grad orelse rt.allocGpuBufZeroed(dim);
-            ops.dispatchLayerNormBackwardDgDb(
+            const gg = pgamma.grad orelse rt.alloc_gpu_buf_zeroed(dim);
+            const gb = pbeta.grad orelse rt.alloc_gpu_buf_zeroed(dim);
+            ops.dispatch_layer_norm_backward_dg_db(
                 rt.cuda_ctx,
                 rt.kernels.fn_ln_bw_dg_db,
                 gg,
@@ -2283,7 +2283,7 @@ pub const DiffCudaRuntime = struct {
         }
 
         if (px.grad) |gx| {
-            ops.dispatchLayerNormBackwardDx(
+            ops.dispatch_layer_norm_backward_dx(
                 rt.cuda_ctx,
                 rt.kernels.fn_ln_bw_dx,
                 gx,
@@ -2304,12 +2304,12 @@ pub const DiffCudaRuntime = struct {
     pub fn dropout(self: *DiffCudaRuntime, x: DiffCudaTensor, rate: f32) DiffCudaTensor {
         if (!self.training) return x;
 
-        const total = x.totalElements();
-        const out_dptr = self.allocGpuBuf(total);
-        const mask_dptr = self.allocGpuBuf(total);
+        const total = x.total_elements();
+        const out_dptr = self.alloc_gpu_buf(total);
+        const mask_dptr = self.alloc_gpu_buf(total);
         const seed = self.prng.random().int(u64);
         const inv_keep = 1.0 / (1.0 - rate);
-        ops.dispatchDropout(
+        ops.dispatch_dropout(
             self.cuda_ctx,
             self.kernels.fn_dropout,
             out_dptr,
@@ -2320,13 +2320,13 @@ pub const DiffCudaRuntime = struct {
             inv_keep,
             total,
         );
-        const node = self.makeNode(out_dptr, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out_dptr, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(DropoutCtx);
+            const ctx = self.alloc_context(DropoutCtx);
             ctx.* = .{ .rt = self, .mask_dptr = mask_dptr };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardDropout;
+            node.backward_fn = &backward_dropout;
         }
         return node;
     }
@@ -2336,18 +2336,18 @@ pub const DiffCudaRuntime = struct {
         mask_dptr: CUdeviceptr,
     };
 
-    fn backwardDropout(self_node: *DiffCudaNode) void {
+    fn backward_dropout(self_node: *DiffCudaNode) void {
         const ctx: *DropoutCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchDropoutBackward(
+            ops.dispatch_dropout_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_dropout_bw,
                 ga,
                 self_node.grad.?,
                 ctx.mask_dptr,
-                self_node.totalElements(),
+                self_node.total_elements(),
             );
         }
     }
@@ -2363,15 +2363,15 @@ pub const DiffCudaRuntime = struct {
     ) DiffCudaTensor {
         const embed_dim = table.shape[1];
         const num_indices = indices.len;
-        const out_dptr = self.allocGpuBuf(num_indices * embed_dim);
+        const out_dptr = self.alloc_gpu_buf(num_indices * embed_dim);
         // Upload indices to GPU
-        const idx_dptr = self.allocGpuBuf(num_indices); // reuse float buf for u32 (same size)
-        self.cuda_ctx.copyHostToDevice(
+        const idx_dptr = self.alloc_gpu_buf(num_indices); // reuse float buf for u32 (same size)
+        self.cuda_ctx.copy_host_to_device(
             idx_dptr,
             @ptrCast(indices.ptr),
             num_indices * @sizeOf(u32),
         ) catch unreachable;
-        ops.dispatchGather(
+        ops.dispatch_gather(
             self.cuda_ctx,
             self.kernels.fn_gather,
             out_dptr,
@@ -2380,13 +2380,13 @@ pub const DiffCudaRuntime = struct {
             num_indices,
             embed_dim,
         );
-        const node = self.makeNode(out_dptr, &.{ num_indices, embed_dim }, table.requires_grad);
+        const node = self.make_node(out_dptr, &.{ num_indices, embed_dim }, table.requires_grad);
         if (table.requires_grad) {
             node.parents[0] = table;
-            const ctx = self.allocContext(GatherCtx);
+            const ctx = self.alloc_context(GatherCtx);
             ctx.* = .{ .rt = self, .idx_dptr = idx_dptr, .num_indices = num_indices };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardGather;
+            node.backward_fn = &backward_gather;
         }
         return node;
     }
@@ -2397,13 +2397,13 @@ pub const DiffCudaRuntime = struct {
         num_indices: usize,
     };
 
-    fn backwardGather(self_node: *DiffCudaNode) void {
+    fn backward_gather(self_node: *DiffCudaNode) void {
         const ctx: *GatherCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
             const embed_dim = pa.shape[1];
-            ops.dispatchScatterAdd(
+            ops.dispatch_scatter_add(
                 rt.cuda_ctx,
                 rt.kernels.fn_scatter_add,
                 ga,
@@ -2419,20 +2419,20 @@ pub const DiffCudaRuntime = struct {
     // Loss functions
     // ════════════════════════════════════════════════════════════════
 
-    pub fn mseLoss(
+    pub fn mse_loss(
         self: *DiffCudaRuntime,
         pred: DiffCudaTensor,
         target: []const f32,
     ) DiffCudaTensor {
-        const total = pred.totalElements();
-        const target_dptr = self.allocGpuBuf(total);
-        self.cuda_ctx.copyHostToDevice(
+        const total = pred.total_elements();
+        const target_dptr = self.alloc_gpu_buf(total);
+        self.cuda_ctx.copy_host_to_device(
             target_dptr,
             @ptrCast(target.ptr),
             total * @sizeOf(f32),
         ) catch unreachable;
-        const out_dptr = self.allocGpuBufZeroed(1);
-        ops.dispatchLossForward(
+        const out_dptr = self.alloc_gpu_buf_zeroed(1);
+        ops.dispatch_loss_forward(
             self.cuda_ctx,
             self.kernels.fn_mse_fwd,
             out_dptr,
@@ -2440,13 +2440,13 @@ pub const DiffCudaRuntime = struct {
             target_dptr,
             total,
         );
-        const node = self.makeNode(out_dptr, &.{1}, pred.requires_grad);
+        const node = self.make_node(out_dptr, &.{1}, pred.requires_grad);
         if (pred.requires_grad) {
             node.parents[0] = pred;
-            const ctx = self.allocContext(LossCtx);
+            const ctx = self.alloc_context(LossCtx);
             ctx.* = .{ .rt = self, .target_dptr = target_dptr, .is_mse = true };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardMseLoss;
+            node.backward_fn = &backward_mse_loss;
         }
         return node;
     }
@@ -2457,39 +2457,39 @@ pub const DiffCudaRuntime = struct {
         is_mse: bool,
     };
 
-    fn backwardMseLoss(self_node: *DiffCudaNode) void {
+    fn backward_mse_loss(self_node: *DiffCudaNode) void {
         const ctx: *LossCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchLossBackward(
+            ops.dispatch_loss_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_mse_bw,
                 ga,
                 self_node.grad.?,
                 pa.data,
                 ctx.target_dptr,
-                pa.totalElements(),
+                pa.total_elements(),
             );
         }
     }
 
-    pub fn crossEntropyLossWithIndices(
+    pub fn cross_entropy_loss_with_indices(
         self: *DiffCudaRuntime,
         logits: DiffCudaTensor,
         indices: []const u32,
     ) DiffCudaTensor {
         const batch = logits.shape[0];
         const num_classes = logits.shape[1];
-        const idx_dptr = self.allocGpuBuf(batch); // u32 same size as f32
-        self.cuda_ctx.copyHostToDevice(
+        const idx_dptr = self.alloc_gpu_buf(batch); // u32 same size as f32
+        self.cuda_ctx.copy_host_to_device(
             idx_dptr,
             @ptrCast(indices.ptr),
             batch * @sizeOf(u32),
         ) catch unreachable;
-        const softmax_cache = self.allocGpuBuf(batch * num_classes);
-        const out_dptr = self.allocGpuBufZeroed(1);
-        ops.dispatchCrossEntropyForward(
+        const softmax_cache = self.alloc_gpu_buf(batch * num_classes);
+        const out_dptr = self.alloc_gpu_buf_zeroed(1);
+        ops.dispatch_cross_entropy_forward(
             self.cuda_ctx,
             self.kernels.fn_ce_fwd,
             out_dptr,
@@ -2499,13 +2499,13 @@ pub const DiffCudaRuntime = struct {
             batch,
             num_classes,
         );
-        const node = self.makeNode(out_dptr, &.{1}, logits.requires_grad);
+        const node = self.make_node(out_dptr, &.{1}, logits.requires_grad);
         if (logits.requires_grad) {
             node.parents[0] = logits;
-            const ctx = self.allocContext(CECtx);
+            const ctx = self.alloc_context(CECtx);
             ctx.* = .{ .rt = self, .softmax_cache_dptr = softmax_cache, .idx_dptr = idx_dptr };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardCrossEntropy;
+            node.backward_fn = &backward_cross_entropy;
         }
         return node;
     }
@@ -2516,12 +2516,12 @@ pub const DiffCudaRuntime = struct {
         idx_dptr: CUdeviceptr,
     };
 
-    fn backwardCrossEntropy(self_node: *DiffCudaNode) void {
+    fn backward_cross_entropy(self_node: *DiffCudaNode) void {
         const ctx: *CECtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchCrossEntropyBackward(
+            ops.dispatch_cross_entropy_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_ce_bw,
                 ga,
@@ -2534,20 +2534,20 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    pub fn bceLossWithLogits(
+    pub fn bce_loss_with_logits(
         self: *DiffCudaRuntime,
         logits: DiffCudaTensor,
         target: []const f32,
     ) DiffCudaTensor {
-        const total = logits.totalElements();
-        const target_dptr = self.allocGpuBuf(total);
-        self.cuda_ctx.copyHostToDevice(
+        const total = logits.total_elements();
+        const target_dptr = self.alloc_gpu_buf(total);
+        self.cuda_ctx.copy_host_to_device(
             target_dptr,
             @ptrCast(target.ptr),
             total * @sizeOf(f32),
         ) catch unreachable;
-        const out_dptr = self.allocGpuBufZeroed(1);
-        ops.dispatchLossForward(
+        const out_dptr = self.alloc_gpu_buf_zeroed(1);
+        ops.dispatch_loss_forward(
             self.cuda_ctx,
             self.kernels.fn_bce_fwd,
             out_dptr,
@@ -2555,30 +2555,30 @@ pub const DiffCudaRuntime = struct {
             target_dptr,
             total,
         );
-        const node = self.makeNode(out_dptr, &.{1}, logits.requires_grad);
+        const node = self.make_node(out_dptr, &.{1}, logits.requires_grad);
         if (logits.requires_grad) {
             node.parents[0] = logits;
-            const ctx = self.allocContext(LossCtx);
+            const ctx = self.alloc_context(LossCtx);
             ctx.* = .{ .rt = self, .target_dptr = target_dptr, .is_mse = false };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardBceLoss;
+            node.backward_fn = &backward_bce_loss;
         }
         return node;
     }
 
-    fn backwardBceLoss(self_node: *DiffCudaNode) void {
+    fn backward_bce_loss(self_node: *DiffCudaNode) void {
         const ctx: *LossCtx = @ptrCast(@alignCast(self_node.context.?));
         const rt = ctx.rt;
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            ops.dispatchLossBackward(
+            ops.dispatch_loss_backward(
                 rt.cuda_ctx,
                 rt.kernels.fn_bce_bw,
                 ga,
                 self_node.grad.?,
                 pa.data,
                 ctx.target_dptr,
-                pa.totalElements(),
+                pa.total_elements(),
             );
         }
     }
@@ -2590,23 +2590,23 @@ pub const DiffCudaRuntime = struct {
     pub fn zeros(self: *DiffCudaRuntime, new_shape: []const usize) DiffCudaTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const dptr = self.allocGpuBufZeroed(size);
-        return self.makeNode(dptr, new_shape, false);
+        const dptr = self.alloc_gpu_buf_zeroed(size);
+        return self.make_node(dptr, new_shape, false);
     }
 
     pub fn ones(self: *DiffCudaRuntime, new_shape: []const usize) DiffCudaTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const dptr = self.allocGpuBuf(size);
-        ops.dispatchFill(self.cuda_ctx, self.kernels.fn_fill, dptr, 1.0, size);
-        return self.makeNode(dptr, new_shape, false);
+        const dptr = self.alloc_gpu_buf(size);
+        ops.dispatch_fill(self.cuda_ctx, self.kernels.fn_fill, dptr, 1.0, size);
+        return self.make_node(dptr, new_shape, false);
     }
 
     pub fn randn(self: *DiffCudaRuntime, new_shape: []const usize) DiffCudaTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
         // Generate on CPU, then upload
-        const buf = self.allocData(size);
+        const buf = self.alloc_data(size);
         const rng = self.prng.random();
         var i: usize = 0;
         while (i + 1 < size) : (i += 2) {
@@ -2623,28 +2623,28 @@ pub const DiffCudaRuntime = struct {
             const r2 = rng.float(f32);
             buf[size - 1] = @sqrt(-2.0 * @log(r1)) * @cos(2.0 * std.math.pi * r2);
         }
-        const dptr = self.allocGpuBuf(size);
-        self.cuda_ctx.copyHostToDevice(
+        const dptr = self.alloc_gpu_buf(size);
+        self.cuda_ctx.copy_host_to_device(
             dptr,
             @ptrCast(buf.ptr),
             size * @sizeOf(f32),
         ) catch unreachable;
-        return self.makeNode(dptr, new_shape, false);
+        return self.make_node(dptr, new_shape, false);
     }
 
     pub fn rand(self: *DiffCudaRuntime, new_shape: []const usize) DiffCudaTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const buf = self.allocData(size);
+        const buf = self.alloc_data(size);
         const rng = self.prng.random();
         for (buf) |*v| v.* = rng.float(f32) * 2.0 - 1.0;
-        const dptr = self.allocGpuBuf(size);
-        self.cuda_ctx.copyHostToDevice(
+        const dptr = self.alloc_gpu_buf(size);
+        self.cuda_ctx.copy_host_to_device(
             dptr,
             @ptrCast(buf.ptr),
             size * @sizeOf(f32),
         ) catch unreachable;
-        return self.makeNode(dptr, new_shape, false);
+        return self.make_node(dptr, new_shape, false);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -2654,36 +2654,36 @@ pub const DiffCudaRuntime = struct {
     pub fn backward(self: *DiffCudaRuntime, loss: DiffCudaTensor) void {
         // 1. Set loss gradient to 1.0 (CUDA: GPU fill kernel)
         if (loss.grad == null) {
-            loss.grad = self.allocGpuBuf(loss.totalElements());
+            loss.grad = self.alloc_gpu_buf(loss.total_elements());
         }
-        ops.dispatchFill(
+        ops.dispatch_fill(
             self.cuda_ctx,
             self.kernels.fn_fill,
             loss.grad.?,
             1.0,
-            loss.totalElements(),
+            loss.total_elements(),
         );
 
         // 2. Topological sort (DFS)
         self.topo_buf.clearRetainingCapacity();
-        diff_node.topoSort(DiffCudaNode, loss, &self.topo_buf, self.allocator);
+        diff_node.topo_sort(DiffCudaNode, loss, &self.topo_buf, self.allocator);
 
         // 3. Allocate grad buffers for intermediate nodes (CUDA: GPU zeroed alloc)
         for (self.topo_buf.items) |node| {
             if (node.grad == null and node.requires_grad) {
-                node.grad = self.allocGpuBufZeroed(node.totalElements());
+                node.grad = self.alloc_gpu_buf_zeroed(node.total_elements());
             }
         }
 
         // 4-5. Reverse traversal + reset visited
-        diff_node.backwardPass(DiffCudaNode, &self.topo_buf, self.param_nodes);
+        diff_node.backward_pass(DiffCudaNode, &self.topo_buf, self.param_nodes);
     }
 
     // ════════════════════════════════════════════════════════════════
     // Adam optimizer (GPU)
     // ════════════════════════════════════════════════════════════════
 
-    pub fn applyAdam(
+    pub fn apply_adam(
         self: *DiffCudaRuntime,
         adam: *GpuAdamState,
         lr: f32,
@@ -2695,10 +2695,10 @@ pub const DiffCudaRuntime = struct {
         adam.step += 1;
         const bc1 = 1.0 - std.math.pow(f32, beta1, @floatFromInt(adam.step));
         const bc2 = 1.0 - std.math.pow(f32, beta2, @floatFromInt(adam.step));
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
         for (0..count) |i| {
-            const size = self.module.paramSize(.{ .index = i });
-            ops.dispatchAdamStep(
+            const size = self.module.param_size(.{ .index = i });
+            ops.dispatch_adam_step(
                 self.cuda_ctx,
                 self.kernels.fn_adam_step,
                 self.param_nodes[i].data,
@@ -2717,7 +2717,7 @@ pub const DiffCudaRuntime = struct {
         }
     }
 
-    pub fn applyAdamClipped(
+    pub fn apply_adam_clipped(
         self: *DiffCudaRuntime,
         adam: *GpuAdamState,
         lr: f32,
@@ -2727,15 +2727,15 @@ pub const DiffCudaRuntime = struct {
         wd: f32,
         max_grad_norm: f32,
     ) void {
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
 
         // 1. Compute total gradient norm on GPU
         var total_norm_sq: f64 = 0;
         for (0..count) |i| {
-            const size = self.module.paramSize(.{ .index = i });
+            const size = self.module.param_size(.{ .index = i });
             const num_blocks = (size + ops.BLOCK_SIZE - 1) / ops.BLOCK_SIZE;
-            const partial_dptr = self.allocGpuBuf(num_blocks);
-            ops.dispatchNormSq(
+            const partial_dptr = self.alloc_gpu_buf(num_blocks);
+            ops.dispatch_norm_sq(
                 self.cuda_ctx,
                 self.kernels.fn_norm_sq,
                 partial_dptr,
@@ -2743,8 +2743,8 @@ pub const DiffCudaRuntime = struct {
                 size,
             );
             // D2H partial sums
-            const partial = self.allocData(num_blocks);
-            self.cuda_ctx.copyDeviceToHost(
+            const partial = self.alloc_data(num_blocks);
+            self.cuda_ctx.copy_device_to_host(
                 @ptrCast(partial.ptr),
                 partial_dptr,
                 num_blocks * @sizeOf(f32),
@@ -2757,8 +2757,8 @@ pub const DiffCudaRuntime = struct {
         if (total_norm > max_grad_norm) {
             const clip_coef = max_grad_norm / (total_norm + 1e-6);
             for (0..count) |i| {
-                const size = self.module.paramSize(.{ .index = i });
-                ops.dispatchScaleGrad(
+                const size = self.module.param_size(.{ .index = i });
+                ops.dispatch_scale_grad(
                     self.cuda_ctx,
                     self.kernels.fn_scale_grad,
                     self.param_grad_dptrs[i],
@@ -2769,19 +2769,19 @@ pub const DiffCudaRuntime = struct {
         }
 
         // 3. Apply Adam
-        self.applyAdam(adam, lr, beta1, beta2, eps, wd);
+        self.apply_adam(adam, lr, beta1, beta2, eps, wd);
     }
 
     // ════════════════════════════════════════════════════════════════
     // Parameter initialization
     // ════════════════════════════════════════════════════════════════
 
-    pub fn initParams(self: *DiffCudaRuntime) void {
+    pub fn init_params(self: *DiffCudaRuntime) void {
         var rng_state = std.Random.DefaultPrng.init(42);
         const rng = rng_state.random();
 
         for (self.module.params.items, 0..) |meta, i| {
-            const size = self.module.paramSize(.{ .index = i });
+            const size = self.module.param_size(.{ .index = i });
             const buf = self.allocator.alloc(f32, size) catch unreachable;
             defer self.allocator.free(buf);
 
@@ -2808,7 +2808,7 @@ pub const DiffCudaRuntime = struct {
                 },
             }
 
-            self.cuda_ctx.copyHostToDevice(
+            self.cuda_ctx.copy_host_to_device(
                 self.param_nodes[i].data,
                 @ptrCast(buf.ptr),
                 size * @sizeOf(f32),
@@ -2817,11 +2817,11 @@ pub const DiffCudaRuntime = struct {
     }
 
     /// CpuRuntime / DiffCpuRuntime からパラメータをロード
-    pub fn loadFromCpu(self: *DiffCudaRuntime, cpu: anytype) void {
-        for (0..self.module.paramCount()) |i| {
-            const size = self.module.paramSize(.{ .index = i });
-            const cpu_data = cpu.paramData(i);
-            self.cuda_ctx.copyHostToDevice(
+    pub fn load_from_cpu(self: *DiffCudaRuntime, cpu: anytype) void {
+        for (0..self.module.param_count()) |i| {
+            const size = self.module.param_size(.{ .index = i });
+            const cpu_data = cpu.param_data(i);
+            self.cuda_ctx.copy_host_to_device(
                 self.param_nodes[i].data,
                 @ptrCast(cpu_data.ptr),
                 size * @sizeOf(f32),

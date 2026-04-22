@@ -11,33 +11,33 @@ const vl = std.simd.suggestVectorLength(f32) orelse 4;
 // ── Shape utility functions ──
 
 /// comptime shape slice → [MAX_NDIM]usize 配列に変換 (残りは1埋め)
-pub fn initShapeArray(shape_slice: []const usize) [MAX_NDIM]usize {
+pub fn init_shape_array(shape_slice: []const usize) [MAX_NDIM]usize {
     var arr: [MAX_NDIM]usize = .{ 1, 1, 1, 1 };
     for (0..shape_slice.len) |j| arr[j] = shape_slice[j];
     return arr;
 }
 
 /// shape 配列の全要素の積
-pub fn totalElements(shape: [MAX_NDIM]usize, ndim: usize) usize {
+pub fn total_elements(shape: [MAX_NDIM]usize, ndim: usize) usize {
     var size: usize = 1;
     for (0..ndim) |i| size *= shape[i];
     return size;
 }
 
 /// 最後の次元のサイズ
-pub fn lastDim(shape: [MAX_NDIM]usize, ndim: usize) usize {
+pub fn last_dim(shape: [MAX_NDIM]usize, ndim: usize) usize {
     return shape[ndim - 1];
 }
 
 /// 最後の次元を除いた行数
-pub fn numRows(shape: [MAX_NDIM]usize, ndim: usize) usize {
+pub fn num_rows(shape: [MAX_NDIM]usize, ndim: usize) usize {
     var rows: usize = 1;
     for (0..ndim - 1) |i| rows *= shape[i];
     return rows;
 }
 
 /// Softmax (in-place): out_data は入力のコピーを事前に受け取る前提
-pub fn softmaxForward(out_data: []f32, rows: usize, cols: usize) void {
+pub fn softmax_forward(out_data: []f32, rows: usize, cols: usize) void {
     for (0..rows) |i| {
         const row = out_data[i * cols ..][0..cols];
         // SIMD max
@@ -81,7 +81,7 @@ pub fn softmaxForward(out_data: []f32, rows: usize, cols: usize) void {
 }
 
 /// LogSoftmax: in_data → out_data, オプションで softmax_cache にも書き出し
-pub fn logSoftmaxForward(
+pub fn log_softmax_forward(
     in_data: []const f32,
     out_data: []f32,
     rows: usize,
@@ -145,7 +145,7 @@ pub fn logSoftmaxForward(
 
 /// LayerNorm 2パス: pass1=SIMD sum+sum_sq, pass2=normalize+affine
 /// x_norm_out/inv_stds_out が non-null なら backward 用にキャッシュ
-pub fn layerNormForward(
+pub fn layer_norm_forward(
     in_data: []const f32,
     out_data: []f32,
     gamma: []const f32,
@@ -213,7 +213,7 @@ pub fn layerNormForward(
 }
 
 /// ReductionSum: rows (axis=1) — 各行の合計
-pub fn reductionSumRows(in_data: []const f32, out_data: []f32, rows: usize, cols: usize) void {
+pub fn reduction_sum_rows(in_data: []const f32, out_data: []f32, rows: usize, cols: usize) void {
     for (0..rows) |i| {
         const row = in_data[i * cols ..][0..cols];
         var sum_vec: @Vector(vl, f32) = @splat(0);
@@ -229,7 +229,7 @@ pub fn reductionSumRows(in_data: []const f32, out_data: []f32, rows: usize, cols
 }
 
 /// ReductionSum: cols (axis=0) — 各列の合計
-pub fn reductionSumCols(in_data: []const f32, out_data: []f32, rows: usize, cols: usize) void {
+pub fn reduction_sum_cols(in_data: []const f32, out_data: []f32, rows: usize, cols: usize) void {
     @memset(out_data[0..cols], 0);
     for (0..rows) |i| {
         const row = in_data[i * cols ..][0..cols];
@@ -244,7 +244,7 @@ pub fn reductionSumCols(in_data: []const f32, out_data: []f32, rows: usize, cols
 }
 
 /// ReductionSum: 1D — 全要素合計
-pub fn reductionSum1D(data: []const f32) f32 {
+pub fn reduction_sum1d(data: []const f32) f32 {
     var sum_vec: @Vector(vl, f32) = @splat(0);
     var k: usize = 0;
     while (k + vl <= data.len) : (k += vl) {
@@ -259,7 +259,7 @@ pub fn reductionSum1D(data: []const f32) f32 {
 // ── Element-wise forward functions ──
 
 /// GELU forward: out[i] = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-pub fn geluForward(in: []const f32, out: []f32) void {
+pub fn gelu_forward(in: []const f32, out: []f32) void {
     const sqrt_2_over_pi: f32 = 0.7978845608028654;
     for (in, out) |v, *o| {
         const inner = sqrt_2_over_pi * (v + 0.044715 * v * v * v);
@@ -268,7 +268,7 @@ pub fn geluForward(in: []const f32, out: []f32) void {
 }
 
 /// SiLU forward: out[i] = x * sigmoid(x), sig_cache[i] = sigmoid(x)
-pub fn siluForward(in: []const f32, out: []f32, sig_cache: []f32) void {
+pub fn silu_forward(in: []const f32, out: []f32, sig_cache: []f32) void {
     for (in, out, sig_cache) |v, *o, *sc| {
         const sig = 1.0 / (1.0 + @exp(-v));
         sc.* = sig;
@@ -277,42 +277,42 @@ pub fn siluForward(in: []const f32, out: []f32, sig_cache: []f32) void {
 }
 
 /// ReLU forward: out[i] = max(0, x)
-pub fn reluForward(in: []const f32, out: []f32) void {
+pub fn relu_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = if (v > 0) v else 0;
     }
 }
 
 /// Tanh forward: out[i] = tanh(x)
-pub fn tanhForward(in: []const f32, out: []f32) void {
+pub fn tanh_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = std.math.tanh(v);
     }
 }
 
 /// Sigmoid forward: out[i] = 1 / (1 + exp(-x))
-pub fn sigmoidForward(in: []const f32, out: []f32) void {
+pub fn sigmoid_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = 1.0 / (1.0 + @exp(-v));
     }
 }
 
 /// Square forward: out[i] = x^2
-pub fn squareForward(in: []const f32, out: []f32) void {
+pub fn square_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = v * v;
     }
 }
 
 /// Negative forward: out[i] = -x
-pub fn negativeForward(in: []const f32, out: []f32) void {
+pub fn negative_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = -v;
     }
 }
 
 /// Exp forward: out[i] = exp(x)
-pub fn expForward(in: []const f32, out: []f32) void {
+pub fn exp_forward(in: []const f32, out: []f32) void {
     for (in, out) |v, *o| {
         o.* = @exp(v);
     }
@@ -325,7 +325,7 @@ const testing = std.testing;
 test "geluForward: 基本値" {
     var in = [_]f32{ -1.0, 0.0, 1.0 };
     var out: [3]f32 = undefined;
-    geluForward(&in, &out);
+    gelu_forward(&in, &out);
     // gelu(0) = 0
     try testing.expectApproxEqAbs(@as(f32, 0.0), out[1], 1e-6);
     // gelu(x) ≈ x for large x, gelu(1) ≈ 0.8412
@@ -338,7 +338,7 @@ test "siluForward: 基本値とキャッシュ" {
     var in = [_]f32{ 0.0, 1.0, -1.0 };
     var out: [3]f32 = undefined;
     var sig: [3]f32 = undefined;
-    siluForward(&in, &out, &sig);
+    silu_forward(&in, &out, &sig);
     // silu(0) = 0 * 0.5 = 0, sigmoid(0) = 0.5
     try testing.expectApproxEqAbs(@as(f32, 0.0), out[0], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0.5), sig[0], 1e-6);
@@ -349,7 +349,7 @@ test "siluForward: 基本値とキャッシュ" {
 test "reluForward: 正負" {
     var in = [_]f32{ -2.0, 0.0, 3.0 };
     var out: [3]f32 = undefined;
-    reluForward(&in, &out);
+    relu_forward(&in, &out);
     try testing.expectEqual(@as(f32, 0.0), out[0]);
     try testing.expectEqual(@as(f32, 0.0), out[1]);
     try testing.expectEqual(@as(f32, 3.0), out[2]);
@@ -358,7 +358,7 @@ test "reluForward: 正負" {
 test "tanhForward: 基本値" {
     var in = [_]f32{ 0.0, 1.0 };
     var out: [2]f32 = undefined;
-    tanhForward(&in, &out);
+    tanh_forward(&in, &out);
     try testing.expectApproxEqAbs(@as(f32, 0.0), out[0], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0.7616), out[1], 1e-3);
 }
@@ -366,7 +366,7 @@ test "tanhForward: 基本値" {
 test "sigmoidForward: 基本値" {
     var in = [_]f32{ 0.0, 100.0, -100.0 };
     var out: [3]f32 = undefined;
-    sigmoidForward(&in, &out);
+    sigmoid_forward(&in, &out);
     try testing.expectApproxEqAbs(@as(f32, 0.5), out[0], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 1.0), out[1], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0.0), out[2], 1e-6);
@@ -375,7 +375,7 @@ test "sigmoidForward: 基本値" {
 test "squareForward: 基本値" {
     var in = [_]f32{ -3.0, 0.0, 2.0 };
     var out: [3]f32 = undefined;
-    squareForward(&in, &out);
+    square_forward(&in, &out);
     try testing.expectEqual(@as(f32, 9.0), out[0]);
     try testing.expectEqual(@as(f32, 0.0), out[1]);
     try testing.expectEqual(@as(f32, 4.0), out[2]);
@@ -384,7 +384,7 @@ test "squareForward: 基本値" {
 test "negativeForward: 基本値" {
     var in = [_]f32{ 1.0, -2.0, 0.0 };
     var out: [3]f32 = undefined;
-    negativeForward(&in, &out);
+    negative_forward(&in, &out);
     try testing.expectEqual(@as(f32, -1.0), out[0]);
     try testing.expectEqual(@as(f32, 2.0), out[1]);
     try testing.expectEqual(@as(f32, 0.0), out[2]);
@@ -393,7 +393,7 @@ test "negativeForward: 基本値" {
 test "expForward: 基本値" {
     var in = [_]f32{ 0.0, 1.0 };
     var out: [2]f32 = undefined;
-    expForward(&in, &out);
+    exp_forward(&in, &out);
     try testing.expectApproxEqAbs(@as(f32, 1.0), out[0], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 2.71828), out[1], 1e-3);
 }

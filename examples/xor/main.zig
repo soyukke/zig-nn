@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const nn = @import("nn");
-const Sequential = nn.unified.Sequential;
-const Linear = nn.unified.Linear;
+const sequential = nn.unified.sequential;
+const linear = nn.unified.linear;
 const ReLU = nn.unified.ReLU;
-const Trainer = nn.unified.Trainer;
+const trainer = nn.unified.trainer;
 
 pub const std_options = nn.log.std_options;
 const log = nn.log.example;
@@ -20,18 +20,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         const cuda = nn.cuda;
         var cuda_ctx = try cuda.CudaContext.init(0);
         defer cuda_ctx.deinit();
-        var trainer = try Trainer(XorModel, .cuda).init(std.heap.page_allocator, &cuda_ctx, .{ .lr = 0.01 });
+        var trainer = try trainer(XorModel, .cuda).init(std.heap.page_allocator, &cuda_ctx, .{ .lr = 0.01 });
         defer trainer.deinit();
         try xorDemo(&trainer, "CUDA");
     } else {
-        var trainer = try Trainer(XorModel, .cpu).init(std.heap.page_allocator, {}, .{ .lr = 0.01 });
+        var trainer = try trainer(XorModel, .cpu).init(std.heap.page_allocator, {}, .{ .lr = 0.01 });
         defer trainer.deinit();
         try xorDemo(&trainer, "CPU");
     }
 }
 
 /// XOR model: Linear(2,8) -> ReLU -> Linear(8,1)
-const XorModel = Sequential(.{ Linear(2, 8), ReLU, Linear(8, 1) });
+const XorModel = sequential(.{ linear(2, 8), ReLU, linear(8, 1) });
 
 fn xorDemo(trainer: anytype, device_name: []const u8) !void {
     log.info("=== XOR Training ({s}: MSE + Adam) ===", .{device_name});
@@ -42,26 +42,26 @@ fn xorDemo(trainer: anytype, device_name: []const u8) !void {
     const num_epochs = 2000;
     var timer = try nn.Timer.start();
     for (0..num_epochs) |epoch| {
-        trainer.zeroGrad();
+        trainer.zero_grad();
         const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
         const pred = trainer.reshape(output, &.{4});
-        const loss = trainer.mseLoss(pred, &targets);
+        const loss = trainer.mse_loss(pred, &targets);
         trainer.backward(loss);
         trainer.step();
 
         if (epoch % 400 == 0 or epoch == num_epochs - 1) {
-            const loss_val = trainer.lossValue(loss);
+            const loss_val = trainer.loss_value(loss);
             log.info("epoch {d:>4}: loss = {d:.6}", .{ epoch, loss_val });
         }
     }
     const elapsed_ms = timer.read() / 1_000_000;
     log.info("training time: {d}ms", .{elapsed_ms});
     log.info("predictions:", .{});
-    trainer.zeroGrad();
+    trainer.zero_grad();
     const output = trainer.forward(trainer.tensor(&inputs, &.{ 4, 2 }));
     const pred = trainer.reshape(output, &.{4});
     var pred_buf: [4]f32 = undefined;
-    const pred_data = trainer.dataSlice(pred, &pred_buf);
+    const pred_data = trainer.data_slice(pred, &pred_buf);
     printPredictions(pred_data);
 }
 

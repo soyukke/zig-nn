@@ -36,6 +36,9 @@
 //!     missing_final_newline File does not end with '\n'.
 //!     debug_print           `std.debug.print` committed in source.
 //!     function_too_long     Function body exceeds --function-line-limit lines.
+//!     file_not_snake_case   `.zig` file stem is not snake_case.
+//!     function_not_snake_case
+//!                           Function name is not snake_case.
 //!     control_character     Non-tab ASCII control character in source.
 //!     ambiguous_precedence  Bitwise and arithmetic operators mixed without
 //!                           parentheses (e.g. `a & b + c`).
@@ -58,6 +61,8 @@ const Rule = enum {
     missing_final_newline,
     debug_print,
     function_too_long,
+    file_not_snake_case,
+    function_not_snake_case,
     control_character,
     ambiguous_precedence,
     defer_no_blank_line,
@@ -70,6 +75,8 @@ const rule_names = [_][]const u8{
     "missing_final_newline",
     "debug_print",
     "function_too_long",
+    "file_not_snake_case",
+    "function_not_snake_case",
     "control_character",
     "ambiguous_precedence",
     "defer_no_blank_line",
@@ -212,9 +219,10 @@ fn checkAst(
     content: []const u8,
 ) !void {
     const want_fn_len = cfg.isEnabled(.function_too_long);
+    const want_fn_name = cfg.isEnabled(.function_not_snake_case);
     const want_precedence = cfg.isEnabled(.ambiguous_precedence);
     const want_defer = cfg.isEnabled(.defer_no_blank_line);
-    if (!want_fn_len and !want_precedence and !want_defer) return;
+    if (!want_fn_len and !want_fn_name and !want_precedence and !want_defer) return;
 
     const content_z = try allocator.dupeZ(u8, content);
     defer allocator.free(content_z);
@@ -222,8 +230,8 @@ fn checkAst(
     var tree = try Ast.parse(allocator, content_z, .zig);
     defer tree.deinit(allocator);
 
-    if (want_fn_len or want_precedence) {
-        try checkNodes(allocator, cfg, counter, path, &tree, want_fn_len, want_precedence);
+    if (want_fn_len or want_fn_name or want_precedence) {
+        try checkNodes(allocator, cfg, counter, path, &tree, want_fn_len, want_fn_name, want_precedence);
     }
     if (want_defer) {
         try checkDeferNewlines(counter, path, &tree);
@@ -237,6 +245,7 @@ fn checkNodes(
     path: []const u8,
     tree: *const Ast,
     want_fn_len: bool,
+    want_fn_name: bool,
     want_precedence: bool,
 ) !void {
     const FnRange = struct {
@@ -248,19 +257,34 @@ fn checkNodes(
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
+    var fn_proto_buffer: [1]Ast.Node.Index = undefined;
     for (tags, datas, 0..) |tag, data, node_usize| {
         const node: Ast.Node.Index = @enumFromInt(node_usize);
 
-        if (want_fn_len and tag == .fn_decl) {
-            const body_node = data.node_and_node[1];
-            const token_opening = tree.firstToken(node);
-            const token_closing = tree.lastToken(body_node);
-            const line_opening = tree.tokenLocation(0, token_opening).line;
-            const line_closing = tree.tokenLocation(0, token_closing).line;
-            try functions.append(allocator, .{
-                .line_opening = line_opening,
-                .line_closing = line_closing,
-            });
+        if ((want_fn_len or want_fn_name) and tag == .fn_decl) {
+            if (want_fn_len) {
+                const body_node = data.node_and_node[1];
+                const token_opening = tree.firstToken(node);
+                const token_closing = tree.lastToken(body_node);
+                const line_opening = tree.tokenLocation(0, token_opening).line;
+                const line_closing = tree.tokenLocation(0, token_closing).line;
+                try functions.append(allocator, .{
+                    .line_opening = line_opening,
+                    .line_closing = line_closing,
+                });
+            }
+
+            if (want_fn_name) {
+                const fn_proto = tree.fullFnProto(&fn_proto_buffer, node) orelse continue;
+                if (fn_proto.extern_export_inline_token) |token| {
+                    if (tree.tokens.items(.tag)[token] == .keyword_extern) continue;
+                }
+                const name_token = fn_proto.name_token orelse continue;
+                const name = tree.tokenSlice(name_token);
+                if (!isSnakeCase(name)) {
+                    try counter.bump(path, .function_not_snake_case);
+                }
+            }
         }
 
         if (want_precedence and isBinOp(tag)) {
@@ -298,6 +322,34 @@ fn checkNodes(
             try counter.bump(path, .function_too_long);
         }
     }
+}
+
+fn isSnakeCase(name: []const u8) bool {
+    if (name.len == 0) return false;
+    if (mem.eql(u8, name, "_")) return true;
+
+    var prev_underscore = false;
+    for (name, 0..) |c, i| {
+        const is_lower = c >= 'a' and c <= 'z';
+        const is_digit = c >= '0' and c <= '9';
+        if (is_lower or is_digit) {
+            prev_underscore = false;
+            continue;
+        }
+        if (c == '_') {
+            if (i == 0 or i + 1 == name.len or prev_underscore) return false;
+            prev_underscore = true;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+fn fileStem(path: []const u8) []const u8 {
+    const base = std.fs.path.basename(path);
+    if (mem.endsWith(u8, base, ".zig")) return base[0 .. base.len - 4];
+    return base;
 }
 
 fn checkDeferNewlines(counter: *Counter, path: []const u8, tree: *const Ast) !void {
@@ -392,6 +444,11 @@ fn checkFile(
     content: []const u8,
 ) !void {
     _ = try counter.getOrInsert(path);
+
+    if (cfg.isEnabled(.file_not_snake_case) and !isSnakeCase(fileStem(path))) {
+        try counter.bump(path, .file_not_snake_case);
+    }
+
     if (content.len == 0) return;
 
     if (cfg.isEnabled(.missing_final_newline) and content[content.len - 1] != '\n') {
@@ -669,6 +726,9 @@ fn printHelp() !void {
         \\  missing_final_newline File does not end with '\n'.
         \\  debug_print           `std.debug.print` committed in source.
         \\  function_too_long     Function exceeds --function-line-limit lines.
+        \\  file_not_snake_case   `.zig` file stem is not snake_case.
+        \\  function_not_snake_case
+        \\                       Function name is not snake_case.
         \\  control_character     Non-tab ASCII control character in source.
         \\  ambiguous_precedence  Bitwise/arithmetic mix without parens.
         \\  defer_no_blank_line   `defer` not followed by a blank line.

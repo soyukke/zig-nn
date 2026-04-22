@@ -45,7 +45,7 @@ pub const GpuMemPool = struct {
         }
     }
 
-    pub fn bucketIndex(size: usize) usize {
+    pub fn bucket_index(size: usize) usize {
         if (size == 0) return 0;
         // Round up to next power of 2, then find log2
         var s = size - 1;
@@ -60,13 +60,13 @@ pub const GpuMemPool = struct {
         return idx;
     }
 
-    pub fn bucketSize(idx: usize) usize {
+    pub fn bucket_size(idx: usize) usize {
         return @as(usize, 1) << @intCast(idx + MIN_BUCKET);
     }
 
     /// Try to acquire a buffer from the pool. Returns null if none available.
     pub fn acquire(self: *GpuMemPool, size: usize) ?CUdeviceptr {
-        const idx = bucketIndex(size);
+        const idx = bucket_index(size);
         if (self.buckets[idx].items.len > 0) {
             return self.buckets[idx].pop();
         }
@@ -75,7 +75,7 @@ pub const GpuMemPool = struct {
 
     /// Return a buffer to the pool for reuse.
     pub fn release(self: *GpuMemPool, dptr: CUdeviceptr, size: usize) void {
-        const idx = bucketIndex(size);
+        const idx = bucket_index(size);
         self.buckets[idx].append(self.allocator, dptr) catch {
             // If we can't track it, just free it
             _ = cuda_driver.cuMemFree_v2(dptr);
@@ -154,7 +154,7 @@ pub const CudaContext = struct {
     }
 
     /// GPU メモリを確保する
-    pub fn allocBuffer(self: *CudaContext, size: usize) CudaError!CUdeviceptr {
+    pub fn alloc_buffer(self: *CudaContext, size: usize) CudaError!CUdeviceptr {
         _ = self;
         var dptr: CUdeviceptr = undefined;
         if (cuda_driver.cuMemAlloc_v2(&dptr, size) != CUDA_SUCCESS) return error.MemAllocFailed;
@@ -162,12 +162,12 @@ pub const CudaContext = struct {
     }
 
     /// GPU メモリを解放する
-    pub fn freeBuffer(_: *CudaContext, dptr: CUdeviceptr) void {
+    pub fn free_buffer(_: *CudaContext, dptr: CUdeviceptr) void {
         _ = cuda_driver.cuMemFree_v2(dptr);
     }
 
     /// ホスト → デバイスへメモリコピー
-    pub fn copyHostToDevice(
+    pub fn copy_host_to_device(
         _: *CudaContext,
         dst: CUdeviceptr,
         src: *const anyopaque,
@@ -177,7 +177,7 @@ pub const CudaContext = struct {
     }
 
     /// デバイス → ホストへメモリコピー
-    pub fn copyDeviceToHost(
+    pub fn copy_device_to_host(
         _: *CudaContext,
         dst: *anyopaque,
         src: CUdeviceptr,
@@ -187,7 +187,7 @@ pub const CudaContext = struct {
     }
 
     /// デバイス → デバイスへメモリコピー
-    pub fn copyDeviceToDevice(
+    pub fn copy_device_to_device(
         _: *CudaContext,
         dst: CUdeviceptr,
         src: CUdeviceptr,
@@ -197,7 +197,7 @@ pub const CudaContext = struct {
     }
 
     /// PTX モジュールをロードする
-    pub fn loadModule(self: *CudaContext, ptx_image: *const anyopaque) CudaError!void {
+    pub fn load_module(self: *CudaContext, ptx_image: *const anyopaque) CudaError!void {
         var module: CUmodule = undefined;
         if (cuda_driver.cuModuleLoadData(&module, ptx_image) != CUDA_SUCCESS) {
             return error.ModuleLoadFailed;
@@ -206,7 +206,7 @@ pub const CudaContext = struct {
     }
 
     /// カーネル関数を取得する
-    pub fn getFunction(self: *CudaContext, name: [*:0]const u8) CudaError!CUfunction {
+    pub fn get_function(self: *CudaContext, name: [*:0]const u8) CudaError!CUfunction {
         const m = self.module orelse return error.ModuleLoadFailed;
         var func: CUfunction = undefined;
         if (cuda_driver.cuModuleGetFunction(&func, m, name) != CUDA_SUCCESS) {
@@ -216,7 +216,7 @@ pub const CudaContext = struct {
     }
 
     /// カーネルを起動する
-    pub fn launchKernel(
+    pub fn launch_kernel(
         self: *CudaContext,
         func: CUfunction,
         grid: [3]c_uint,
@@ -280,7 +280,7 @@ pub const CudaContext = struct {
     }
 
     /// cuBLAS SGEMM with beta=1.0 for gradient accumulation: C += alpha * op(A) * op(B)
-    pub fn sgemmAccum(
+    pub fn sgemm_accum(
         self: *CudaContext,
         transa: cublasOperation_t,
         transb: cublasOperation_t,
@@ -299,7 +299,7 @@ pub const CudaContext = struct {
     }
 
     /// Strided batched SGEMM
-    pub fn sgemmStridedBatched(
+    pub fn sgemm_strided_batched(
         self: *CudaContext,
         transa: cublasOperation_t,
         transb: cublasOperation_t,
@@ -342,19 +342,19 @@ pub const CudaContext = struct {
     }
 
     /// TF32 Tensor Core math mode を有効化 (Ampere+)
-    pub fn setTensorMathMode(self: *CudaContext) void {
+    pub fn set_tensor_math_mode(self: *CudaContext) void {
         _ = cuda_blas.cublasSetMathMode(self.cublas_handle, cuda_blas.CUBLAS_TENSOR_OP_MATH);
     }
 
     /// GPU メモリをゼロクリア
-    pub fn memsetZero(_: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
+    pub fn memset_zero(_: *CudaContext, dptr: CUdeviceptr, num_floats: usize) CudaError!void {
         if (cuda_driver.cuMemsetD32_v2(dptr, 0, num_floats) != CUDA_SUCCESS) {
             return error.MemcpyFailed;
         }
     }
 
     /// GPU メモリをゼロクリア (非同期)
-    pub fn memsetZeroAsync(
+    pub fn memset_zero_async(
         self: *CudaContext,
         dptr: CUdeviceptr,
         num_floats: usize,

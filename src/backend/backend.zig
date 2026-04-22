@@ -12,7 +12,7 @@ pub const BackendType = enum {
 
 /// コンパイル時にバックエンドを選択するディスパッチャー。
 /// 全ての演算は comptime T: type でf16/f32/f64に対応する。
-pub fn Backend(comptime backend_type: BackendType) type {
+pub fn backend(comptime backend_type: BackendType) type {
     return struct {
         /// 行列積: C = A @ B
         /// A: (m x k), B: (k x n), C: (m x n)  row-major

@@ -21,13 +21,13 @@ const dbg = std.debug;
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
-    .logFn = nnLogFn,
+    .logFn = nn_log_fn,
 };
 
 /// Test root などで level を絞った std_options を組み立てたいときに使う。
 /// 例: `pub const std_options = @import("log.zig").stdOptionsAtLevel(.warn);`
-pub fn stdOptionsAtLevel(comptime level: std.log.Level) std.Options {
-    return .{ .log_level = level, .logFn = nnLogFn };
+pub fn std_options_at_level(comptime level: std.log.Level) std.Options {
+    return .{ .log_level = level, .logFn = nn_log_fn };
 }
 
 pub const default = std.log.scoped(.nn);
@@ -50,7 +50,7 @@ var scope_filter_lens: [max_scopes]usize = [_]usize{0} ** max_scopes;
 var scope_filter_count: usize = 0;
 var scope_filter_active: bool = false;
 
-fn parseLevel(s: []const u8) ?std.log.Level {
+fn parse_level(s: []const u8) ?std.log.Level {
     if (std.ascii.eqlIgnoreCase(s, "err")) return .err;
     if (std.ascii.eqlIgnoreCase(s, "error")) return .err;
     if (std.ascii.eqlIgnoreCase(s, "warn")) return .warn;
@@ -60,7 +60,7 @@ fn parseLevel(s: []const u8) ?std.log.Level {
     return null;
 }
 
-fn loadScopeFilter(spec: []const u8) void {
+fn load_scope_filter(spec: []const u8) void {
     var it = std.mem.tokenizeScalar(u8, spec, ',');
     while (it.next()) |raw| {
         const trimmed = std.mem.trim(u8, raw, " \t");
@@ -79,7 +79,7 @@ fn loadScopeFilter(spec: []const u8) void {
     if (scope_filter_count > 0) scope_filter_active = true;
 }
 
-fn scopeAllowed(name: []const u8) bool {
+fn scope_allowed(name: []const u8) bool {
     if (!scope_filter_active) return true;
     for (0..scope_filter_count) |i| {
         const len = scope_filter_lens[i];
@@ -88,22 +88,22 @@ fn scopeAllowed(name: []const u8) bool {
     return false;
 }
 
-fn ensureInit() void {
+fn ensure_init() void {
     if (@atomicLoad(bool, &initialized, .acquire)) return;
     if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_LEVEL")) |buf| {
         defer std.heap.page_allocator.free(buf);
 
-        if (parseLevel(buf)) |lv| runtime_level = lv;
+        if (parse_level(buf)) |lv| runtime_level = lv;
     } else |_| {}
     if (std.process.getEnvVarOwned(std.heap.page_allocator, "NN_LOG_SCOPES")) |buf| {
         defer std.heap.page_allocator.free(buf);
 
-        loadScopeFilter(buf);
+        load_scope_filter(buf);
     } else |_| {}
     @atomicStore(bool, &initialized, true, .release);
 }
 
-fn levelStr(comptime level: std.log.Level) []const u8 {
+fn level_str(comptime level: std.log.Level) []const u8 {
     return switch (level) {
         .err => "err ",
         .warn => "warn",
@@ -132,7 +132,7 @@ pub const ProfileArtifact = struct {
     }
 };
 
-fn isProfileEnabled() bool {
+fn is_profile_enabled() bool {
     const v = std.process.getEnvVarOwned(std.heap.page_allocator, "NN_PROFILE") catch return false;
     defer std.heap.page_allocator.free(v);
 
@@ -146,8 +146,8 @@ fn isProfileEnabled() bool {
 /// `NN_PROFILE` env が立っていない場合は null を返す (no-op gate)。
 /// 出力先: `NN_PROFILE_DIR` env か、既定 `zig-out/profiles`。
 /// ファイル名: `<prefix>-<unix_ts>.txt`。
-pub fn openProfileArtifact(prefix: []const u8) !?ProfileArtifact {
-    if (!isProfileEnabled()) return null;
+pub fn open_profile_artifact(prefix: []const u8) !?ProfileArtifact {
+    if (!is_profile_enabled()) return null;
     const allocator = std.heap.page_allocator;
 
     const dir_owned: ?[]u8 = std.process.getEnvVarOwned(allocator, "NN_PROFILE_DIR") catch null;
@@ -165,17 +165,17 @@ pub fn openProfileArtifact(prefix: []const u8) !?ProfileArtifact {
     return .{ .file = file, .path = path, .allocator = allocator };
 }
 
-fn nnLogFn(
+fn nn_log_fn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
-    ensureInit();
+    ensure_init();
     if (@intFromEnum(level) > @intFromEnum(runtime_level)) return;
 
-    const lvl = comptime levelStr(level);
+    const lvl = comptime level_str(level);
     const scp = comptime if (scope == .default) "nn" else @tagName(scope);
-    if (level != .err and level != .warn and !scopeAllowed(scp)) return;
+    if (level != .err and level != .warn and !scope_allowed(scp)) return;
     dbg.print("[" ++ lvl ++ "][" ++ scp ++ "] " ++ format ++ "\n", args);
 }

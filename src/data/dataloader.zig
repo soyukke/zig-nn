@@ -40,7 +40,7 @@ pub const BatchIterator = struct {
             .shuffle = do_shuffle,
         };
 
-        if (do_shuffle) self.shuffleIndices();
+        if (do_shuffle) self.shuffle_indices();
         return self;
     }
 
@@ -51,7 +51,7 @@ pub const BatchIterator = struct {
     /// epoch 先頭: re-shuffle + current=0
     pub fn reset(self: *BatchIterator) void {
         self.current = 0;
-        if (self.shuffle) self.shuffleIndices();
+        if (self.shuffle) self.shuffle_indices();
     }
 
     /// 次のバッチインデックスを返す。全バッチ走査済みなら null。
@@ -64,12 +64,12 @@ pub const BatchIterator = struct {
     }
 
     /// 合計バッチ数 (端数バッチ含む)
-    pub fn numBatches(self: *const BatchIterator) usize {
+    pub fn num_batches(self: *const BatchIterator) usize {
         if (self.n_samples == 0) return 0;
         return (self.n_samples + self.batch_size - 1) / self.batch_size;
     }
 
-    fn shuffleIndices(self: *BatchIterator) void {
+    fn shuffle_indices(self: *BatchIterator) void {
         var random = self.prng.random();
         // Fisher-Yates shuffle
         var i: usize = self.n_samples;
@@ -118,7 +118,7 @@ test "BatchIterator: numBatches" {
     var iter = try BatchIterator.init(testing.allocator, 10, 3, false);
     defer iter.deinit();
 
-    try testing.expectEqual(@as(usize, 4), iter.numBatches()); // ceil(10/3) = 4
+    try testing.expectEqual(@as(usize, 4), iter.num_batches()); // ceil(10/3) = 4
 }
 
 test "BatchIterator: shuffle covers all indices" {
@@ -164,7 +164,7 @@ test "BatchIterator: exact divisible batch size" {
     var iter = try BatchIterator.init(testing.allocator, 8, 4, false);
     defer iter.deinit();
 
-    try testing.expectEqual(@as(usize, 2), iter.numBatches());
+    try testing.expectEqual(@as(usize, 2), iter.num_batches());
     const b1 = iter.next().?;
     try testing.expectEqual(@as(usize, 4), b1.len);
     const b2 = iter.next().?;

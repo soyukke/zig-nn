@@ -29,8 +29,8 @@ pub const SentencePieceTokenizer = struct {
     allocator: Allocator,
 
     /// GGUF メタデータから SentencePiece トークナイザーを構築
-    pub fn initFromGGUF(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
-        const vocab_strings = try gguf_file.getArrayStrings("tokenizer.ggml.tokens", allocator);
+    pub fn init_from_gguf(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
+        const vocab_strings = try gguf_file.get_array_strings("tokenizer.ggml.tokens", allocator);
         defer allocator.free(vocab_strings);
 
         const vocab_count = vocab_strings.len;
@@ -48,22 +48,22 @@ pub const SentencePieceTokenizer = struct {
         }
 
         // Special token IDs
-        const bos_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.bos_token_id")) |v|
+        const bos_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.bos_token_id")) |v|
             v
         else
             2;
-        const eos_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.eos_token_id")) |v|
+        const eos_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.eos_token_id")) |v|
             v
         else
             1;
-        const unk_id: u32 = if (gguf_file.getMetadataU32("tokenizer.ggml.unknown_token_id")) |v|
+        const unk_id: u32 = if (gguf_file.get_metadata_u32("tokenizer.ggml.unknown_token_id")) |v|
             v
         else
             3;
 
         // Check add_bos metadata
         var add_bos = true;
-        if (gguf_file.getMetadata("tokenizer.ggml.add_bos_token")) |val| {
+        if (gguf_file.get_metadata("tokenizer.ggml.add_bos_token")) |val| {
             switch (val) {
                 .bool_ => |b| add_bos = b,
                 else => {},
@@ -89,7 +89,7 @@ pub const SentencePieceTokenizer = struct {
     const Match = struct { len: usize, id: u32 };
 
     /// 先頭に "▁" を付与した最長一致を試みる
-    fn matchWithSpPrefix(self: *const Self, text: []const u8, pos: usize) Match {
+    fn match_with_sp_prefix(self: *const Self, text: []const u8, pos: usize) Match {
         var best: Match = .{ .len = 0, .id = self.unk_id };
         var try_len: usize = @min(text.len - pos, 64);
         while (try_len > 0) : (try_len -= 1) {
@@ -108,7 +108,7 @@ pub const SentencePieceTokenizer = struct {
     }
 
     /// prefix 無しの最長一致を試みる (現状の best を更新する形で返す)
-    fn matchPlain(self: *const Self, text: []const u8, pos: usize, current: Match) Match {
+    fn match_plain(self: *const Self, text: []const u8, pos: usize, current: Match) Match {
         var best = current;
         var try_len: usize = @min(text.len - pos, 64);
         while (try_len > 0) : (try_len -= 1) {
@@ -121,7 +121,7 @@ pub const SentencePieceTokenizer = struct {
     }
 
     /// 1 バイトのフォールバック (<0xNN> または unk) をトークン列に追記
-    fn appendByteFallback(
+    fn append_byte_fallback(
         self: *const Self,
         byte: u8,
         tokens: *std.ArrayListAligned(u32, null),
@@ -155,11 +155,11 @@ pub const SentencePieceTokenizer = struct {
 
         while (pos < text.len) {
             var best: Match = .{ .len = 0, .id = self.unk_id };
-            if (is_word_start) best = self.matchWithSpPrefix(text, pos);
-            best = self.matchPlain(text, pos, best);
+            if (is_word_start) best = self.match_with_sp_prefix(text, pos);
+            best = self.match_plain(text, pos, best);
 
             if (best.len == 0) {
-                try self.appendByteFallback(text[pos], &tokens, allocator);
+                try self.append_byte_fallback(text[pos], &tokens, allocator);
                 pos += 1;
                 is_word_start = false;
             } else {

@@ -7,13 +7,13 @@ const compute = @import("../compute.zig");
 const Module = compute.Module;
 const ParamHandle = compute.ParamHandle;
 
-pub fn Embedding(comptime vocab_size: usize, comptime embed_dim: usize) type {
+pub fn embedding(comptime vocab_size: usize, comptime embed_dim: usize) type {
     return struct {
         w: ParamHandle,
 
         pub fn init(module: anytype) @This() {
             return .{
-                .w = module.addParam(&.{ vocab_size, embed_dim }, .xavier),
+                .w = module.add_param(&.{ vocab_size, embed_dim }, .xavier),
             };
         }
 

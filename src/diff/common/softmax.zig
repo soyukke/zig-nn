@@ -15,7 +15,7 @@
 // どちらも parent.grad への accumulate (+=)。
 
 /// softmax 出力 s (rows * cols) と出力勾配 go から parent 勾配に accumulate。
-pub fn softmaxBackward(
+pub fn softmax_backward(
     ga: [*]f32,
     go: [*]const f32,
     s: [*]const f32,
@@ -34,7 +34,7 @@ pub fn softmaxBackward(
 
 /// logSoftmax 出力 log_s (= log-softmax values) から softmax を復元しつつ backward 計算。
 /// s は呼び出し側で用意しなくて良い（exp で都度計算、state 不要）。
-pub fn logSoftmaxBackward(
+pub fn log_softmax_backward(
     ga: [*]f32,
     go: [*]const f32,
     log_s: [*]const f32,
@@ -79,7 +79,7 @@ test "softmaxBackward matches numerical gradient" {
     for (0..n) |i| go[i] = w[i]; // dL/ds_i = w_i
 
     var ga = [_]f32{ 0, 0, 0, 0 };
-    softmaxBackward(&ga, &go, &s, 1, n);
+    softmax_backward(&ga, &go, &s, 1, n);
 
     // numerical: dL/dx_k via finite diff on softmax forward
     const eps: f32 = 1e-3;

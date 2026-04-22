@@ -47,7 +47,7 @@ pub const ThreadPool = struct {
         pool.* = .{};
         const n = @min(if (n_threads > 1) n_threads - 1 else 0, MAX_WORKERS);
         for (0..n) |i| {
-            pool.workers[i] = std.Thread.spawn(.{}, workerLoop, .{ pool, i }) catch break;
+            pool.workers[i] = std.Thread.spawn(.{}, worker_loop, .{ pool, i }) catch break;
             pool.n_workers += 1;
         }
         return pool;
@@ -62,7 +62,7 @@ pub const ThreadPool = struct {
         allocator.destroy(pool);
     }
 
-    fn workerLoop(pool: *ThreadPool, id: usize) void {
+    fn worker_loop(pool: *ThreadPool, id: usize) void {
         var my_gen: u32 = 0;
         while (true) {
             // Spin until new generation or shutdown
@@ -77,7 +77,7 @@ pub const ThreadPool = struct {
 
             const w = &pool.work[id];
             if (w.row_end > w.row_start) {
-                matmulChunkQ8(
+                matmul_chunk_q8(
                     w.weight,
                     w.q8_input,
                     w.output,
@@ -103,22 +103,22 @@ pub const ThreadPool = struct {
         qt: QuantType,
     ) void {
         const row_bytes: usize = switch (qt) {
-            .q4_0 => dequant.tensorBytes(.q4_0, in_dim),
-            .q4_1 => dequant.tensorBytes(.q4_1, in_dim),
-            .q8_0 => dequant.tensorBytes(.q8_0, in_dim),
+            .q4_0 => dequant.tensor_bytes(.q4_0, in_dim),
+            .q4_1 => dequant.tensor_bytes(.q4_1, in_dim),
+            .q8_0 => dequant.tensor_bytes(.q8_0, in_dim),
         };
 
         // (1) 入力を Q8 に量子化 (1回だけ、メインスレッド)
         const num_blocks = in_dim / 32;
         const q8_slice = pool.q8_buf[0..num_blocks];
-        simd_dot.quantizeRowQ8(input[0..in_dim], q8_slice);
+        simd_dot.quantize_row_q8(input[0..in_dim], q8_slice);
 
         // Total threads = workers + main; min 256 rows/thread
         const total_threads = pool.n_workers + 1;
         const effective = @max(1, @min(total_threads, out_dim / 256));
 
         if (effective <= 1 or pool.n_workers == 0) {
-            matmulChunkQ8(weight, q8_slice, output, 0, out_dim, row_bytes, qt);
+            matmul_chunk_q8(weight, q8_slice, output, 0, out_dim, row_bytes, qt);
             return;
         }
 
@@ -151,7 +151,7 @@ pub const ThreadPool = struct {
         _ = @atomicRmw(u32, &pool.gen, .Add, 1, .release);
 
         // Main thread does first chunk
-        matmulChunkQ8(weight, q8_slice, output, 0, rows_per, row_bytes, qt);
+        matmul_chunk_q8(weight, q8_slice, output, 0, rows_per, row_bytes, qt);
 
         // Wait for all workers (including inactive ones that just decrement)
         while (@atomicLoad(u32, &pool.pending, .acquire) != 0) {
@@ -161,7 +161,7 @@ pub const ThreadPool = struct {
 };
 
 /// Q8 整数ドット積を使った matmul チャンク (ワーカースレッド用)
-fn matmulChunkQ8(
+fn matmul_chunk_q8(
     weight: []const u8,
     q8_input: []const Q8Block,
     output: []f32,
@@ -173,9 +173,9 @@ fn matmulChunkQ8(
     for (row_start..row_end) |j| {
         const row = weight[j * row_bytes ..][0..row_bytes];
         output[j] = switch (quant_type) {
-            .q4_0 => simd_dot.dotQ4_0_q8(row, q8_input),
-            .q4_1 => simd_dot.dotQ4_1_q8(row, q8_input),
-            .q8_0 => simd_dot.dotQ8_0_q8(row, q8_input),
+            .q4_0 => simd_dot.dot_q4_0_q8(row, q8_input),
+            .q4_1 => simd_dot.dot_q4_1_q8(row, q8_input),
+            .q8_0 => simd_dot.dot_q8_0_q8(row, q8_input),
         };
     }
 }

@@ -21,7 +21,7 @@ const matmul_common = @import("common/matmul.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
-pub const DiffNode = diff_node.DiffNodeGeneric([]f32, kernels.MAX_NDIM);
+pub const DiffNode = diff_node.diff_node_generic([]f32, kernels.MAX_NDIM);
 
 // ── Backward function types ──
 const BackwardFn = *const fn (*DiffNode) void;
@@ -39,19 +39,19 @@ pub const DiffCpuRuntime = struct {
     training: bool,
 
     pub fn init(module: *const Module, allocator: Allocator) !DiffCpuRuntime {
-        const count = module.paramCount();
+        const count = module.param_count();
         const param_nodes = try allocator.alloc(DiffNode, count);
         const param_grads = try allocator.alloc([]f32, count);
 
         for (module.params.items, 0..) |meta, i| {
-            const size = module.paramSize(.{ .index = i });
+            const size = module.param_size(.{ .index = i });
             const data = try allocator.alloc(f32, size);
             const grad = try allocator.alloc(f32, size);
             @memset(grad, 0);
 
             param_nodes[i] = .{
                 .data = data,
-                .shape = kernels.initShapeArray(meta.shape),
+                .shape = kernels.init_shape_array(meta.shape),
                 .ndim = meta.shape.len,
                 .grad = grad,
                 .backward_fn = null,
@@ -88,7 +88,7 @@ pub const DiffCpuRuntime = struct {
         self.topo_buf.deinit(self.allocator);
     }
 
-    pub fn resetArena(self: *DiffCpuRuntime) void {
+    pub fn reset_arena(self: *DiffCpuRuntime) void {
         _ = self.arena.reset(.retain_capacity);
         // Reset visited flags on params
         for (self.param_nodes) |*node| {
@@ -96,7 +96,7 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    pub fn zeroGrad(self: *DiffCpuRuntime) void {
+    pub fn zero_grad(self: *DiffCpuRuntime) void {
         for (self.param_grads) |grad| {
             @memset(grad, 0);
         }
@@ -106,22 +106,22 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn arenaAlloc(self: *DiffCpuRuntime) Allocator {
+    fn arena_alloc(self: *DiffCpuRuntime) Allocator {
         return self.arena.allocator();
     }
 
     // ── Tensor/Node creation helpers ──
 
-    pub fn makeNode(
+    pub fn make_node(
         self: *DiffCpuRuntime,
         data: []f32,
         shape_slice: []const usize,
         requires_grad: bool,
     ) *DiffNode {
-        const node = self.arenaAlloc().create(DiffNode) catch unreachable;
+        const node = self.arena_alloc().create(DiffNode) catch unreachable;
         node.* = .{
             .data = data,
-            .shape = kernels.initShapeArray(shape_slice),
+            .shape = kernels.init_shape_array(shape_slice),
             .ndim = shape_slice.len,
             .grad = null,
             .backward_fn = null,
@@ -135,24 +135,24 @@ pub const DiffCpuRuntime = struct {
         return node;
     }
 
-    pub fn makeTensor(self: *DiffCpuRuntime, data: []f32, shape: []const usize) DiffTensor {
-        return self.makeNode(data, shape, false);
+    pub fn make_tensor(self: *DiffCpuRuntime, data: []f32, shape: []const usize) DiffTensor {
+        return self.make_node(data, shape, false);
     }
 
-    pub fn allocData(self: *DiffCpuRuntime, size: usize) []f32 {
-        return self.arenaAlloc().alloc(f32, size) catch unreachable;
+    pub fn alloc_data(self: *DiffCpuRuntime, size: usize) []f32 {
+        return self.arena_alloc().alloc(f32, size) catch unreachable;
     }
 
-    fn allocGrad(self: *DiffCpuRuntime, size: usize) []f32 {
-        const g = self.arenaAlloc().alloc(f32, size) catch unreachable;
+    fn alloc_grad(self: *DiffCpuRuntime, size: usize) []f32 {
+        const g = self.arena_alloc().alloc(f32, size) catch unreachable;
         @memset(g, 0);
         return g;
     }
 
     // ── Context allocation helper ──
 
-    fn allocContext(self: *DiffCpuRuntime, comptime T: type) *T {
-        return self.arenaAlloc().create(T) catch unreachable;
+    fn alloc_context(self: *DiffCpuRuntime, comptime T: type) *T {
+        return self.arena_alloc().create(T) catch unreachable;
     }
 
     // ── Unary op helper ──
@@ -161,23 +161,23 @@ pub const DiffCpuRuntime = struct {
     /// fwd は comptime 関数ポインタなので確実にインライン展開される。
     /// Pointwise unary op driver. 数式は diff/common/unary.zig に集約。
     /// comptime Kind で forward/backward の関数ポインタを特殊化する。
-    fn unaryKind(self: *DiffCpuRuntime, comptime kind: unary.Kind, x: DiffTensor) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
+    fn unary_kind(self: *DiffCpuRuntime, comptime kind: unary.Kind, x: DiffTensor) DiffTensor {
+        const total = x.total_elements();
+        const out = self.alloc_data(total);
         for (0..total) |i| out[i] = kind.fwd(x.data[i]);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &UnaryBackward(kind).apply;
+            node.backward_fn = &unary_backward(kind).apply;
         }
         return node;
     }
 
-    fn UnaryBackward(comptime kind: unary.Kind) type {
+    fn unary_backward(comptime kind: unary.Kind) type {
         return struct {
             fn apply(self_node: *DiffNode) void {
                 const pa = self_node.parents[0].?;
-                const total = self_node.totalElements();
+                const total = self_node.total_elements();
                 const go = self_node.grad.?;
                 if (pa.grad) |ga| {
                     for (0..total) |i| {
@@ -190,42 +190,42 @@ pub const DiffCpuRuntime = struct {
 
     /// Pointwise binary op driver. 数式は diff/common/binary.zig に集約。
     /// broadcasting: a と b の総要素数の大きい方が出力。mod index で shape mismatch を吸収。
-    fn binaryKind(
+    fn binary_kind(
         self: *DiffCpuRuntime,
         comptime kind: binary.Kind,
         a: DiffTensor,
         b: DiffTensor,
     ) DiffTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
+        const a_total = a.total_elements();
+        const b_total = b.total_elements();
         const out_total = @max(a_total, b_total);
         const smaller = @min(a_total, b_total);
         if (!(a_total == b_total or out_total % smaller == 0)) {
             @panic("binary: incompatible shapes for broadcast");
         }
         const out_shape = if (a_total >= b_total) a.shape[0..a.ndim] else b.shape[0..b.ndim];
-        const out = self.allocData(out_total);
+        const out = self.alloc_data(out_total);
         for (0..out_total) |i| {
             out[i] = kind.fwd(a.data[i % a_total], b.data[i % b_total]);
         }
         const rg = a.requires_grad or b.requires_grad;
-        const node = self.makeNode(out, out_shape, rg);
+        const node = self.make_node(out, out_shape, rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            node.backward_fn = &BinaryBackward(kind).apply;
+            node.backward_fn = &binary_backward(kind).apply;
         }
         return node;
     }
 
-    fn BinaryBackward(comptime kind: binary.Kind) type {
+    fn binary_backward(comptime kind: binary.Kind) type {
         return struct {
             fn apply(self_node: *DiffNode) void {
                 const pa = self_node.parents[0].?;
                 const pb = self_node.parents[1].?;
-                const out_total = self_node.totalElements();
-                const a_total = pa.totalElements();
-                const b_total = pb.totalElements();
+                const out_total = self_node.total_elements();
+                const a_total = pa.total_elements();
+                const b_total = pb.total_elements();
                 const go = self_node.grad.?;
                 const y = self_node.data;
                 if (pa.grad) |ga| {
@@ -254,14 +254,14 @@ pub const DiffCpuRuntime = struct {
 
     // ── Leaf ops ──
 
-    pub fn constantScalar(self: *DiffCpuRuntime, val: f64, dtype: u32) DiffTensor {
+    pub fn constant_scalar(self: *DiffCpuRuntime, val: f64, dtype: u32) DiffTensor {
         _ = dtype;
-        const out = self.allocData(1);
+        const out = self.alloc_data(1);
         out[0] = @floatCast(val);
-        return self.makeNode(out, &.{1}, false);
+        return self.make_node(out, &.{1}, false);
     }
 
-    pub fn constantData(
+    pub fn constant_data(
         self: *DiffCpuRuntime,
         data: [*]const u8,
         len: usize,
@@ -270,80 +270,80 @@ pub const DiffCpuRuntime = struct {
     ) DiffTensor {
         _ = dtype;
         const n_floats = len / @sizeOf(f32);
-        const out = self.allocData(n_floats);
+        const out = self.alloc_data(n_floats);
         const src: [*]const f32 = @ptrCast(@alignCast(data));
         @memcpy(out, src[0..n_floats]);
-        return self.makeNode(out, new_shape, false);
+        return self.make_node(out, new_shape, false);
     }
 
-    pub fn stopGradient(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
+    pub fn stop_gradient(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
         // Create a new node with same data but requires_grad=false
-        const node = self.makeNode(x.data, x.shape[0..x.ndim], false);
+        const node = self.make_node(x.data, x.shape[0..x.ndim], false);
         return node;
     }
 
     // ── Unary ops ──
 
     pub fn negative(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Negative, x);
+        return self.unary_kind(unary.Negative, x);
     }
 
     pub fn gelu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Gelu, x);
+        return self.unary_kind(unary.Gelu, x);
     }
 
     pub fn silu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Silu, x);
+        return self.unary_kind(unary.Silu, x);
     }
 
     /// Fused add + silu: silu(a + b) — delegates to add then silu
-    pub fn addSilu(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
+    pub fn add_silu(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
         return self.silu(self.add(a, b));
     }
 
     pub fn square(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Square, x);
+        return self.unary_kind(unary.Square, x);
     }
 
     // ── exp / log / abs / sqrt / clamp ──
 
     pub fn exp(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Exp, x);
+        return self.unary_kind(unary.Exp, x);
     }
 
     pub fn log(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Log, x);
+        return self.unary_kind(unary.Log, x);
     }
 
     pub fn abs(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Abs, x);
+        return self.unary_kind(unary.Abs, x);
     }
 
     pub fn sqrt(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Sqrt, x);
+        return self.unary_kind(unary.Sqrt, x);
     }
 
     /// clamp(x, min, max) — gradient passes through if min <= x <= max
     pub fn clamp(self: *DiffCpuRuntime, x: DiffTensor, min_val: f32, max_val: f32) DiffTensor {
-        const total = x.totalElements();
-        const out = self.allocData(total);
+        const total = x.total_elements();
+        const out = self.alloc_data(total);
         for (0..total) |i| out[i] = @min(@max(x.data[i], min_val), max_val);
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(ClampContext);
+            const ctx = self.alloc_context(ClampContext);
             ctx.* = .{ .min_val = min_val, .max_val = max_val };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardClamp;
+            node.backward_fn = &backward_clamp;
         }
         return node;
     }
 
     const ClampContext = struct { min_val: f32, max_val: f32 };
 
-    fn backwardClamp(self_node: *DiffNode) void {
+    fn backward_clamp(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
-        const total = self_node.totalElements();
+        const total = self_node.total_elements();
         const go = self_node.grad.?;
         const ctx: *const ClampContext = @ptrCast(@alignCast(self_node.context.?));
         if (pa.grad) |ga| {
@@ -356,29 +356,29 @@ pub const DiffCpuRuntime = struct {
 
     /// element-wise div: a / b — d/da = 1/b, d/db = -a/b^2
     pub fn div(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        return self.binaryKind(binary.Div, a, b);
+        return self.binary_kind(binary.Div, a, b);
     }
 
-    pub fn tanh_(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Tanh, x);
+    pub fn tanh(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
+        return self.unary_kind(unary.Tanh, x);
     }
 
     pub fn sigmoid(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Sigmoid, x);
+        return self.unary_kind(unary.Sigmoid, x);
     }
 
     // ── Binary ops (数式は diff/common/binary.zig) ──
 
     pub fn add(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        return self.binaryKind(binary.Add, a, b);
+        return self.binary_kind(binary.Add, a, b);
     }
 
     pub fn sub(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        return self.binaryKind(binary.Sub, a, b);
+        return self.binary_kind(binary.Sub, a, b);
     }
 
     pub fn mul(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        return self.binaryKind(binary.Mul, a, b);
+        return self.binary_kind(binary.Mul, a, b);
     }
 
     // ── Matmul ──
@@ -386,35 +386,35 @@ pub const DiffCpuRuntime = struct {
     pub fn matmul(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
         const rg = a.requires_grad or b.requires_grad;
 
-        if (a.ndim == 2 and b.ndim == 2) return self.matmul2D(a, b, rg);
-        if (a.ndim == 3 and b.ndim == 3) return self.matmul3D(a, b, rg);
+        if (a.ndim == 2 and b.ndim == 2) return self.matmul2d(a, b, rg);
+        if (a.ndim == 3 and b.ndim == 3) return self.matmul3d(a, b, rg);
         // 2D @ 3D: treat as batch with shared 2D
-        if (a.ndim == 2 and b.ndim == 3) return self.matmul2D3D(a, b, rg);
+        if (a.ndim == 2 and b.ndim == 3) return self.matmul2_d3d(a, b, rg);
 
         @panic("matmul: unsupported shape combination (expected 2D or 3D)");
     }
 
-    fn matmul2D(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
+    fn matmul2d(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
         const M = a.shape[0];
         const K = a.shape[1];
         const N = b.shape[1];
-        const out = self.allocData(M * N);
+        const out = self.alloc_data(M * N);
         cpu_backend.matmul(f32, a.data.ptr, b.data.ptr, out.ptr, M, K, N);
-        const node = self.makeNode(out, &.{ M, N }, rg);
+        const node = self.make_node(out, &.{ M, N }, rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            node.backward_fn = &backwardMatmul2D;
+            node.backward_fn = &backward_matmul2d;
         }
         return node;
     }
 
-    fn matmul3D(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
+    fn matmul3d(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
         const B = a.shape[0];
         const M = a.shape[1];
         const K = a.shape[2];
         const N = b.shape[2];
-        const out = self.allocData(B * M * N);
+        const out = self.alloc_data(B * M * N);
         for (0..B) |batch| {
             cpu_backend.matmul(
                 f32,
@@ -426,21 +426,21 @@ pub const DiffCpuRuntime = struct {
                 N,
             );
         }
-        const node = self.makeNode(out, &.{ B, M, N }, rg);
+        const node = self.make_node(out, &.{ B, M, N }, rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            node.backward_fn = &backwardMatmul3D;
+            node.backward_fn = &backward_matmul3d;
         }
         return node;
     }
 
-    fn matmul2D3D(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
+    fn matmul2_d3d(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, rg: bool) DiffTensor {
         const B = b.shape[0];
         const M = a.shape[0];
         const K = a.shape[1];
         const N = b.shape[2];
-        const out = self.allocData(B * M * N);
+        const out = self.alloc_data(B * M * N);
         for (0..B) |batch| {
             cpu_backend.matmul(
                 f32,
@@ -452,11 +452,11 @@ pub const DiffCpuRuntime = struct {
                 N,
             );
         }
-        const node = self.makeNode(out, &.{ B, M, N }, rg);
+        const node = self.make_node(out, &.{ B, M, N }, rg);
         if (rg) {
             node.parents[0] = a;
             node.parents[1] = b;
-            node.backward_fn = &backwardMatmul2D3D;
+            node.backward_fn = &backward_matmul2_d3d;
         }
         return node;
     }
@@ -468,14 +468,14 @@ pub const DiffCpuRuntime = struct {
     //
     // 3D batched / 2D @ 3D (a 共有) も同じ公式を batch 毎に適用するだけ。
 
-    fn backwardMatmul2D(self_node: *DiffNode) void {
+    fn backward_matmul2d(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[1];
-        matmul_common.backward2D(
+        matmul_common.backward2d(
             go.ptr,
             pa.data.ptr,
             pb.data.ptr,
@@ -487,7 +487,7 @@ pub const DiffCpuRuntime = struct {
         );
     }
 
-    fn backwardMatmul3D(self_node: *DiffNode) void {
+    fn backward_matmul3d(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
@@ -495,7 +495,7 @@ pub const DiffCpuRuntime = struct {
         const M = pa.shape[1];
         const K = pa.shape[2];
         const N = pb.shape[2];
-        matmul_common.backward3D(
+        matmul_common.backward3d(
             go.ptr,
             pa.data.ptr,
             pb.data.ptr,
@@ -508,7 +508,7 @@ pub const DiffCpuRuntime = struct {
         );
     }
 
-    fn backwardMatmul2D3D(self_node: *DiffNode) void {
+    fn backward_matmul2_d3d(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
@@ -516,7 +516,7 @@ pub const DiffCpuRuntime = struct {
         const M = pa.shape[0];
         const K = pa.shape[1];
         const N = pb.shape[2];
-        matmul_common.backward2Dx3D(
+        matmul_common.backward2_dx3d(
             go.ptr,
             pa.data.ptr,
             pb.data.ptr,
@@ -533,14 +533,14 @@ pub const DiffCpuRuntime = struct {
 
     pub fn reshape(self: *DiffCpuRuntime, x: DiffTensor, new_shape: []const usize) DiffTensor {
         // Data is shared (no copy), reshape just changes the view
-        const node = self.makeNode(x.data, new_shape, x.requires_grad);
+        const node = self.make_node(x.data, new_shape, x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
             // Save original shape in context for backward
-            const ctx = self.allocContext(ReshapeContext);
+            const ctx = self.alloc_context(ReshapeContext);
             ctx.* = .{ .orig_ndim = x.ndim, .orig_shape = x.shape };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardReshape;
+            node.backward_fn = &backward_reshape;
         }
         return node;
     }
@@ -550,12 +550,12 @@ pub const DiffCpuRuntime = struct {
         orig_shape: [MAX_NDIM]usize,
     };
 
-    fn backwardReshape(self_node: *DiffNode) void {
+    fn backward_reshape(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
         // Reshape grad shares the same memory, just accumulate
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
+            const total = self_node.total_elements();
             for (0..total) |i| ga[i] += go[i];
         }
     }
@@ -569,7 +569,7 @@ pub const DiffCpuRuntime = struct {
             const R = x.shape[1];
             const C = x.shape[2];
             const total = B * R * C;
-            const out = self.allocData(total);
+            const out = self.alloc_data(total);
             for (0..B) |b| {
                 for (0..R) |i| {
                     for (0..C) |j| {
@@ -577,10 +577,10 @@ pub const DiffCpuRuntime = struct {
                     }
                 }
             }
-            const node = self.makeNode(out, &.{ B, C, R }, x.requires_grad);
+            const node = self.make_node(out, &.{ B, C, R }, x.requires_grad);
             if (x.requires_grad) {
                 node.parents[0] = x;
-                node.backward_fn = &backwardTranspose3D;
+                node.backward_fn = &backward_transpose3d;
             }
             return node;
         }
@@ -588,16 +588,16 @@ pub const DiffCpuRuntime = struct {
         if (x.ndim == 2 and dim1 == 0 and dim2 == 1) {
             const R = x.shape[0];
             const C = x.shape[1];
-            const out = self.allocData(R * C);
+            const out = self.alloc_data(R * C);
             for (0..R) |i| {
                 for (0..C) |j| {
                     out[j * R + i] = x.data[i * C + j];
                 }
             }
-            const node = self.makeNode(out, &.{ C, R }, x.requires_grad);
+            const node = self.make_node(out, &.{ C, R }, x.requires_grad);
             if (x.requires_grad) {
                 node.parents[0] = x;
-                node.backward_fn = &backwardTranspose2D;
+                node.backward_fn = &backward_transpose2d;
             }
             return node;
         }
@@ -605,7 +605,7 @@ pub const DiffCpuRuntime = struct {
         @panic("transpose: unsupported ndim (expected 2D or 3D)");
     }
 
-    fn backwardTranspose3D(self_node: *DiffNode) void {
+    fn backward_transpose3d(self_node: *DiffNode) void {
         // self_node shape: [B, C, R], parent shape: [B, R, C]
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
@@ -624,7 +624,7 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn backwardTranspose2D(self_node: *DiffNode) void {
+    fn backward_transpose2d(self_node: *DiffNode) void {
         // self_node shape: [C, R], parent shape: [R, C]
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
@@ -643,27 +643,27 @@ pub const DiffCpuRuntime = struct {
 
     pub fn softmax(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
         _ = axis;
-        const total = x.totalElements();
-        const cols = x.lastDim();
+        const total = x.total_elements();
+        const cols = x.last_dim();
         const rows = total / cols;
-        const out = self.allocData(total);
+        const out = self.alloc_data(total);
         @memcpy(out, x.data[0..total]);
-        kernels.softmaxForward(out, rows, cols);
+        kernels.softmax_forward(out, rows, cols);
 
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &backwardSoftmax;
+            node.backward_fn = &backward_softmax;
         }
         return node;
     }
 
-    fn backwardSoftmax(self_node: *DiffNode) void {
+    fn backward_softmax(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const cols = self_node.lastDim();
-            const rows = self_node.totalElements() / cols;
-            softmax_common.softmaxBackward(
+            const cols = self_node.last_dim();
+            const rows = self_node.total_elements() / cols;
+            softmax_common.softmax_backward(
                 ga.ptr,
                 self_node.grad.?.ptr,
                 self_node.data.ptr,
@@ -673,29 +673,29 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    pub fn logSoftmax(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
+    pub fn log_softmax(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
         _ = axis;
-        const total = x.totalElements();
-        const cols = x.lastDim();
+        const total = x.total_elements();
+        const cols = x.last_dim();
         const rows = total / cols;
-        const out = self.allocData(total);
+        const out = self.alloc_data(total);
         // softmax cache は不要 (backward で @exp(log_s) で復元)
-        kernels.logSoftmaxForward(x.data[0..total], out, rows, cols, null);
+        kernels.log_softmax_forward(x.data[0..total], out, rows, cols, null);
 
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &backwardLogSoftmax;
+            node.backward_fn = &backward_log_softmax;
         }
         return node;
     }
 
-    fn backwardLogSoftmax(self_node: *DiffNode) void {
+    fn backward_log_softmax(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
-            const cols = self_node.lastDim();
-            const rows = self_node.totalElements() / cols;
-            softmax_common.logSoftmaxBackward(
+            const cols = self_node.last_dim();
+            const rows = self_node.total_elements() / cols;
+            softmax_common.log_softmax_backward(
                 ga.ptr,
                 self_node.grad.?.ptr,
                 self_node.data.ptr,
@@ -705,48 +705,48 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    pub fn reductionSum(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
+    pub fn reduction_sum(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
         const actual_axis: usize = if (axis < 0)
             @intCast(@as(i64, @intCast(x.ndim)) + axis)
         else
             @intCast(axis);
 
-        if (x.ndim == 2) return self.reductionSum2D(x, actual_axis);
-        if (x.ndim == 1) return self.reductionSum1D(x);
-        if (x.ndim >= 3) return self.reductionSumNDim(x, actual_axis);
+        if (x.ndim == 2) return self.reduction_sum2d(x, actual_axis);
+        if (x.ndim == 1) return self.reduction_sum1d(x);
+        if (x.ndim >= 3) return self.reduction_sum_n_dim(x, actual_axis);
 
         @panic("reductionSum: unsupported ndim/axis combination");
     }
 
-    fn reductionSum2D(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
+    fn reduction_sum2d(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
         const rows = x.shape[0];
         const cols = x.shape[1];
         if (actual_axis == 1) {
-            const out = self.allocData(rows);
-            kernels.reductionSumRows(x.data[0 .. rows * cols], out, rows, cols);
-            const node = self.makeNode(out, &.{ rows, 1 }, x.requires_grad);
-            if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleSum());
+            const out = self.alloc_data(rows);
+            kernels.reduction_sum_rows(x.data[0 .. rows * cols], out, rows, cols);
+            const node = self.make_node(out, &.{ rows, 1 }, x.requires_grad);
+            if (x.requires_grad) self.set_reduce_backward(node, x, .axis1_2d, reduce.scale_sum());
             return node;
         } else {
-            const out = self.allocData(cols);
-            kernels.reductionSumCols(x.data[0 .. rows * cols], out, rows, cols);
-            const node = self.makeNode(out, &.{ 1, cols }, x.requires_grad);
-            if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleSum());
+            const out = self.alloc_data(cols);
+            kernels.reduction_sum_cols(x.data[0 .. rows * cols], out, rows, cols);
+            const node = self.make_node(out, &.{ 1, cols }, x.requires_grad);
+            if (x.requires_grad) self.set_reduce_backward(node, x, .axis0_2d, reduce.scale_sum());
             return node;
         }
     }
 
-    fn reductionSum1D(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const out = self.allocData(1);
-        out[0] = kernels.reductionSum1D(x.data[0..x.totalElements()]);
-        const node = self.makeNode(out, &.{1}, x.requires_grad);
-        if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleSum());
+    fn reduction_sum1d(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
+        const out = self.alloc_data(1);
+        out[0] = kernels.reduction_sum1d(x.data[0..x.total_elements()]);
+        const node = self.make_node(out, &.{1}, x.requires_grad);
+        if (x.requires_grad) self.set_reduce_backward(node, x, .all, reduce.scale_sum());
         return node;
     }
 
     // ndim >= 3: flatten around the reduction axis
-    fn reductionSumNDim(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
-        const total = x.totalElements();
+    fn reduction_sum_n_dim(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
+        const total = x.total_elements();
         // Compute before/axis_dim/after
         var before: usize = 1;
         for (0..actual_axis) |d| before *= x.shape[d];
@@ -757,7 +757,7 @@ pub const DiffCpuRuntime = struct {
         if (actual_axis == x.ndim - 1) {
             // reduce last dim: reshape to [total/last, last] then sum axis=1
             const flat = self.reshape(x, &.{ total / axis_dim, axis_dim });
-            const reduced = self.reductionSum(flat, 1);
+            const reduced = self.reduction_sum(flat, 1);
             var new_shape: [8]usize = undefined;
             for (0..x.ndim - 1) |d| new_shape[d] = x.shape[d];
             new_shape[x.ndim - 1] = 1;
@@ -765,7 +765,7 @@ pub const DiffCpuRuntime = struct {
         } else if (actual_axis == 0) {
             // reduce first dim: reshape to [first, total/first] then sum axis=0
             const flat = self.reshape(x, &.{ axis_dim, total / axis_dim });
-            const reduced = self.reductionSum(flat, 0);
+            const reduced = self.reduction_sum(flat, 0);
             var new_shape: [8]usize = undefined;
             new_shape[0] = 1;
             for (1..x.ndim) |d| new_shape[d] = x.shape[d];
@@ -777,7 +777,7 @@ pub const DiffCpuRuntime = struct {
             const r3 = self.reshape(x, &.{ before, axis_dim, after });
             const t3 = self.transpose(r3, 1, 2); // [before, after, axis_dim]
             const flat = self.reshape(t3, &.{ before * after, axis_dim });
-            const reduced = self.reductionSum(flat, 1); // [before*after, 1]
+            const reduced = self.reduction_sum(flat, 1); // [before*after, 1]
             // output shape: original with shape[axis] = 1
             var new_shape: [8]usize = undefined;
             for (0..x.ndim) |d| new_shape[d] = x.shape[d];
@@ -797,7 +797,7 @@ pub const DiffCpuRuntime = struct {
         scale: f32,
     };
 
-    fn setReduceBackward(
+    fn set_reduce_backward(
         self: *DiffCpuRuntime,
         node: *DiffNode,
         parent: DiffTensor,
@@ -805,13 +805,13 @@ pub const DiffCpuRuntime = struct {
         scale: f32,
     ) void {
         node.parents[0] = parent;
-        const ctx = self.allocContext(ReduceContext);
+        const ctx = self.alloc_context(ReduceContext);
         ctx.* = .{ .case = case, .scale = scale };
         node.context = @ptrCast(ctx);
-        node.backward_fn = &backwardReduction;
+        node.backward_fn = &backward_reduction;
     }
 
-    fn backwardReduction(self_node: *DiffNode) void {
+    fn backward_reduction(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         if (pa.grad) |ga| {
             const ctx: *const ReduceContext = @ptrCast(@alignCast(self_node.context.?));
@@ -819,63 +819,63 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    pub fn reductionMean(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
+    pub fn reduction_mean(self: *DiffCpuRuntime, x: DiffTensor, axis: i64) DiffTensor {
         const actual_axis: usize = if (axis < 0)
             @intCast(@as(i64, @intCast(x.ndim)) + axis)
         else
             @intCast(axis);
 
-        if (x.ndim == 2) return self.reductionMean2D(x, actual_axis);
-        if (x.ndim == 1) return self.reductionMean1D(x);
-        if (x.ndim >= 3) return self.reductionMeanNDim(x, actual_axis);
+        if (x.ndim == 2) return self.reduction_mean2d(x, actual_axis);
+        if (x.ndim == 1) return self.reduction_mean1d(x);
+        if (x.ndim >= 3) return self.reduction_mean_n_dim(x, actual_axis);
 
         @panic("reductionMean: unsupported ndim/axis combination");
     }
 
-    fn reductionMean2D(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
+    fn reduction_mean2d(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
         const rows = x.shape[0];
         const cols = x.shape[1];
         if (actual_axis == 1) {
-            const out = self.allocData(rows);
+            const out = self.alloc_data(rows);
             for (0..rows) |i| {
                 var s: f32 = 0;
                 for (0..cols) |j| s += x.data[i * cols + j];
                 out[i] = s / @as(f32, @floatFromInt(cols));
             }
-            const node = self.makeNode(out, &.{ rows, 1 }, x.requires_grad);
+            const node = self.make_node(out, &.{ rows, 1 }, x.requires_grad);
             if (x.requires_grad)
-                self.setReduceBackward(node, x, .axis1_2d, reduce.scaleMean(cols));
+                self.set_reduce_backward(node, x, .axis1_2d, reduce.scale_mean(cols));
             return node;
         } else {
-            const out = self.allocData(cols);
+            const out = self.alloc_data(cols);
             @memset(out, 0);
             for (0..rows) |i| {
                 for (0..cols) |j| out[j] += x.data[i * cols + j];
             }
             const rows_f: f32 = @floatFromInt(rows);
             for (0..cols) |j| out[j] /= rows_f;
-            const node = self.makeNode(out, &.{ 1, cols }, x.requires_grad);
+            const node = self.make_node(out, &.{ 1, cols }, x.requires_grad);
             if (x.requires_grad)
-                self.setReduceBackward(node, x, .axis0_2d, reduce.scaleMean(rows));
+                self.set_reduce_backward(node, x, .axis0_2d, reduce.scale_mean(rows));
             return node;
         }
     }
 
-    fn reductionMean1D(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        const total_elem = x.totalElements();
-        const out = self.allocData(1);
+    fn reduction_mean1d(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
+        const total_elem = x.total_elements();
+        const out = self.alloc_data(1);
         var s: f32 = 0;
         for (x.data[0..total_elem]) |v| s += v;
         out[0] = s / @as(f32, @floatFromInt(total_elem));
-        const node = self.makeNode(out, &.{1}, x.requires_grad);
+        const node = self.make_node(out, &.{1}, x.requires_grad);
         if (x.requires_grad)
-            self.setReduceBackward(node, x, .all, reduce.scaleMean(total_elem));
+            self.set_reduce_backward(node, x, .all, reduce.scale_mean(total_elem));
         return node;
     }
 
     // ndim >= 3: flatten around the reduction axis
-    fn reductionMeanNDim(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
-        const total = x.totalElements();
+    fn reduction_mean_n_dim(self: *DiffCpuRuntime, x: DiffTensor, actual_axis: usize) DiffTensor {
+        const total = x.total_elements();
         var before: usize = 1;
         for (0..actual_axis) |d| before *= x.shape[d];
         const axis_dim = x.shape[actual_axis];
@@ -884,14 +884,14 @@ pub const DiffCpuRuntime = struct {
 
         if (actual_axis == x.ndim - 1) {
             const flat = self.reshape(x, &.{ total / axis_dim, axis_dim });
-            const reduced = self.reductionMean(flat, 1);
+            const reduced = self.reduction_mean(flat, 1);
             var new_shape: [8]usize = undefined;
             for (0..x.ndim - 1) |d| new_shape[d] = x.shape[d];
             new_shape[x.ndim - 1] = 1;
             return self.reshape(reduced, new_shape[0..x.ndim]);
         } else if (actual_axis == 0) {
             const flat = self.reshape(x, &.{ axis_dim, total / axis_dim });
-            const reduced = self.reductionMean(flat, 0);
+            const reduced = self.reduction_mean(flat, 0);
             var new_shape: [8]usize = undefined;
             new_shape[0] = 1;
             for (1..x.ndim) |d| new_shape[d] = x.shape[d];
@@ -903,7 +903,7 @@ pub const DiffCpuRuntime = struct {
             const r3 = self.reshape(x, &.{ before, axis_dim, after });
             const t3 = self.transpose(r3, 1, 2);
             const flat = self.reshape(t3, &.{ before * after, axis_dim });
-            const reduced = self.reductionMean(flat, 1);
+            const reduced = self.reduction_mean(flat, 1);
             var new_shape: [8]usize = undefined;
             for (0..x.ndim) |d| new_shape[d] = x.shape[d];
             new_shape[actual_axis] = 1;
@@ -913,7 +913,7 @@ pub const DiffCpuRuntime = struct {
 
     // ── LayerNorm ──
 
-    pub fn layerNorm(
+    pub fn layer_norm(
         self: *DiffCpuRuntime,
         x: DiffTensor,
         gamma: DiffTensor,
@@ -922,13 +922,13 @@ pub const DiffCpuRuntime = struct {
         axis: i64,
     ) DiffTensor {
         _ = axis;
-        const total = x.totalElements();
-        const dim = x.lastDim();
+        const total = x.total_elements();
+        const dim = x.last_dim();
         const rows = total / dim;
-        const out = self.allocData(total);
-        const x_norm = self.allocData(total);
-        const inv_stds = self.allocData(rows);
-        kernels.layerNormForward(
+        const out = self.alloc_data(total);
+        const x_norm = self.alloc_data(total);
+        const inv_stds = self.alloc_data(rows);
+        kernels.layer_norm_forward(
             x.data[0..total],
             out,
             gamma.data[0..dim],
@@ -941,15 +941,15 @@ pub const DiffCpuRuntime = struct {
         );
 
         const rg = x.requires_grad or gamma.requires_grad or beta.requires_grad;
-        const node = self.makeNode(out, x.shape[0..x.ndim], rg);
+        const node = self.make_node(out, x.shape[0..x.ndim], rg);
         if (rg) {
             node.parents[0] = x;
             node.parents[1] = gamma;
             node.parents[2] = beta;
-            const ctx = self.allocContext(LayerNormContext);
+            const ctx = self.alloc_context(LayerNormContext);
             ctx.* = .{ .x_norm = x_norm, .inv_stds = inv_stds };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardLayerNorm;
+            node.backward_fn = &backward_layer_norm;
         }
         return node;
     }
@@ -959,7 +959,7 @@ pub const DiffCpuRuntime = struct {
         inv_stds: []f32,
     };
 
-    fn backwardLayerNorm(self_node: *DiffNode) void {
+    fn backward_layer_norm(self_node: *DiffNode) void {
         const px = self_node.parents[0].?;
         const pgamma = self_node.parents[1].?;
         const pbeta = self_node.parents[2].?;
@@ -968,8 +968,8 @@ pub const DiffCpuRuntime = struct {
         const x_norm = ctx.x_norm;
         const inv_stds = ctx.inv_stds;
 
-        const total = self_node.totalElements();
-        const dim = self_node.lastDim();
+        const total = self_node.total_elements();
+        const dim = self_node.last_dim();
         const rows = total / dim;
         const dim_f: f32 = @floatFromInt(dim);
 
@@ -1018,7 +1018,7 @@ pub const DiffCpuRuntime = struct {
     // ── ReLU ──
 
     pub fn relu(self: *DiffCpuRuntime, x: DiffTensor) DiffTensor {
-        return self.unaryKind(unary.Relu, x);
+        return self.unary_kind(unary.Relu, x);
     }
 
     // ── Dropout ──
@@ -1026,9 +1026,9 @@ pub const DiffCpuRuntime = struct {
     pub fn dropout(self: *DiffCpuRuntime, x: DiffTensor, rate: f32) DiffTensor {
         if (!self.training) return x;
 
-        const total = x.totalElements();
-        const out = self.allocData(total);
-        const mask = self.allocData(total);
+        const total = x.total_elements();
+        const out = self.alloc_data(total);
+        const mask = self.alloc_data(total);
         const rng = self.prng.random();
         const inv_keep = 1.0 / (1.0 - rate);
 
@@ -1042,13 +1042,13 @@ pub const DiffCpuRuntime = struct {
             }
         }
 
-        const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
+        const node = self.make_node(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(DropoutContext);
+            const ctx = self.alloc_context(DropoutContext);
             ctx.* = .{ .mask = mask };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardDropout;
+            node.backward_fn = &backward_dropout;
         }
         return node;
     }
@@ -1057,12 +1057,12 @@ pub const DiffCpuRuntime = struct {
         mask: []f32,
     };
 
-    fn backwardDropout(self_node: *DiffNode) void {
+    fn backward_dropout(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
             const ctx: *DropoutContext = @ptrCast(@alignCast(self_node.context.?));
-            const total = self_node.totalElements();
+            const total = self_node.total_elements();
             for (0..total) |i| {
                 ga[i] += go[i] * ctx.mask[i];
             }
@@ -1086,7 +1086,7 @@ pub const DiffCpuRuntime = struct {
     pub fn gather(self: *DiffCpuRuntime, table: DiffTensor, indices: []const u32) DiffTensor {
         const embed_dim = table.shape[1];
         const num_indices = indices.len;
-        const out = self.allocData(num_indices * embed_dim);
+        const out = self.alloc_data(num_indices * embed_dim);
 
         for (0..num_indices) |i| {
             const idx = indices[i];
@@ -1094,13 +1094,13 @@ pub const DiffCpuRuntime = struct {
             @memcpy(out[i * embed_dim .. (i + 1) * embed_dim], src);
         }
 
-        const node = self.makeNode(out, &.{ num_indices, embed_dim }, table.requires_grad);
+        const node = self.make_node(out, &.{ num_indices, embed_dim }, table.requires_grad);
         if (table.requires_grad) {
             node.parents[0] = table;
-            const ctx = self.allocContext(GatherContext);
+            const ctx = self.alloc_context(GatherContext);
             ctx.* = .{ .indices = indices };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardGather;
+            node.backward_fn = &backward_gather;
         }
         return node;
     }
@@ -1109,7 +1109,7 @@ pub const DiffCpuRuntime = struct {
         indices: []const u32,
     };
 
-    fn backwardGather(self_node: *DiffNode) void {
+    fn backward_gather(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?; // table
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
@@ -1129,24 +1129,24 @@ pub const DiffCpuRuntime = struct {
 
     /// pred と target の MSE: mean((pred - target)^2)
     /// target は non-differentiable な f32 スライス
-    pub fn mseLoss(self: *DiffCpuRuntime, pred: DiffTensor, target: []const f32) DiffTensor {
-        const total = pred.totalElements();
+    pub fn mse_loss(self: *DiffCpuRuntime, pred: DiffTensor, target: []const f32) DiffTensor {
+        const total = pred.total_elements();
         var sum_sq: f32 = 0;
         for (0..total) |i| {
             const diff = pred.data[i] - target[i];
             sum_sq += diff * diff;
         }
         const n_f: f32 = @floatFromInt(total);
-        const out = self.allocData(1);
+        const out = self.alloc_data(1);
         out[0] = sum_sq / n_f;
 
-        const node = self.makeNode(out, &.{1}, pred.requires_grad);
+        const node = self.make_node(out, &.{1}, pred.requires_grad);
         if (pred.requires_grad) {
             node.parents[0] = pred;
-            const ctx = self.allocContext(MseLossContext);
+            const ctx = self.alloc_context(MseLossContext);
             ctx.* = .{ .target = target };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardMseLoss;
+            node.backward_fn = &backward_mse_loss;
         }
         return node;
     }
@@ -1155,12 +1155,12 @@ pub const DiffCpuRuntime = struct {
         target: []const f32,
     };
 
-    fn backwardMseLoss(self_node: *DiffNode) void {
+    fn backward_mse_loss(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
             const ctx: *MseLossContext = @ptrCast(@alignCast(self_node.context.?));
-            const total = pa.totalElements();
+            const total = pa.total_elements();
             const n_f: f32 = @floatFromInt(total);
             const scale = go[0] * 2.0 / n_f;
             for (0..total) |i| {
@@ -1174,7 +1174,7 @@ pub const DiffCpuRuntime = struct {
     /// logits: [batch, num_classes], indices: [batch] (u32 class labels)
     /// forward: -mean(log_softmax(logits)[i, indices[i]])
     /// backward: softmax(logits) - one_hot(indices), scaled by 1/batch
-    pub fn crossEntropyLossWithIndices(
+    pub fn cross_entropy_loss_with_indices(
         self: *DiffCpuRuntime,
         logits: DiffTensor,
         indices: []const u32,
@@ -1183,7 +1183,7 @@ pub const DiffCpuRuntime = struct {
         const num_classes = logits.shape[1];
 
         // Compute log_softmax and softmax (cache for backward)
-        const softmax_cache = self.allocData(batch * num_classes);
+        const softmax_cache = self.alloc_data(batch * num_classes);
         var total_loss: f32 = 0;
 
         for (0..batch) |i| {
@@ -1210,16 +1210,16 @@ pub const DiffCpuRuntime = struct {
         }
 
         const batch_f: f32 = @floatFromInt(batch);
-        const out = self.allocData(1);
+        const out = self.alloc_data(1);
         out[0] = total_loss / batch_f;
 
-        const node = self.makeNode(out, &.{1}, logits.requires_grad);
+        const node = self.make_node(out, &.{1}, logits.requires_grad);
         if (logits.requires_grad) {
             node.parents[0] = logits;
-            const ctx = self.allocContext(CrossEntropyContext);
+            const ctx = self.alloc_context(CrossEntropyContext);
             ctx.* = .{ .softmax_cache = softmax_cache, .indices = indices };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardCrossEntropy;
+            node.backward_fn = &backward_cross_entropy;
         }
         return node;
     }
@@ -1229,7 +1229,7 @@ pub const DiffCpuRuntime = struct {
         indices: []const u32,
     };
 
-    fn backwardCrossEntropy(self_node: *DiffNode) void {
+    fn backward_cross_entropy(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?; // logits
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
@@ -1254,12 +1254,12 @@ pub const DiffCpuRuntime = struct {
     /// Binary cross-entropy with logits (numerically stable)
     /// forward: mean(max(x,0) - x*target + log(1+exp(-|x|)))
     /// backward: (sigmoid(x) - target) / n
-    pub fn bceLossWithLogits(
+    pub fn bce_loss_with_logits(
         self: *DiffCpuRuntime,
         logits: DiffTensor,
         target: []const f32,
     ) DiffTensor {
-        const total = logits.totalElements();
+        const total = logits.total_elements();
         var loss_sum: f32 = 0;
         for (0..total) |i| {
             const x = logits.data[i];
@@ -1269,16 +1269,16 @@ pub const DiffCpuRuntime = struct {
             loss_sum += pos_part - x * t + @log(1.0 + @exp(-@abs(x)));
         }
         const n_f: f32 = @floatFromInt(total);
-        const out = self.allocData(1);
+        const out = self.alloc_data(1);
         out[0] = loss_sum / n_f;
 
-        const node = self.makeNode(out, &.{1}, logits.requires_grad);
+        const node = self.make_node(out, &.{1}, logits.requires_grad);
         if (logits.requires_grad) {
             node.parents[0] = logits;
-            const ctx = self.allocContext(BceLossContext);
+            const ctx = self.alloc_context(BceLossContext);
             ctx.* = .{ .target = target };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardBceLoss;
+            node.backward_fn = &backward_bce_loss;
         }
         return node;
     }
@@ -1287,12 +1287,12 @@ pub const DiffCpuRuntime = struct {
         target: []const f32,
     };
 
-    fn backwardBceLoss(self_node: *DiffNode) void {
+    fn backward_bce_loss(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad.?;
         if (pa.grad) |ga| {
             const ctx: *BceLossContext = @ptrCast(@alignCast(self_node.context.?));
-            const total = pa.totalElements();
+            const total = pa.total_elements();
             const n_f: f32 = @floatFromInt(total);
             const scale = go[0] / n_f;
             for (0..total) |i| {
@@ -1306,31 +1306,31 @@ pub const DiffCpuRuntime = struct {
 
     pub fn backward(self: *DiffCpuRuntime, loss: DiffTensor) void {
         // 1. Set loss gradient to 1.0 (CPU: fill loop)
-        const loss_total = loss.totalElements();
+        const loss_total = loss.total_elements();
         if (loss.grad == null) {
-            loss.grad = self.allocGrad(loss_total);
+            loss.grad = self.alloc_grad(loss_total);
         }
         for (0..loss_total) |i| loss.grad.?[i] = 1.0;
 
         // 2. Topological sort (DFS)
         self.topo_buf.clearRetainingCapacity();
-        diff_node.topoSort(DiffNode, loss, &self.topo_buf, self.allocator);
+        diff_node.topo_sort(DiffNode, loss, &self.topo_buf, self.allocator);
 
         // 3. Allocate grad buffers for intermediate nodes (CPU: allocGrad)
         for (self.topo_buf.items) |node| {
             if (node.grad == null and node.requires_grad) {
-                const total = node.totalElements();
-                node.grad = self.allocGrad(total);
+                const total = node.total_elements();
+                node.grad = self.alloc_grad(total);
             }
         }
 
         // 4-5. Reverse traversal + reset visited
-        diff_node.backwardPass(DiffNode, &self.topo_buf, self.param_nodes);
+        diff_node.backward_pass(DiffNode, &self.topo_buf, self.param_nodes);
     }
 
     // ── Adam optimizer ──
 
-    pub fn applyAdam(
+    pub fn apply_adam(
         self: *DiffCpuRuntime,
         adam: *AdamState,
         lr: f32,
@@ -1340,9 +1340,9 @@ pub const DiffCpuRuntime = struct {
         wd: f32,
     ) void {
         adam.step += 1;
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
         for (0..count) |i| {
-            compute.adamStep(
+            compute.adam_step(
                 self.param_nodes[i].data,
                 self.param_grads[i],
                 adam.m[i],
@@ -1358,7 +1358,7 @@ pub const DiffCpuRuntime = struct {
     }
 
     /// Gradient clipping + Adam 適用
-    pub fn applyAdamClipped(
+    pub fn apply_adam_clipped(
         self: *DiffCpuRuntime,
         adam: *AdamState,
         lr: f32,
@@ -1368,7 +1368,7 @@ pub const DiffCpuRuntime = struct {
         wd: f32,
         max_grad_norm: f32,
     ) void {
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
 
         // 1. Compute total gradient norm
         var total_norm_sq: f64 = 0;
@@ -1390,16 +1390,16 @@ pub const DiffCpuRuntime = struct {
         }
 
         // 3. Apply Adam
-        self.applyAdam(adam, lr, beta1, beta2, eps, wd);
+        self.apply_adam(adam, lr, beta1, beta2, eps, wd);
     }
 
     // ── Param data access ──
 
-    pub fn paramData(self: *const DiffCpuRuntime, index: usize) []f32 {
+    pub fn param_data(self: *const DiffCpuRuntime, index: usize) []f32 {
         return self.param_nodes[index].data;
     }
 
-    pub fn paramGrad(self: *const DiffCpuRuntime, index: usize) []f32 {
+    pub fn param_grad(self: *const DiffCpuRuntime, index: usize) []f32 {
         return self.param_grads[index];
     }
 
@@ -1409,25 +1409,25 @@ pub const DiffCpuRuntime = struct {
     pub fn zeros(self: *DiffCpuRuntime, new_shape: []const usize) DiffTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const out = self.allocData(size);
+        const out = self.alloc_data(size);
         @memset(out, 0);
-        return self.makeNode(out, new_shape, false);
+        return self.make_node(out, new_shape, false);
     }
 
     /// 全要素 1 のテンソルを作成
     pub fn ones(self: *DiffCpuRuntime, new_shape: []const usize) DiffTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const out = self.allocData(size);
+        const out = self.alloc_data(size);
         @memset(out, 1.0);
-        return self.makeNode(out, new_shape, false);
+        return self.make_node(out, new_shape, false);
     }
 
     /// 標準正規分布 N(0,1) テンソルを作成 (Box-Muller法)
     pub fn randn(self: *DiffCpuRuntime, new_shape: []const usize) DiffTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const out = self.allocData(size);
+        const out = self.alloc_data(size);
         const rng = self.prng.random();
         var i: usize = 0;
         while (i + 1 < size) : (i += 2) {
@@ -1444,24 +1444,24 @@ pub const DiffCpuRuntime = struct {
             const uniform2 = rng.float(f32);
             out[size - 1] = @sqrt(-2.0 * @log(uniform1)) * @cos(2.0 * std.math.pi * uniform2);
         }
-        return self.makeNode(out, new_shape, false);
+        return self.make_node(out, new_shape, false);
     }
 
     /// uniform [-1, 1] テンソルを作成
     pub fn rand(self: *DiffCpuRuntime, new_shape: []const usize) DiffTensor {
         var size: usize = 1;
         for (new_shape) |d| size *= d;
-        const out = self.allocData(size);
+        const out = self.alloc_data(size);
         const rng = self.prng.random();
         for (out) |*v| {
             v.* = rng.float(f32) * 2.0 - 1.0;
         }
-        return self.makeNode(out, new_shape, false);
+        return self.make_node(out, new_shape, false);
     }
 
     // ── Param initialization ──
 
-    pub fn initParams(self: *DiffCpuRuntime) void {
+    pub fn init_params(self: *DiffCpuRuntime) void {
         var rng_state = std.Random.DefaultPrng.init(42);
         const rng = rng_state.random();
 
@@ -1501,21 +1501,21 @@ pub const DiffCpuRuntime = struct {
     }
 
     /// MpsRuntime のパラメータデータを CPU にロード
-    pub fn loadFromMps(self: *DiffCpuRuntime, mps: anytype) void {
+    pub fn load_from_mps(self: *DiffCpuRuntime, mps: anytype) void {
         const metal_mod = @import("../backend/metal.zig");
         const MetalContext = metal_mod.MetalContext;
-        for (0..self.module.paramCount()) |i| {
-            const size = self.module.paramSize(.{ .index = i });
-            const ptr = MetalContext.bufferContents(f32, mps.param_bufs[i]);
+        for (0..self.module.param_count()) |i| {
+            const size = self.module.param_size(.{ .index = i });
+            const ptr = MetalContext.buffer_contents(f32, mps.param_bufs[i]);
             @memcpy(self.param_nodes[i].data[0..size], ptr[0..size]);
         }
     }
 
     /// CpuRuntime からパラメータをロード
-    pub fn loadFromCpu(self: *DiffCpuRuntime, cpu: anytype) void {
-        for (0..self.module.paramCount()) |i| {
-            const size = self.module.paramSize(.{ .index = i });
-            @memcpy(self.param_nodes[i].data[0..size], cpu.paramData(i)[0..size]);
+    pub fn load_from_cpu(self: *DiffCpuRuntime, cpu: anytype) void {
+        for (0..self.module.param_count()) |i| {
+            const size = self.module.param_size(.{ .index = i });
+            @memcpy(self.param_nodes[i].data[0..size], cpu.param_data(i)[0..size]);
         }
     }
 
@@ -1581,13 +1581,21 @@ pub const DiffCpuRuntime = struct {
         const col_col = in_ch * kernel_size * kernel_size;
 
         // im2col
-        const col = self.allocData(col_row * col_col);
-        conv2dIm2Col(col, input.data, shape);
+        const col = self.alloc_data(col_row * col_col);
+        conv2d_im2_col(col, input.data, shape);
 
         // col [col_row, col_col] @ weight^T [col_col, out_ch] → out [col_row, out_ch]
-        const out = self.allocData(col_row * out_ch);
+        const out = self.alloc_data(col_row * out_ch);
         // weight is [out_ch, col_col], we need col @ weight^T
-        cpu_backend.matmulTransB(f32, col.ptr, weight.data.ptr, out.ptr, col_row, col_col, out_ch);
+        cpu_backend.matmul_trans_b(
+            f32,
+            col.ptr,
+            weight.data.ptr,
+            out.ptr,
+            col_row,
+            col_col,
+            out_ch,
+        );
 
         // Add bias: out[i, j] += bias[j]
         for (0..col_row) |r| {
@@ -1597,17 +1605,17 @@ pub const DiffCpuRuntime = struct {
         }
 
         // Reshape to [batch, out_ch * oh * ow]
-        const node = self.makeNode(
+        const node = self.make_node(
             out,
             &.{ batch, out_ch * oh * ow },
             input.requires_grad or weight.requires_grad or bias.requires_grad,
         );
         if (node.requires_grad)
-            self.conv2dSetBackward(node, input, weight, bias, col, shape);
+            self.conv2d_set_backward(node, input, weight, bias, col, shape);
         return node;
     }
 
-    fn conv2dIm2Col(col: []f32, input_data: []const f32, s: Conv2dShape) void {
+    fn conv2d_im2_col(col: []f32, input_data: []const f32, s: Conv2dShape) void {
         @memset(col, 0);
         const col_col = s.in_ch * s.kernel_size * s.kernel_size;
         for (0..s.batch) |b| {
@@ -1639,7 +1647,7 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn conv2dSetBackward(
+    fn conv2d_set_backward(
         self: *DiffCpuRuntime,
         node: *DiffNode,
         input: DiffTensor,
@@ -1651,7 +1659,7 @@ pub const DiffCpuRuntime = struct {
         node.parents[0] = input;
         node.parents[1] = weight;
         node.parents[2] = bias;
-        const ctx = self.allocContext(Conv2dContext);
+        const ctx = self.alloc_context(Conv2dContext);
         ctx.* = .{
             .col = col,
             .batch = s.batch,
@@ -1665,10 +1673,10 @@ pub const DiffCpuRuntime = struct {
             .padding = s.padding,
         };
         node.context = @ptrCast(ctx);
-        node.backward_fn = &backwardConv2d;
+        node.backward_fn = &backward_conv2d;
     }
 
-    fn backwardConv2d(self_node: *DiffNode) void {
+    fn backward_conv2d(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?; // input
         const pw = self_node.parents[1].?; // weight
         const pb = self_node.parents[2].?; // bias
@@ -1691,7 +1699,7 @@ pub const DiffCpuRuntime = struct {
 
         // dWeight = go^T @ col → [out_ch, col_col]
         if (pw.grad) |gw| {
-            cpu_backend.matmulTransAAccum(
+            cpu_backend.matmul_trans_a_accum(
                 f32,
                 go.ptr,
                 ctx.col.ptr,
@@ -1752,7 +1760,7 @@ pub const DiffCpuRuntime = struct {
     };
 
     /// MaxPool2d forward: input [batch, ch*H*W], returns [batch, ch*OH*OW]
-    pub fn maxPool2d(
+    pub fn max_pool2d(
         self: *DiffCpuRuntime,
         input: DiffTensor,
         pool_size: usize,
@@ -1766,8 +1774,8 @@ pub const DiffCpuRuntime = struct {
         const ow = (w - pool_size) / stride_val + 1;
         const out_total = batch * channels * oh * ow;
 
-        const out = self.allocData(out_total);
-        const argmax = self.arenaAlloc().alloc(usize, out_total) catch unreachable;
+        const out = self.alloc_data(out_total);
+        const argmax = self.arena_alloc().alloc(usize, out_total) catch unreachable;
 
         for (0..batch) |b| {
             for (0..channels) |c| {
@@ -1794,10 +1802,10 @@ pub const DiffCpuRuntime = struct {
             }
         }
 
-        const node = self.makeNode(out, &.{ batch, channels * oh * ow }, input.requires_grad);
+        const node = self.make_node(out, &.{ batch, channels * oh * ow }, input.requires_grad);
         if (input.requires_grad) {
             node.parents[0] = input;
-            const ctx = self.allocContext(MaxPool2dContext);
+            const ctx = self.alloc_context(MaxPool2dContext);
             ctx.* = .{
                 .argmax = argmax,
                 .batch = batch,
@@ -1810,18 +1818,18 @@ pub const DiffCpuRuntime = struct {
                 .stride = stride_val,
             };
             node.context = @ptrCast(ctx);
-            node.backward_fn = &backwardMaxPool2d;
+            node.backward_fn = &backward_max_pool2d;
         }
         return node;
     }
 
-    fn backwardMaxPool2d(self_node: *DiffNode) void {
+    fn backward_max_pool2d(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad orelse return;
         const gx = pa.grad orelse return;
         const ctx: *const MaxPool2dContext = @ptrCast(@alignCast(self_node.context.?));
 
-        const out_total = self_node.totalElements();
+        const out_total = self_node.total_elements();
         for (0..out_total) |i| {
             gx[ctx.argmax[i]] += go[i];
         }
@@ -1837,19 +1845,19 @@ pub const DiffCpuRuntime = struct {
     /// 2つのテンソルを指定軸で連結
     /// axis=0: 最初の次元で連結, axis=-1: 最後の次元で連結
     pub fn concat(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor) DiffTensor {
-        return self.concatAxis(a, b, -1);
+        return self.concat_axis(a, b, -1);
     }
 
-    pub fn concatAxis(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, axis: i64) DiffTensor {
+    pub fn concat_axis(self: *DiffCpuRuntime, a: DiffTensor, b: DiffTensor, axis: i64) DiffTensor {
         const rg = a.requires_grad or b.requires_grad;
 
         if (axis == -1 or axis == @as(i64, @intCast(a.ndim)) - 1) {
             // Last-axis concat
-            const a_cols = a.lastDim();
-            const b_cols = b.lastDim();
-            const rows = a.numRows();
+            const a_cols = a.last_dim();
+            const b_cols = b.last_dim();
+            const rows = a.num_rows();
             const out_cols = a_cols + b_cols;
-            const out = self.allocData(rows * out_cols);
+            const out = self.alloc_data(rows * out_cols);
 
             for (0..rows) |r| {
                 @memcpy(out[r * out_cols ..][0..a_cols], a.data[r * a_cols ..][0..a_cols]);
@@ -1858,36 +1866,36 @@ pub const DiffCpuRuntime = struct {
 
             var out_shape: [MAX_NDIM]usize = a.shape;
             out_shape[a.ndim - 1] = out_cols;
-            const node = self.makeNode(out, out_shape[0..a.ndim], rg);
+            const node = self.make_node(out, out_shape[0..a.ndim], rg);
             if (rg) {
                 node.parents[0] = a;
                 node.parents[1] = b;
-                const ctx = self.allocContext(ConcatContext);
+                const ctx = self.alloc_context(ConcatContext);
                 ctx.* = .{ .a_last_dim = a_cols, .axis = -1 };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardConcatLastAxis;
+                node.backward_fn = &backward_concat_last_axis;
             }
             return node;
         }
 
         if (axis == 0) {
             // First-axis concat: just concatenate data
-            const a_total = a.totalElements();
-            const b_total = b.totalElements();
-            const out = self.allocData(a_total + b_total);
+            const a_total = a.total_elements();
+            const b_total = b.total_elements();
+            const out = self.alloc_data(a_total + b_total);
             @memcpy(out[0..a_total], a.data[0..a_total]);
             @memcpy(out[a_total..][0..b_total], b.data[0..b_total]);
 
             var out_shape: [MAX_NDIM]usize = a.shape;
             out_shape[0] = a.shape[0] + b.shape[0];
-            const node = self.makeNode(out, out_shape[0..a.ndim], rg);
+            const node = self.make_node(out, out_shape[0..a.ndim], rg);
             if (rg) {
                 node.parents[0] = a;
                 node.parents[1] = b;
-                const ctx = self.allocContext(ConcatContext);
+                const ctx = self.alloc_context(ConcatContext);
                 ctx.* = .{ .a_last_dim = a_total, .axis = 0 };
                 node.context = @ptrCast(ctx);
-                node.backward_fn = &backwardConcatAxis0;
+                node.backward_fn = &backward_concat_axis0;
             }
             return node;
         }
@@ -1895,15 +1903,15 @@ pub const DiffCpuRuntime = struct {
         @panic("concatAxis: unsupported ndim or axis combination");
     }
 
-    fn backwardConcatLastAxis(self_node: *DiffNode) void {
+    fn backward_concat_last_axis(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
         const ctx: *const ConcatContext = @ptrCast(@alignCast(self_node.context.?));
         const a_cols = ctx.a_last_dim;
-        const out_cols = self_node.lastDim();
+        const out_cols = self_node.last_dim();
         const b_cols = out_cols - a_cols;
-        const rows = self_node.numRows();
+        const rows = self_node.num_rows();
 
         if (pa.grad) |ga| {
             for (0..rows) |r| {
@@ -1921,12 +1929,12 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn backwardConcatAxis0(self_node: *DiffNode) void {
+    fn backward_concat_axis0(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const pb = self_node.parents[1].?;
         const go = self_node.grad.?;
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
+        const a_total = pa.total_elements();
+        const b_total = pb.total_elements();
 
         if (pa.grad) |ga| {
             for (0..a_total) |i| ga[i] += go[i];
@@ -1946,20 +1954,20 @@ pub const DiffCpuRuntime = struct {
     /// axis=-1: 最後の次元で分割, axis=0: 最初の次元で分割
     pub fn split(self: *DiffCpuRuntime, x: DiffTensor, split_pos: usize, axis: i64) [2]DiffTensor {
         if (axis == -1 or axis == @as(i64, @intCast(x.ndim)) - 1)
-            return self.splitLastAxis(x, split_pos);
-        if (axis == 0) return self.splitAxis0(x, split_pos);
+            return self.split_last_axis(x, split_pos);
+        if (axis == 0) return self.split_axis0(x, split_pos);
 
         @panic("splitAxis: unsupported ndim or axis combination");
     }
 
-    fn splitLastAxis(self: *DiffCpuRuntime, x: DiffTensor, split_pos: usize) [2]DiffTensor {
-        const cols = x.lastDim();
-        const rows = x.numRows();
+    fn split_last_axis(self: *DiffCpuRuntime, x: DiffTensor, split_pos: usize) [2]DiffTensor {
+        const cols = x.last_dim();
+        const rows = x.num_rows();
         const a_cols = split_pos;
         const b_cols = cols - split_pos;
 
-        const out_a = self.allocData(rows * a_cols);
-        const out_b = self.allocData(rows * b_cols);
+        const out_a = self.alloc_data(rows * a_cols);
+        const out_b = self.alloc_data(rows * b_cols);
 
         for (0..rows) |r| {
             @memcpy(out_a[r * a_cols ..][0..a_cols], x.data[r * cols ..][0..a_cols]);
@@ -1971,27 +1979,27 @@ pub const DiffCpuRuntime = struct {
         var shape_b: [MAX_NDIM]usize = x.shape;
         shape_b[x.ndim - 1] = b_cols;
 
-        const node_a = self.makeNode(out_a, shape_a[0..x.ndim], x.requires_grad);
-        const node_b = self.makeNode(out_b, shape_b[0..x.ndim], x.requires_grad);
+        const node_a = self.make_node(out_a, shape_a[0..x.ndim], x.requires_grad);
+        const node_b = self.make_node(out_b, shape_b[0..x.ndim], x.requires_grad);
 
         if (x.requires_grad) {
             node_a.parents[0] = x;
-            const ctx_a = self.allocContext(SplitContext);
+            const ctx_a = self.alloc_context(SplitContext);
             ctx_a.* = .{ .split_pos = split_pos, .axis = -1, .sibling = node_b };
             node_a.context = @ptrCast(ctx_a);
-            node_a.backward_fn = &backwardSplitLastAxisFirst;
+            node_a.backward_fn = &backward_split_last_axis_first;
 
             node_b.parents[0] = x;
-            const ctx_b = self.allocContext(SplitContext);
+            const ctx_b = self.alloc_context(SplitContext);
             ctx_b.* = .{ .split_pos = split_pos, .axis = -1, .sibling = node_a };
             node_b.context = @ptrCast(ctx_b);
-            node_b.backward_fn = &backwardSplitLastAxisSecond;
+            node_b.backward_fn = &backward_split_last_axis_second;
         }
 
         return .{ node_a, node_b };
     }
 
-    fn splitAxis0(self: *DiffCpuRuntime, x: DiffTensor, split_pos: usize) [2]DiffTensor {
+    fn split_axis0(self: *DiffCpuRuntime, x: DiffTensor, split_pos: usize) [2]DiffTensor {
         const a_rows = split_pos;
         const b_rows = x.shape[0] - split_pos;
         var stride: usize = 1;
@@ -1999,8 +2007,8 @@ pub const DiffCpuRuntime = struct {
         const a_total = a_rows * stride;
         const b_total = b_rows * stride;
 
-        const out_a = self.allocData(a_total);
-        const out_b = self.allocData(b_total);
+        const out_a = self.alloc_data(a_total);
+        const out_b = self.alloc_data(b_total);
         @memcpy(out_a[0..a_total], x.data[0..a_total]);
         @memcpy(out_b[0..b_total], x.data[a_total..][0..b_total]);
 
@@ -2009,34 +2017,34 @@ pub const DiffCpuRuntime = struct {
         var shape_b: [MAX_NDIM]usize = x.shape;
         shape_b[0] = b_rows;
 
-        const node_a = self.makeNode(out_a, shape_a[0..x.ndim], x.requires_grad);
-        const node_b = self.makeNode(out_b, shape_b[0..x.ndim], x.requires_grad);
+        const node_a = self.make_node(out_a, shape_a[0..x.ndim], x.requires_grad);
+        const node_b = self.make_node(out_b, shape_b[0..x.ndim], x.requires_grad);
 
         if (x.requires_grad) {
             node_a.parents[0] = x;
-            const ctx_a = self.allocContext(SplitContext);
+            const ctx_a = self.alloc_context(SplitContext);
             ctx_a.* = .{ .split_pos = a_total, .axis = 0, .sibling = node_b };
             node_a.context = @ptrCast(ctx_a);
-            node_a.backward_fn = &backwardSplitAxis0First;
+            node_a.backward_fn = &backward_split_axis0_first;
 
             node_b.parents[0] = x;
-            const ctx_b = self.allocContext(SplitContext);
+            const ctx_b = self.alloc_context(SplitContext);
             ctx_b.* = .{ .split_pos = a_total, .axis = 0, .sibling = node_a };
             node_b.context = @ptrCast(ctx_b);
-            node_b.backward_fn = &backwardSplitAxis0Second;
+            node_b.backward_fn = &backward_split_axis0_second;
         }
 
         return .{ node_a, node_b };
     }
 
-    fn backwardSplitLastAxisFirst(self_node: *DiffNode) void {
+    fn backward_split_last_axis_first(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad orelse return;
         const gx = pa.grad orelse return;
         const ctx: *const SplitContext = @ptrCast(@alignCast(self_node.context.?));
         const a_cols = ctx.split_pos;
-        const x_cols = pa.lastDim();
-        const rows = pa.numRows();
+        const x_cols = pa.last_dim();
+        const rows = pa.num_rows();
 
         for (0..rows) |r| {
             for (0..a_cols) |c| {
@@ -2045,15 +2053,15 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn backwardSplitLastAxisSecond(self_node: *DiffNode) void {
+    fn backward_split_last_axis_second(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad orelse return;
         const gx = pa.grad orelse return;
         const ctx: *const SplitContext = @ptrCast(@alignCast(self_node.context.?));
         const a_cols = ctx.split_pos;
-        const x_cols = pa.lastDim();
+        const x_cols = pa.last_dim();
         const b_cols = x_cols - a_cols;
-        const rows = pa.numRows();
+        const rows = pa.num_rows();
 
         for (0..rows) |r| {
             for (0..b_cols) |c| {
@@ -2062,7 +2070,7 @@ pub const DiffCpuRuntime = struct {
         }
     }
 
-    fn backwardSplitAxis0First(self_node: *DiffNode) void {
+    fn backward_split_axis0_first(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad orelse return;
         const gx = pa.grad orelse return;
@@ -2072,49 +2080,49 @@ pub const DiffCpuRuntime = struct {
         for (0..a_total) |i| gx[i] += go[i];
     }
 
-    fn backwardSplitAxis0Second(self_node: *DiffNode) void {
+    fn backward_split_axis0_second(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
         const go = self_node.grad orelse return;
         const gx = pa.grad orelse return;
         const ctx: *const SplitContext = @ptrCast(@alignCast(self_node.context.?));
         const a_total = ctx.split_pos;
-        const b_total = self_node.totalElements();
+        const b_total = self_node.total_elements();
 
         for (0..b_total) |i| gx[a_total + i] += go[i];
     }
 
     /// Checkpoint 保存
-    pub fn saveCheckpoint(
+    pub fn save_checkpoint(
         self: *const DiffCpuRuntime,
         io: std.Io,
         adam: *const AdamState,
         path: []const u8,
     ) !void {
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
         const slices = try self.allocator.alloc([]const f32, count);
         defer self.allocator.free(slices);
 
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }
-        try compute.saveCheckpoint(self.module, io, slices, adam, path);
+        try compute.save_checkpoint(self.module, io, slices, adam, path);
     }
 
     /// Checkpoint 読み込み
-    pub fn loadCheckpoint(
+    pub fn load_checkpoint(
         self: *DiffCpuRuntime,
         io: std.Io,
         adam: *AdamState,
         path: []const u8,
     ) !void {
-        const count = self.module.paramCount();
+        const count = self.module.param_count();
         const slices = try self.allocator.alloc([]f32, count);
         defer self.allocator.free(slices);
 
         for (0..count) |i| {
             slices[i] = self.param_nodes[i].data;
         }
-        try compute.loadCheckpoint(self.module, io, slices, adam, path);
+        try compute.load_checkpoint(self.module, io, slices, adam, path);
     }
 };
 

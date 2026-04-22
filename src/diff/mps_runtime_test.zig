@@ -5,7 +5,7 @@
 ///
 /// ビルド: zig build test-diff-mps (macOS only)
 const std = @import("std");
-pub const std_options = @import("../log.zig").stdOptionsAtLevel(.warn);
+pub const std_options = @import("../log.zig").std_options_at_level(.warn);
 const compute = @import("../compute.zig");
 const Module = compute.Module;
 const diff_mps = @import("mps_runtime.zig");
@@ -25,21 +25,21 @@ const MpsAdapter = struct {
     pub const Tensor = DiffMpsTensor;
 
     /// ホストデータを MTLBuffer にコピーしてノードを作成
-    pub fn makeInput(rt: *Runtime, data: []f32, shape: []const usize, requires_grad: bool) Tensor {
-        const node = rt.makeTensor(data, shape);
+    pub fn make_input(rt: *Runtime, data: []f32, shape: []const usize, requires_grad: bool) Tensor {
+        const node = rt.make_tensor(data, shape);
         node.requires_grad = requires_grad;
         return node;
     }
 
     /// UMA: bufferContents で直接読み取り
-    pub fn readData(_: *Runtime, tensor: Tensor, dst: []f32) void {
-        @memcpy(dst, MetalContext.bufferContents(f32, tensor.data)[0..dst.len]);
+    pub fn read_data(_: *Runtime, tensor: Tensor, dst: []f32) void {
+        @memcpy(dst, MetalContext.buffer_contents(f32, tensor.data)[0..dst.len]);
     }
 
     /// UMA: 勾配バッファを直接読み取り
-    pub fn readGrad(_: *Runtime, tensor: Tensor, dst: []f32) ?[]f32 {
+    pub fn read_grad(_: *Runtime, tensor: Tensor, dst: []f32) ?[]f32 {
         if (tensor.grad) |grad_buf| {
-            @memcpy(dst, MetalContext.bufferContents(f32, grad_buf)[0..dst.len]);
+            @memcpy(dst, MetalContext.buffer_contents(f32, grad_buf)[0..dst.len]);
             return dst;
         }
         return null;
@@ -49,7 +49,7 @@ const MpsAdapter = struct {
 /// テスト全体で共有する MetalContext (1回だけ初期化)
 var global_metal_ctx: ?MetalContext = null;
 
-fn getOrInitMetalCtx() !*MetalContext {
+fn get_or_init_metal_ctx() !*MetalContext {
     if (global_metal_ctx) |*ctx| return ctx;
     global_metal_ctx = try MetalContext.init();
     return &global_metal_ctx.?;
@@ -60,155 +60,155 @@ fn getOrInitMetalCtx() !*MetalContext {
 // ════════════════════════════════════════════════════════════════
 
 test "diff_mps_runtime: gelu gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testGeluGrad(MpsAdapter, &rt);
+    try helpers.test_gelu_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: silu gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSiluGrad(MpsAdapter, &rt);
+    try helpers.test_silu_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: square gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSquareGrad(MpsAdapter, &rt);
+    try helpers.test_square_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: tanh gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testTanhGrad(MpsAdapter, &rt);
+    try helpers.test_tanh_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: sigmoid gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSigmoidGrad(MpsAdapter, &rt);
+    try helpers.test_sigmoid_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: relu gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testReluGrad(MpsAdapter, &rt);
+    try helpers.test_relu_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: negative gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testNegativeGrad(MpsAdapter, &rt);
+    try helpers.test_negative_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: softmax gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSoftmaxGrad(MpsAdapter, &rt);
+    try helpers.test_softmax_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: reductionSum gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testReductionSumGrad(MpsAdapter, &rt);
+    try helpers.test_reduction_sum_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: reductionMean gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testReductionMeanGrad(MpsAdapter, &rt);
+    try helpers.test_reduction_mean_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: transpose 3D gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testTranspose3DGrad(MpsAdapter, &rt);
+    try helpers.test_transpose3_d_grad(MpsAdapter, &rt);
 }
 
 test "diff_mps_runtime: reshape gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testReshapeGrad(MpsAdapter, &rt);
+    try helpers.test_reshape_grad(MpsAdapter, &rt);
 }
 
 // ════════════════════════════════════════════════════════════════
 // パラメータ依存テスト (checkGrad を直接使用)
 // ════════════════════════════════════════════════════════════════
-const checkGrad = helpers.GradientChecker(MpsAdapter).checkGrad;
+const check_grad = helpers.gradient_checker(MpsAdapter).check_grad;
 
 test "diff_mps_runtime: matmul 2D gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{ 3, 2 }, .xavier);
+    _ = module.add_param(&.{ 3, 2 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             const w = ctx.param(.{ .index = 0 });
             return ctx.matmul(x, w);
@@ -217,40 +217,40 @@ test "diff_mps_runtime: matmul 2D gradient" {
 }
 
 test "diff_mps_runtime: layerNorm gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{4}, .ones);
-    _ = module.addParam(&.{4}, .zeros);
+    _ = module.add_param(&.{4}, .ones);
+    _ = module.add_param(&.{4}, .zeros);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             const gamma = ctx.param(.{ .index = 0 });
             const beta = ctx.param(.{ .index = 1 });
-            return ctx.gelu(ctx.layerNorm(x, gamma, beta, 1e-5, -1));
+            return ctx.gelu(ctx.layer_norm(x, gamma, beta, 1e-5, -1));
         }
     }.f, &rt, &data, &.{ 2, 4 }, 1e-4, 2e-2);
 }
 
 test "diff_mps_runtime: add broadcast gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{3}, .xavier);
+    _ = module.add_param(&.{3}, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             const b = ctx.param(.{ .index = 0 });
             return ctx.add(x, b);
@@ -259,7 +259,7 @@ test "diff_mps_runtime: add broadcast gradient" {
 }
 
 test "diff_mps_runtime: mul broadcast gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -267,48 +267,48 @@ test "diff_mps_runtime: mul broadcast gradient" {
     defer rt.deinit();
 
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             var scalar_host = [_]f32{2.5};
-            const scalar = ctx.makeTensor(&scalar_host, &.{1});
+            const scalar = ctx.make_tensor(&scalar_host, &.{1});
             return ctx.mul(x, scalar);
         }
     }.f, &rt, &data, &.{ 2, 3 }, 1e-4, 1e-2);
 }
 
 test "diff_mps_runtime: linear forward+backward" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{ 3, 2 }, .xavier);
-    _ = module.addParam(&.{2}, .zeros);
+    _ = module.add_param(&.{ 3, 2 }, .xavier);
+    _ = module.add_param(&.{2}, .zeros);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     // loss = sum(x @ W + b) → dW = x^T @ ones, db = sum(ones, axis=0)
     var input_data = [_]f32{ 1, 2, 3, 4, 5, 6 };
-    const input_node = MpsAdapter.makeInput(&rt, &input_data, &.{ 2, 3 }, true);
+    const input_node = MpsAdapter.make_input(&rt, &input_data, &.{ 2, 3 }, true);
 
     const w = rt.param(.{ .index = 0 });
     const b = rt.param(.{ .index = 1 });
     const xw = rt.matmul(input_node, w);
     const y = rt.add(xw, b);
 
-    const loss_node = rt.reductionSum(y, -1);
-    const total_loss = rt.reductionSum(loss_node, 0);
+    const loss_node = rt.reduction_sum(y, -1);
+    const total_loss = rt.reduction_sum(loss_node, 0);
 
     rt.backward(total_loss);
 
     // db = [2.0, 2.0] (2 rows の ones を axis=0 で sum)
-    const b_grad = rt.paramGrad(1);
+    const b_grad = rt.param_grad(1);
     try testing.expectApproxEqAbs(@as(f32, 2.0), b_grad[0], 1e-5);
     try testing.expectApproxEqAbs(@as(f32, 2.0), b_grad[1], 1e-5);
 
     // dW = x^T @ ones(2,2) = [[1,4],[2,5],[3,6]]^T @ [[1,1],[1,1]] = [[5,5],[7,7],[9,9]]
-    const w_grad = rt.paramGrad(0);
+    const w_grad = rt.param_grad(0);
     try testing.expectApproxEqAbs(@as(f32, 5.0), w_grad[0], 1e-4);
     try testing.expectApproxEqAbs(@as(f32, 5.0), w_grad[1], 1e-4);
     try testing.expectApproxEqAbs(@as(f32, 7.0), w_grad[2], 1e-4);
@@ -322,7 +322,7 @@ test "diff_mps_runtime: linear forward+backward" {
 // ════════════════════════════════════════════════════════════════
 
 test "diff_mps_runtime: mseLoss gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -332,14 +332,14 @@ test "diff_mps_runtime: mseLoss gradient" {
     var pred_data = [_]f32{ 1.0, 2.0, 3.0, 4.0 };
     const target_data = [_]f32{ 1.5, 2.5, 2.5, 3.5 };
 
-    rt.resetArena();
-    const pred = MpsAdapter.makeInput(&rt, &pred_data, &.{ 2, 2 }, true);
-    const loss = rt.mseLoss(pred, &target_data);
+    rt.reset_arena();
+    const pred = MpsAdapter.make_input(&rt, &pred_data, &.{ 2, 2 }, true);
+    const loss = rt.mse_loss(pred, &target_data);
 
     rt.backward(loss);
 
     var ga: [4]f32 = undefined;
-    _ = MpsAdapter.readGrad(&rt, pred, &ga) orelse unreachable;
+    _ = MpsAdapter.read_grad(&rt, pred, &ga) orelse unreachable;
     const n: f32 = 4.0;
     for (0..4) |i| {
         const expected = 2.0 * (pred_data[i] - target_data[i]) / n;
@@ -348,7 +348,7 @@ test "diff_mps_runtime: mseLoss gradient" {
 }
 
 test "diff_mps_runtime: crossEntropyLossWithIndices gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -358,14 +358,14 @@ test "diff_mps_runtime: crossEntropyLossWithIndices gradient" {
     var logits_data = [_]f32{ 1.0, 2.0, 3.0, 1.0, 3.0, 2.0 };
     const indices = [_]u32{ 0, 2 };
 
-    rt.resetArena();
-    const logits = MpsAdapter.makeInput(&rt, &logits_data, &.{ 2, 3 }, true);
-    const loss = rt.crossEntropyLossWithIndices(logits, &indices);
+    rt.reset_arena();
+    const logits = MpsAdapter.make_input(&rt, &logits_data, &.{ 2, 3 }, true);
+    const loss = rt.cross_entropy_loss_with_indices(logits, &indices);
 
     rt.backward(loss);
 
     var ga: [6]f32 = undefined;
-    _ = MpsAdapter.readGrad(&rt, logits, &ga) orelse unreachable;
+    _ = MpsAdapter.read_grad(&rt, logits, &ga) orelse unreachable;
 
     // grad = (softmax - one_hot) / batch で exact check
     const batch: f32 = 2.0;
@@ -392,7 +392,7 @@ test "diff_mps_runtime: crossEntropyLossWithIndices gradient" {
 }
 
 test "diff_mps_runtime: bceLossWithLogits gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -402,14 +402,14 @@ test "diff_mps_runtime: bceLossWithLogits gradient" {
     var logits_data = [_]f32{ -1.0, 0.0, 1.0, 2.0 };
     const target_data = [_]f32{ 0.0, 1.0, 1.0, 0.0 };
 
-    rt.resetArena();
-    const logits = MpsAdapter.makeInput(&rt, &logits_data, &.{ 2, 2 }, true);
-    const loss = rt.bceLossWithLogits(logits, &target_data);
+    rt.reset_arena();
+    const logits = MpsAdapter.make_input(&rt, &logits_data, &.{ 2, 2 }, true);
+    const loss = rt.bce_loss_with_logits(logits, &target_data);
 
     rt.backward(loss);
 
     var ga: [4]f32 = undefined;
-    _ = MpsAdapter.readGrad(&rt, logits, &ga) orelse unreachable;
+    _ = MpsAdapter.read_grad(&rt, logits, &ga) orelse unreachable;
     const n: f32 = 4.0;
     for (0..4) |i| {
         const sig = 1.0 / (1.0 + @exp(-logits_data[i]));
@@ -419,27 +419,27 @@ test "diff_mps_runtime: bceLossWithLogits gradient" {
 }
 
 test "diff_mps_runtime: gather gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{ 4, 3 }, .xavier);
+    _ = module.add_param(&.{ 4, 3 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     const indices = [_]u32{ 1, 3, 0, 1 };
 
-    rt.resetArena();
-    rt.zeroGrad();
+    rt.reset_arena();
+    rt.zero_grad();
     const table = rt.param(.{ .index = 0 });
     const embedded = rt.gather(table, &indices);
 
-    const loss = rt.reductionSum(rt.reductionSum(embedded, -1), 0);
+    const loss = rt.reduction_sum(rt.reduction_sum(embedded, -1), 0);
     rt.backward(loss);
 
-    const tg = rt.paramGrad(0);
+    const tg = rt.param_grad(0);
     // Row 1 は index 0, 3 で2回参照 → grad=2.0
     for (0..3) |j| {
         try testing.expectApproxEqAbs(@as(f32, 2.0), tg[1 * 3 + j], 1e-5);
@@ -455,84 +455,84 @@ test "diff_mps_runtime: gather gradient" {
 // ════════════════════════════════════════════════════════════════
 
 test "diff_mps_runtime: gelu n=33 (BM=64 boundary)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testGeluBoundary(MpsAdapter, &rt, 33);
+    try helpers.test_gelu_boundary(MpsAdapter, &rt, 33);
 }
 
 test "diff_mps_runtime: gelu n=65 (BM=64+1)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testGeluBoundary(MpsAdapter, &rt, 65);
+    try helpers.test_gelu_boundary(MpsAdapter, &rt, 65);
 }
 
 test "diff_mps_runtime: gelu n=257 (threadgroup 256+1)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testGeluBoundary(MpsAdapter, &rt, 257);
+    try helpers.test_gelu_boundary(MpsAdapter, &rt, 257);
 }
 
 test "diff_mps_runtime: matmul 65x33 (tiling boundary)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{ 65, 33 }, .xavier);
+    _ = module.add_param(&.{ 65, 33 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
-    try helpers.testMatmulBoundary(MpsAdapter, &rt, 5, 65, 33);
+    rt.init_params();
+    try helpers.test_matmul_boundary(MpsAdapter, &rt, 5, 65, 33);
 }
 
 test "diff_mps_runtime: matmul 7x5 (non-power-of-2)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{ 7, 5 }, .xavier);
+    _ = module.add_param(&.{ 7, 5 }, .xavier);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
-    try helpers.testMatmulBoundary(MpsAdapter, &rt, 3, 7, 5);
+    rt.init_params();
+    try helpers.test_matmul_boundary(MpsAdapter, &rt, 3, 7, 5);
 }
 
 test "diff_mps_runtime: softmax 4x7 (non-power-of-2 cols)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSoftmaxBoundary(MpsAdapter, &rt, 4, 7);
+    try helpers.test_softmax_boundary(MpsAdapter, &rt, 4, 7);
 }
 
 test "diff_mps_runtime: softmax 3x33 (non-power-of-2)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    try helpers.testSoftmaxBoundary(MpsAdapter, &rt, 3, 33);
+    try helpers.test_softmax_boundary(MpsAdapter, &rt, 3, 33);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -540,47 +540,47 @@ test "diff_mps_runtime: softmax 3x33 (non-power-of-2)" {
 // ════════════════════════════════════════════════════════════════
 
 test "diff_mps_runtime: rmsNorm gradient (x)" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{4}, .ones);
+    _ = module.add_param(&.{4}, .ones);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     var data = [_]f32{ 0.5, 1.3, 2.7, 0.1, 3.2, 0.8, 1.5, 2.1 };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             const w = ctx.param(.{ .index = 0 });
-            return ctx.rmsNorm(x, w, 1e-5);
+            return ctx.rms_norm(x, w, 1e-5);
         }
     }.f, &rt, &data, &.{ 2, 4 }, 1e-4, 2e-2);
 }
 
 test "diff_mps_runtime: rmsNorm forward sanity" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
-    _ = module.addParam(&.{3}, .ones);
+    _ = module.add_param(&.{3}, .ones);
     var rt = try DiffMpsRuntime.init(&module, metal_ctx, testing.allocator);
     defer rt.deinit();
 
-    rt.initParams();
+    rt.init_params();
 
     // x = [[1, 2, 3]], inv_rms = 1/sqrt((1+4+9)/3) = sqrt(3/14) ≈ 0.4629
     // out = x * inv_rms * w = [0.4629, 0.9258, 1.3887]
     var x_data = [_]f32{ 1.0, 2.0, 3.0 };
 
-    rt.resetArena();
-    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ 1, 3 }, false);
+    rt.reset_arena();
+    const x = MpsAdapter.make_input(&rt, &x_data, &.{ 1, 3 }, false);
     const w = rt.param(.{ .index = 0 });
-    const y = rt.rmsNorm(x, w, 0);
+    const y = rt.rms_norm(x, w, 0);
 
     var out: [3]f32 = undefined;
-    MpsAdapter.readData(&rt, y, &out);
+    MpsAdapter.read_data(&rt, y, &out);
     const inv_rms: f32 = 1.0 / @sqrt((1.0 + 4.0 + 9.0) / 3.0);
     try testing.expectApproxEqAbs(1.0 * inv_rms, out[0], 1e-4);
     try testing.expectApproxEqAbs(2.0 * inv_rms, out[1], 1e-4);
@@ -588,7 +588,7 @@ test "diff_mps_runtime: rmsNorm forward sanity" {
 }
 
 test "diff_mps_runtime: causalSoftmax upper-triangular mask" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -604,12 +604,12 @@ test "diff_mps_runtime: causalSoftmax upper-triangular mask" {
         2.0, 2.0, 2.0, 2.0,
     };
 
-    rt.resetArena();
-    const x = MpsAdapter.makeInput(&rt, &scores, &.{ @as(usize, seq), @as(usize, seq) }, false);
-    const y = rt.causalSoftmax(x, num_heads, seq);
+    rt.reset_arena();
+    const x = MpsAdapter.make_input(&rt, &scores, &.{ @as(usize, seq), @as(usize, seq) }, false);
+    const y = rt.causal_softmax(x, num_heads, seq);
 
     var out: [16]f32 = undefined;
-    MpsAdapter.readData(&rt, y, &out);
+    MpsAdapter.read_data(&rt, y, &out);
 
     // 上三角 (j > i) は 0、各行の合計は 1.0
     for (0..seq) |i| {
@@ -624,7 +624,7 @@ test "diff_mps_runtime: causalSoftmax upper-triangular mask" {
 }
 
 test "diff_mps_runtime: causalSoftmax gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -637,16 +637,16 @@ test "diff_mps_runtime: causalSoftmax gradient" {
         0.3, 0.6, 1.2, 2.4,
         1.1, 0.4, 0.9, 1.8,
     };
-    try checkGrad(struct {
+    try check_grad(struct {
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
-            return ctx.causalSoftmax(x, 1, 4);
+            return ctx.causal_softmax(x, 1, 4);
         }
     }.f, &rt, &data, &.{ 4, 4 }, 1e-4, 2e-2);
 }
 
 // Q8_0 encoder for testing (mirror of gguf/dequant.zig: dequantizeQ8_0)
 // Block layout: [f16 scale (2 bytes)] [32 × int8 quants] → 34 bytes/block.
-fn quantizeQ8_0(src: []const f32, dst: []u8) void {
+fn quantize_q8_0(src: []const f32, dst: []u8) void {
     const BLOCK: usize = 32;
     const BPB: usize = 34;
     const n_blocks = src.len / BLOCK;
@@ -673,7 +673,7 @@ fn quantizeQ8_0(src: []const f32, dst: []u8) void {
     }
 }
 
-fn dequantizeQ8_0_inline(src: []const u8, dst: []f32) void {
+fn dequantize_q8_0_inline(src: []const u8, dst: []f32) void {
     const BLOCK: usize = 32;
     const BPB: usize = 34;
     const n_blocks = dst.len / BLOCK;
@@ -692,7 +692,7 @@ fn dequantizeQ8_0_inline(src: []const u8, dst: []f32) void {
 }
 
 test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -715,13 +715,13 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
     var w_q8: [OUT * row_bytes]u8 = undefined;
     var w_dequant: [OUT * IN]f32 = undefined;
     for (0..OUT) |o| {
-        quantizeQ8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
-        dequantizeQ8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
+        quantize_q8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
+        dequantize_q8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
     }
 
     // Upload weight bytes to MTLBuffer
-    const w_buf = try metal_ctx.createBufferWithData(w_q8[0..]);
-    defer metal.objRelease(w_buf);
+    const w_buf = try metal_ctx.create_buffer_with_data(w_q8[0..]);
+    defer metal.obj_release(w_buf);
 
     const qw = DiffMpsRuntime.QuantWeight{
         .buf = w_buf,
@@ -734,12 +734,12 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
     var x_data: [M * IN]f32 = undefined;
     for (0..M * IN) |i| x_data[i] = 0.05 * (@as(f32, @floatFromInt(i)) - 15.0);
 
-    rt.resetArena();
-    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ M, IN }, false);
-    const y = rt.quantMatmulNoGrad(x, &qw);
+    rt.reset_arena();
+    const x = MpsAdapter.make_input(&rt, &x_data, &.{ M, IN }, false);
+    const y = rt.quant_matmul_no_grad(x, &qw);
 
     var y_out: [M * OUT]f32 = undefined;
-    MpsAdapter.readData(&rt, y, &y_out);
+    MpsAdapter.read_data(&rt, y, &y_out);
 
     // Reference: dequant(W) @ X^T → y_ref[m, o] = Σ_i X[m, i] * W_deq[o, i]
     for (0..M) |m| {
@@ -752,7 +752,7 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 forward" {
 }
 
 test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -773,12 +773,12 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
     var w_q8: [OUT * row_bytes]u8 = undefined;
     var w_dequant: [OUT * IN]f32 = undefined;
     for (0..OUT) |o| {
-        quantizeQ8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
-        dequantizeQ8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
+        quantize_q8_0(w_f32[o * IN ..][0..IN], w_q8[o * row_bytes ..][0..row_bytes]);
+        dequantize_q8_0_inline(w_q8[o * row_bytes ..][0..row_bytes], w_dequant[o * IN ..][0..IN]);
     }
 
-    const w_buf = try metal_ctx.createBufferWithData(w_q8[0..]);
-    defer metal.objRelease(w_buf);
+    const w_buf = try metal_ctx.create_buffer_with_data(w_q8[0..]);
+    defer metal.obj_release(w_buf);
 
     const qw = DiffMpsRuntime.QuantWeight{
         .buf = w_buf,
@@ -790,16 +790,16 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
     var x_data: [M * IN]f32 = undefined;
     for (0..M * IN) |i| x_data[i] = 0.03 * (@as(f32, @floatFromInt(i)) - 8.0);
 
-    rt.resetArena();
-    const x = MpsAdapter.makeInput(&rt, &x_data, &.{ M, IN }, true);
-    const y = rt.quantMatmulNoGrad(x, &qw);
+    rt.reset_arena();
+    const x = MpsAdapter.make_input(&rt, &x_data, &.{ M, IN }, true);
+    const y = rt.quant_matmul_no_grad(x, &qw);
 
     // Loss = sum(y) → grad_y = 1 → grad_x[m, i] = Σ_o W_deq[o, i]
-    const loss = rt.reductionSum(rt.reductionSum(y, -1), 0);
+    const loss = rt.reduction_sum(rt.reduction_sum(y, -1), 0);
     rt.backward(loss);
 
     var gx: [M * IN]f32 = undefined;
-    _ = MpsAdapter.readGrad(&rt, x, &gx) orelse unreachable;
+    _ = MpsAdapter.read_grad(&rt, x, &gx) orelse unreachable;
 
     for (0..M) |m| {
         for (0..IN) |i| {
@@ -811,7 +811,7 @@ test "diff_mps_runtime: quantMatmulNoGrad Q8_0 backward" {
 }
 
 test "diff_mps_runtime: rope gradient" {
-    const metal_ctx = try getOrInitMetalCtx();
+    const metal_ctx = try get_or_init_metal_ctx();
     var module = Module.init(testing.allocator);
     defer module.deinit();
 
@@ -828,14 +828,14 @@ test "diff_mps_runtime: rope gradient" {
         -0.4, 0.5,  0.6,  -0.7,
     };
 
-    try checkGrad(struct {
+    try check_grad(struct {
         const SEQ: u32 = 3;
         const HEADS: u32 = 2;
         const HALF: u32 = 2;
         // freqs are recreated in f so checkGrad's resetArena between probes stays safe.
         fn f(ctx: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
             var freqs_host = [_]f32{ 1.0, 0.01 };
-            const fr = ctx.makeTensor(&freqs_host, &.{HALF});
+            const fr = ctx.make_tensor(&freqs_host, &.{HALF});
             fr.requires_grad = false;
             return ctx.rope(x, fr, HEADS, SEQ, HALF);
         }

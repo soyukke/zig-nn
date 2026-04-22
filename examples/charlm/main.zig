@@ -12,10 +12,10 @@ const DiffCpuRuntime = nn.unified.DiffCpuRuntime;
 const DiffTensor = nn.unified.DiffTensor;
 const DiffCudaRuntime = nn.unified.DiffCudaRuntime;
 const GpuAdamState = nn.unified.GpuAdamState;
-const Linear = nn.unified.Linear;
-const LayerNorm = nn.unified.LayerNorm;
-const Embedding = nn.unified.Embedding;
-const CausalSelfAttention = nn.unified.CausalSelfAttention;
+const linear = nn.unified.linear;
+const layer_norm = nn.unified.layer_norm;
+const embedding = nn.unified.embedding;
+const causal_self_attention = nn.unified.causal_self_attention;
 
 const is_cuda_available = builtin.os.tag == .linux;
 
@@ -70,27 +70,27 @@ fn argmax(comptime n: usize, data: []const f32) u32 {
 /// CharLM model: Embedding + 1-layer Transformer (causal) + Linear output
 /// Pre-norm architecture: LN -> Attention -> Residual -> LN -> FF -> Residual -> LN -> Output
 const CharLMModel = struct {
-    tok_emb: Embedding(CHAR_VOCAB_SIZE, CHAR_EMBED_DIM),
+    tok_emb: embedding(CHAR_VOCAB_SIZE, CHAR_EMBED_DIM),
     pos_emb: compute.ParamHandle, // [SEQ_LEN, EMBED_DIM]
-    ln1: LayerNorm(CHAR_EMBED_DIM),
-    attn: CausalSelfAttention(CHAR_EMBED_DIM, CHAR_SEQ_LEN),
-    ln2: LayerNorm(CHAR_EMBED_DIM),
-    ff1: Linear(CHAR_EMBED_DIM, CHAR_FF_DIM),
-    ff2: Linear(CHAR_FF_DIM, CHAR_EMBED_DIM),
-    ln_f: LayerNorm(CHAR_EMBED_DIM),
-    out_proj: Linear(CHAR_EMBED_DIM, CHAR_VOCAB_SIZE),
+    ln1: layer_norm(CHAR_EMBED_DIM),
+    attn: causal_self_attention(CHAR_EMBED_DIM, CHAR_SEQ_LEN),
+    ln2: layer_norm(CHAR_EMBED_DIM),
+    ff1: linear(CHAR_EMBED_DIM, CHAR_FF_DIM),
+    ff2: linear(CHAR_FF_DIM, CHAR_EMBED_DIM),
+    ln_f: layer_norm(CHAR_EMBED_DIM),
+    out_proj: linear(CHAR_EMBED_DIM, CHAR_VOCAB_SIZE),
 
     fn init(module: *Module) CharLMModel {
         return .{
-            .tok_emb = Embedding(CHAR_VOCAB_SIZE, CHAR_EMBED_DIM).init(module),
-            .pos_emb = module.addParam(&.{ CHAR_SEQ_LEN, CHAR_EMBED_DIM }, .xavier),
-            .ln1 = LayerNorm(CHAR_EMBED_DIM).init(module),
-            .attn = CausalSelfAttention(CHAR_EMBED_DIM, CHAR_SEQ_LEN).init(module),
-            .ln2 = LayerNorm(CHAR_EMBED_DIM).init(module),
-            .ff1 = Linear(CHAR_EMBED_DIM, CHAR_FF_DIM).init(module),
-            .ff2 = Linear(CHAR_FF_DIM, CHAR_EMBED_DIM).init(module),
-            .ln_f = LayerNorm(CHAR_EMBED_DIM).init(module),
-            .out_proj = Linear(CHAR_EMBED_DIM, CHAR_VOCAB_SIZE).init(module),
+            .tok_emb = embedding(CHAR_VOCAB_SIZE, CHAR_EMBED_DIM).init(module),
+            .pos_emb = module.add_param(&.{ CHAR_SEQ_LEN, CHAR_EMBED_DIM }, .xavier),
+            .ln1 = layer_norm(CHAR_EMBED_DIM).init(module),
+            .attn = causal_self_attention(CHAR_EMBED_DIM, CHAR_SEQ_LEN).init(module),
+            .ln2 = layer_norm(CHAR_EMBED_DIM).init(module),
+            .ff1 = linear(CHAR_EMBED_DIM, CHAR_FF_DIM).init(module),
+            .ff2 = linear(CHAR_FF_DIM, CHAR_EMBED_DIM).init(module),
+            .ln_f = layer_norm(CHAR_EMBED_DIM).init(module),
+            .out_proj = linear(CHAR_EMBED_DIM, CHAR_VOCAB_SIZE).init(module),
         };
     }
 
@@ -158,12 +158,12 @@ fn charLMDemo() !void {
 
     var rt = try DiffCpuRuntime.init(&module, allocator);
     defer rt.deinit();
-    rt.initParams();
+    rt.init_params();
 
-    const total_params = module.totalParamElements();
+    const total_params = module.total_param_elements();
     log.info("model: 1-layer Transformer, {d} params (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
 
-    const sizes = try module.paramSizes(allocator);
+    const sizes = try module.param_sizes(allocator);
     defer allocator.free(sizes);
     var adam = try AdamState.init(allocator, sizes);
     defer adam.deinit();
@@ -175,14 +175,14 @@ fn charLMDemo() !void {
         var epoch_loss: f32 = 0;
 
         for (0..actual_num_seq) |seq_idx| {
-            rt.resetArena();
-            rt.zeroGrad();
+            rt.reset_arena();
+            rt.zero_grad();
 
             const logits = model.forward(&rt, &all_input_ids[seq_idx]);
-            const loss = rt.crossEntropyLossWithIndices(logits, &all_target_ids[seq_idx]);
+            const loss = rt.cross_entropy_loss_with_indices(logits, &all_target_ids[seq_idx]);
 
             rt.backward(loss);
-            rt.applyAdam(&adam, 0.001, 0.9, 0.999, 1e-8, 0);
+            rt.apply_adam(&adam, 0.001, 0.9, 0.999, 1e-8, 0);
 
             epoch_loss += loss.data[0];
         }
@@ -217,12 +217,12 @@ fn charLMDemoCuda() !void {
 
     var rt = try DiffCudaRuntime.init(&module, &cuda_ctx, allocator);
     defer rt.deinit();
-    rt.initParams();
+    rt.init_params();
 
-    const total_params = module.totalParamElements();
+    const total_params = module.total_param_elements();
     log.info("model: 1-layer Transformer, {d} params (~{d}KB)", .{ total_params, total_params * 4 / 1024 });
 
-    const sizes = try module.paramSizes(allocator);
+    const sizes = try module.param_sizes(allocator);
     defer allocator.free(sizes);
     var adam = try GpuAdamState.init(allocator, &cuda_ctx, sizes);
     defer adam.deinit();
@@ -234,16 +234,16 @@ fn charLMDemoCuda() !void {
         var epoch_loss: f32 = 0;
 
         for (0..actual_num_seq) |seq_idx| {
-            rt.resetArena();
-            rt.zeroGrad();
+            rt.reset_arena();
+            rt.zero_grad();
 
             const logits = model.forward(&rt, &all_input_ids[seq_idx]);
-            const loss = rt.crossEntropyLossWithIndices(logits, &all_target_ids[seq_idx]);
+            const loss = rt.cross_entropy_loss_with_indices(logits, &all_target_ids[seq_idx]);
 
             rt.backward(loss);
-            rt.applyAdam(&adam, 0.001, 0.9, 0.999, 1e-8, 0);
+            rt.apply_adam(&adam, 0.001, 0.9, 0.999, 1e-8, 0);
 
-            epoch_loss += rt.copyScalarToHost(loss);
+            epoch_loss += rt.copy_scalar_to_host(loss);
         }
 
         if (epoch % 50 == 0 or epoch == num_epochs - 1) {
@@ -273,7 +273,7 @@ fn generateText(rt: *DiffCpuRuntime, model: CharLMModel) void {
 
     const gen_len = 60;
     for (0..gen_len) |_| {
-        rt.resetArena();
+        rt.reset_arena();
         const logits = model.forward(rt, &gen_ctx);
         const last_logits = logits.data[(CHAR_SEQ_LEN - 1) * CHAR_VOCAB_SIZE .. CHAR_SEQ_LEN * CHAR_VOCAB_SIZE];
         const pred = argmax(CHAR_VOCAB_SIZE, last_logits);
@@ -299,13 +299,13 @@ fn generateTextCuda(rt: *DiffCudaRuntime, model: CharLMModel) void {
 
     const gen_len = 60;
     for (0..gen_len) |_| {
-        rt.resetArena();
+        rt.reset_arena();
         const logits = model.forward(rt, &gen_ctx);
         var last_logits: [CHAR_VOCAB_SIZE]f32 = undefined;
         // Copy just the last row of logits
-        const total = logits.totalElements();
+        const total = logits.total_elements();
         var all_logits: [CHAR_SEQ_LEN * CHAR_VOCAB_SIZE]f32 = undefined;
-        rt.copyToHost(logits, all_logits[0..total]);
+        rt.copy_to_host(logits, all_logits[0..total]);
         @memcpy(&last_logits, all_logits[(CHAR_SEQ_LEN - 1) * CHAR_VOCAB_SIZE .. CHAR_SEQ_LEN * CHAR_VOCAB_SIZE]);
         const pred = argmax(CHAR_VOCAB_SIZE, &last_logits);
         stdout.print("{c}", .{charDecode(pred)}) catch {};

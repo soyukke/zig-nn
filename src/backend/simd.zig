@@ -4,7 +4,7 @@
 const std = @import("std");
 
 /// SIMD演算のベクトル長を取得。SIMDが利用できない場合はスカラーfallback。
-fn vecLen(comptime T: type) usize {
+fn vec_len(comptime T: type) usize {
     return std.simd.suggestVectorLength(T) orelse 1;
 }
 
@@ -22,7 +22,7 @@ pub fn matmul(
     k: usize,
     n: usize,
 ) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
 
     if (vl == 1) {
         // SIMD利用不可: スカラーfallback
@@ -57,7 +57,7 @@ pub fn matmul(
 
 /// element-wise add: c[i] = a[i] + b[i]
 pub fn add(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -75,7 +75,7 @@ pub fn add(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// element-wise sub: c[i] = a[i] - b[i]
 pub fn sub(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -93,7 +93,7 @@ pub fn sub(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// element-wise mul: c[i] = a[i] * b[i]
 pub fn mul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -111,7 +111,7 @@ pub fn mul(comptime T: type, a: [*]const T, b: [*]const T, c: [*]T, len: usize) 
 
 /// ReLU: c[i] = max(0, a[i])
 pub fn relu(comptime T: type, a: [*]const T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {
@@ -129,7 +129,7 @@ pub fn relu(comptime T: type, a: [*]const T, c: [*]T, len: usize) void {
 
 /// scale: c[i] = a[i] * scalar
 pub fn scale(comptime T: type, a: [*]const T, scalar: T, c: [*]T, len: usize) void {
-    const vl = comptime vecLen(T);
+    const vl = comptime vec_len(T);
     var i: usize = 0;
 
     if (vl > 1) {

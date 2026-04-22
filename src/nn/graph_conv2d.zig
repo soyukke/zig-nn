@@ -7,7 +7,7 @@
 const std = @import("std");
 const compute = @import("../compute.zig");
 
-pub fn Conv2d(
+pub fn conv2d(
     comptime in_ch: usize,
     comptime out_ch: usize,
     comptime kernel_size: usize,
@@ -22,13 +22,13 @@ pub fn Conv2d(
 
         pub fn init(module: anytype) @This() {
             return .{
-                .w = module.addParam(&.{ out_ch, in_ch * kernel_size * kernel_size }, .xavier),
-                .b = module.addParam(&.{out_ch}, .zeros),
+                .w = module.add_param(&.{ out_ch, in_ch * kernel_size * kernel_size }, .xavier),
+                .b = module.add_param(&.{out_ch}, .zeros),
             };
         }
 
         /// 入力の空間サイズを設定 (forward の前に呼ぶ)
-        pub fn setInputSize(self: *@This(), h: usize, input_w: usize) void {
+        pub fn set_input_size(self: *@This(), h: usize, input_w: usize) void {
             self.input_h = h;
             self.input_w = input_w;
         }
@@ -51,7 +51,7 @@ pub fn Conv2d(
         }
 
         /// 明示的 h, w 指定の forward (backward compatibility)
-        pub fn forwardWithSize(
+        pub fn forward_with_size(
             self: @This(),
             ctx: anytype,
             input: anytype,
@@ -73,7 +73,7 @@ pub fn Conv2d(
         }
 
         /// 出力の空間サイズを計算
-        pub fn outputSize(h: usize, input_w: usize) struct { oh: usize, ow: usize } {
+        pub fn output_size(h: usize, input_w: usize) struct { oh: usize, ow: usize } {
             return .{
                 .oh = (h + 2 * padding - kernel_size) / stride + 1,
                 .ow = (input_w + 2 * padding - kernel_size) / stride + 1,
@@ -82,7 +82,7 @@ pub fn Conv2d(
     };
 }
 
-pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
+pub fn max_pool2d(comptime pool_size: usize, comptime stride: usize) type {
     return struct {
         channels: usize = 0,
         input_h: usize = 0,
@@ -93,7 +93,7 @@ pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
         }
 
         /// 入力パラメータを設定 (forward の前に呼ぶ)
-        pub fn setInputSize(self: *@This(), channels: usize, h: usize, input_w: usize) void {
+        pub fn set_input_size(self: *@This(), channels: usize, h: usize, input_w: usize) void {
             self.channels = channels;
             self.input_h = h;
             self.input_w = input_w;
@@ -102,7 +102,7 @@ pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
         /// Sequential 対応の forward(self, ctx, input)。事前に setInputSize() が必要。
         pub fn forward(self: @This(), ctx: anytype, input: anytype) @TypeOf(input) {
             std.debug.assert(self.channels > 0 and self.input_h > 0 and self.input_w > 0);
-            return ctx.maxPool2d(
+            return ctx.max_pool2d(
                 input,
                 pool_size,
                 stride,
@@ -113,7 +113,7 @@ pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
         }
 
         /// 明示的パラメータ指定の forward (backward compatibility)
-        pub fn forwardWithSize(
+        pub fn forward_with_size(
             self: @This(),
             ctx: anytype,
             input: anytype,
@@ -122,10 +122,10 @@ pub fn MaxPool2d(comptime pool_size: usize, comptime stride: usize) type {
             input_w: usize,
         ) @TypeOf(input) {
             _ = self;
-            return ctx.maxPool2d(input, pool_size, stride, channels, h, input_w);
+            return ctx.max_pool2d(input, pool_size, stride, channels, h, input_w);
         }
 
-        pub fn outputSize(h: usize, input_w: usize) struct { oh: usize, ow: usize } {
+        pub fn output_size(h: usize, input_w: usize) struct { oh: usize, ow: usize } {
             return .{
                 .oh = (h - pool_size) / stride + 1,
                 .ow = (input_w - pool_size) / stride + 1,

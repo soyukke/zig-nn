@@ -43,7 +43,7 @@ pub const Module = struct {
     }
 
     /// パラメータを登録: shape + init_kind を記録し、ParamHandle を返す
-    pub fn addParam(self: *Module, shape: []const usize, init_kind: ParamInit) ParamHandle {
+    pub fn add_param(self: *Module, shape: []const usize, init_kind: ParamInit) ParamHandle {
         const index = self.params.items.len;
         self.params.append(self.allocator, .{
             .shape = shape,
@@ -53,12 +53,12 @@ pub const Module = struct {
     }
 
     /// 登録されたパラメータ数
-    pub fn paramCount(self: *const Module) usize {
+    pub fn param_count(self: *const Module) usize {
         return self.params.items.len;
     }
 
     /// パラメータの要素数
-    pub fn paramSize(self: *const Module, handle: ParamHandle) usize {
+    pub fn param_size(self: *const Module, handle: ParamHandle) usize {
         const meta = self.params.items[handle.index];
         var size: usize = 1;
         for (meta.shape) |d| size *= d;
@@ -66,7 +66,7 @@ pub const Module = struct {
     }
 
     /// 全パラメータの総要素数
-    pub fn totalParamElements(self: *const Module) usize {
+    pub fn total_param_elements(self: *const Module) usize {
         var sum: usize = 0;
         for (self.params.items) |meta| {
             var s: usize = 1;
@@ -77,7 +77,7 @@ pub const Module = struct {
     }
 
     /// 全パラメータの要素数配列
-    pub fn paramSizes(self: *const Module, allocator: Allocator) ![]usize {
+    pub fn param_sizes(self: *const Module, allocator: Allocator) ![]usize {
         const result = try allocator.alloc(usize, self.params.items.len);
         for (self.params.items, 0..) |meta, i| {
             var size: usize = 1;
@@ -117,7 +117,7 @@ pub const AdamState = struct {
 };
 
 /// Adam step (CPU実装、1パラメータ分) — SIMD 最適化
-pub fn adamStep(
+pub fn adam_step(
     param: []f32,
     grad: []const f32,
     m: []f32,
@@ -179,7 +179,7 @@ pub fn adamStep(
 // ── Learning Rate Schedulers ──
 
 /// Cosine annealing: lr_min + 0.5*(lr_max-lr_min)*(1+cos(pi*step/total_steps))
-pub fn cosineAnnealingLR(step: u32, total_steps: u32, lr_min: f32, lr_max: f32) f32 {
+pub fn cosine_annealing_lr(step: u32, total_steps: u32, lr_min: f32, lr_max: f32) f32 {
     if (total_steps == 0) return lr_min;
     const ratio: f32 = @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(total_steps));
     const clamped = @min(ratio, 1.0);
@@ -187,53 +187,53 @@ pub fn cosineAnnealingLR(step: u32, total_steps: u32, lr_min: f32, lr_max: f32) 
 }
 
 /// Linear warmup: step < warmup → lr_max * step/warmup, else lr_max
-pub fn linearWarmupLR(step: u32, warmup_steps: u32, lr_max: f32) f32 {
+pub fn linear_warmup_lr(step: u32, warmup_steps: u32, lr_max: f32) f32 {
     if (step >= warmup_steps) return lr_max;
     return lr_max * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(warmup_steps));
 }
 
 /// Warmup + cosine decay
-pub fn warmupCosineDecayLR(
+pub fn warmup_cosine_decay_lr(
     step: u32,
     warmup_steps: u32,
     total_steps: u32,
     lr_min: f32,
     lr_max: f32,
 ) f32 {
-    if (step < warmup_steps) return linearWarmupLR(step, warmup_steps, lr_max);
+    if (step < warmup_steps) return linear_warmup_lr(step, warmup_steps, lr_max);
     const decay_step = step - warmup_steps;
     const decay_total = if (total_steps > warmup_steps) total_steps - warmup_steps else 1;
-    return cosineAnnealingLR(decay_step, decay_total, lr_min, lr_max);
+    return cosine_annealing_lr(decay_step, decay_total, lr_min, lr_max);
 }
 
 const CHECKPOINT_MAGIC: u32 = 0x4D504752; // "MPGR"
 const CHECKPOINT_VERSION: u32 = 1;
 
-fn readExactPositional(f: std.Io.File, io: std.Io, offset: *u64, out: []u8) !void {
+fn read_exact_positional(f: std.Io.File, io: std.Io, offset: *u64, out: []u8) !void {
     const n = try f.readPositionalAll(io, out, offset.*);
     if (n != out.len) return error.EndOfStream;
     offset.* += out.len;
 }
 
-fn readU32Positional(f: std.Io.File, io: std.Io, offset: *u64) !u32 {
+fn read_u32_positional(f: std.Io.File, io: std.Io, offset: *u64) !u32 {
     var bytes: [4]u8 = undefined;
-    try readExactPositional(f, io, offset, &bytes);
+    try read_exact_positional(f, io, offset, &bytes);
     return std.mem.littleToNative(u32, @bitCast(bytes));
 }
 
-fn writeExactPositional(f: std.Io.File, io: std.Io, offset: *u64, bytes: []const u8) !void {
+fn write_exact_positional(f: std.Io.File, io: std.Io, offset: *u64, bytes: []const u8) !void {
     try f.writePositionalAll(io, bytes, offset.*);
     offset.* += bytes.len;
 }
 
-fn writeU32Positional(f: std.Io.File, io: std.Io, offset: *u64, v: u32) !void {
+fn write_u32_positional(f: std.Io.File, io: std.Io, offset: *u64, v: u32) !void {
     const le = std.mem.nativeToLittle(u32, v);
-    try writeExactPositional(f, io, offset, std.mem.asBytes(&le));
+    try write_exact_positional(f, io, offset, std.mem.asBytes(&le));
 }
 
 /// Checkpoint 保存 (パラメータデータ + Adam state)
 /// param_data: 各パラメータの f32 スライス
-pub fn saveCheckpoint(
+pub fn save_checkpoint(
     module: *const Module,
     io: std.Io,
     param_data: []const []const f32,
@@ -247,10 +247,10 @@ pub fn saveCheckpoint(
     var offset: u64 = 0;
     const count: u32 = @intCast(module.params.items.len);
 
-    try writeU32Positional(file, io, &offset, CHECKPOINT_MAGIC);
-    try writeU32Positional(file, io, &offset, CHECKPOINT_VERSION);
-    try writeU32Positional(file, io, &offset, count);
-    try writeU32Positional(file, io, &offset, adam.step);
+    try write_u32_positional(file, io, &offset, CHECKPOINT_MAGIC);
+    try write_u32_positional(file, io, &offset, CHECKPOINT_VERSION);
+    try write_u32_positional(file, io, &offset, count);
+    try write_u32_positional(file, io, &offset, adam.step);
 
     // Each param: num_elements, weight_data, adam_m, adam_v
     for (module.params.items, 0..) |meta, i| {
@@ -258,16 +258,16 @@ pub fn saveCheckpoint(
         for (meta.shape) |d| size *= d;
 
         const n: u32 = @intCast(size);
-        try writeU32Positional(file, io, &offset, n);
-        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
-        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
-        try writeExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
+        try write_u32_positional(file, io, &offset, n);
+        try write_exact_positional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
+        try write_exact_positional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
+        try write_exact_positional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
     }
 }
 
 /// Checkpoint 読み込み
 /// param_data: 各パラメータの f32 スライス (書き込み先)
-pub fn loadCheckpoint(
+pub fn load_checkpoint(
     module: *const Module,
     io: std.Io,
     param_data: [][]f32,
@@ -281,25 +281,25 @@ pub fn loadCheckpoint(
     var offset: u64 = 0;
 
     // Header
-    const magic = try readU32Positional(file, io, &offset);
+    const magic = try read_u32_positional(file, io, &offset);
     if (magic != CHECKPOINT_MAGIC) return error.InvalidCheckpoint;
-    const version = try readU32Positional(file, io, &offset);
+    const version = try read_u32_positional(file, io, &offset);
     if (version != CHECKPOINT_VERSION) return error.UnsupportedVersion;
-    const num_params = try readU32Positional(file, io, &offset);
+    const num_params = try read_u32_positional(file, io, &offset);
     if (num_params != module.params.items.len) return error.ParamCountMismatch;
-    adam.step = try readU32Positional(file, io, &offset);
+    adam.step = try read_u32_positional(file, io, &offset);
 
     // Each param
     for (module.params.items, 0..) |meta, i| {
         var size: usize = 1;
         for (meta.shape) |d| size *= d;
 
-        const n = try readU32Positional(file, io, &offset);
+        const n = try read_u32_positional(file, io, &offset);
         if (n != size) return error.ParamSizeMismatch;
 
-        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
-        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
-        try readExactPositional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
+        try read_exact_positional(file, io, &offset, std.mem.sliceAsBytes(param_data[i]));
+        try read_exact_positional(file, io, &offset, std.mem.sliceAsBytes(adam.m[i]));
+        try read_exact_positional(file, io, &offset, std.mem.sliceAsBytes(adam.v[i]));
     }
 }
 
@@ -309,26 +309,26 @@ const testing = std.testing;
 
 test "cosineAnnealingLR" {
     // step=0 → lr_max
-    try testing.expectApproxEqAbs(cosineAnnealingLR(0, 100, 0.0, 1.0), 1.0, 1e-5);
+    try testing.expectApproxEqAbs(cosine_annealing_lr(0, 100, 0.0, 1.0), 1.0, 1e-5);
     // step=total → lr_min
-    try testing.expectApproxEqAbs(cosineAnnealingLR(100, 100, 0.0, 1.0), 0.0, 1e-5);
+    try testing.expectApproxEqAbs(cosine_annealing_lr(100, 100, 0.0, 1.0), 0.0, 1e-5);
     // step=50 → midpoint
-    try testing.expectApproxEqAbs(cosineAnnealingLR(50, 100, 0.0, 1.0), 0.5, 1e-5);
+    try testing.expectApproxEqAbs(cosine_annealing_lr(50, 100, 0.0, 1.0), 0.5, 1e-5);
 }
 
 test "linearWarmupLR" {
-    try testing.expectApproxEqAbs(linearWarmupLR(0, 10, 1.0), 0.0, 1e-5);
-    try testing.expectApproxEqAbs(linearWarmupLR(5, 10, 1.0), 0.5, 1e-5);
-    try testing.expectApproxEqAbs(linearWarmupLR(10, 10, 1.0), 1.0, 1e-5);
-    try testing.expectApproxEqAbs(linearWarmupLR(20, 10, 1.0), 1.0, 1e-5);
+    try testing.expectApproxEqAbs(linear_warmup_lr(0, 10, 1.0), 0.0, 1e-5);
+    try testing.expectApproxEqAbs(linear_warmup_lr(5, 10, 1.0), 0.5, 1e-5);
+    try testing.expectApproxEqAbs(linear_warmup_lr(10, 10, 1.0), 1.0, 1e-5);
+    try testing.expectApproxEqAbs(linear_warmup_lr(20, 10, 1.0), 1.0, 1e-5);
 }
 
 test "warmupCosineDecayLR" {
     // During warmup
-    try testing.expectApproxEqAbs(warmupCosineDecayLR(0, 10, 110, 0.0, 1.0), 0.0, 1e-5);
-    try testing.expectApproxEqAbs(warmupCosineDecayLR(5, 10, 110, 0.0, 1.0), 0.5, 1e-5);
+    try testing.expectApproxEqAbs(warmup_cosine_decay_lr(0, 10, 110, 0.0, 1.0), 0.0, 1e-5);
+    try testing.expectApproxEqAbs(warmup_cosine_decay_lr(5, 10, 110, 0.0, 1.0), 0.5, 1e-5);
     // At warmup end → lr_max
-    try testing.expectApproxEqAbs(warmupCosineDecayLR(10, 10, 110, 0.0, 1.0), 1.0, 1e-5);
+    try testing.expectApproxEqAbs(warmup_cosine_decay_lr(10, 10, 110, 0.0, 1.0), 1.0, 1e-5);
     // At end → lr_min
-    try testing.expectApproxEqAbs(warmupCosineDecayLR(110, 10, 110, 0.0, 1.0), 0.0, 1e-5);
+    try testing.expectApproxEqAbs(warmup_cosine_decay_lr(110, 10, 110, 0.0, 1.0), 0.0, 1e-5);
 }

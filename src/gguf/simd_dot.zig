@@ -22,7 +22,7 @@ pub const Q8Block = struct {
 
 /// f32 ベクトルを Q8 ブロック列に量子化
 /// input.len は 32 の倍数であること
-pub fn quantizeRowQ8(input: []const f32, out: []Q8Block) void {
+pub fn quantize_row_q8(input: []const f32, out: []Q8Block) void {
     const num_blocks = input.len / dequant.BLOCK_SIZE;
 
     for (0..num_blocks) |bi| {
@@ -68,7 +68,7 @@ pub fn quantizeRowQ8(input: []const f32, out: []Q8Block) void {
 // ============================================================
 
 /// i8[32] × i8[32] → i32 整数ドット積 (SIMD)
-inline fn dotI8x32(a: *const [32]i8, b: *const [32]i8) i32 {
+inline fn dot_i8x32(a: *const [32]i8, b: *const [32]i8) i32 {
     // @Vector(16, i32) で 16 要素ずつ処理 (32 = 16 × 2)
     const a_lo: @Vector(16, i32) = @intCast(@as(@Vector(16, i8), a[0..16].*));
     const b_lo: @Vector(16, i32) = @intCast(@as(@Vector(16, i8), b[0..16].*));
@@ -83,7 +83,7 @@ inline fn dotI8x32(a: *const [32]i8, b: *const [32]i8) i32 {
 /// Q4_0 weight row × Q8 input blocks → f32 ドット積
 /// weight_row: Q4_0 エンコード済み 1 行分
 /// q8_input: quantizeRowQ8 で生成した Q8 ブロック列
-pub fn dotQ4_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
+pub fn dot_q4_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
     const num_blocks = q8_input.len;
     var sum: f32 = 0;
 
@@ -99,7 +99,7 @@ pub fn dotQ4_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
             w_i8[j + 16] = @as(i8, @intCast(@as(i32, byte >> 4) - 8));
         }
 
-        const int_dot = dotI8x32(&w_i8, &q8_input[bi].q);
+        const int_dot = dot_i8x32(&w_i8, &q8_input[bi].q);
         sum += w_scale * q8_input[bi].scale * @as(f32, @floatFromInt(int_dot));
     }
     return sum;
@@ -107,7 +107,7 @@ pub fn dotQ4_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
 
 /// Q4_1 weight row × Q8 input blocks → f32 ドット積
 /// Q4_1: val = nibble * scale + min
-pub fn dotQ4_1_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
+pub fn dot_q4_1_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
     const num_blocks = q8_input.len;
     var sum: f32 = 0;
 
@@ -124,7 +124,7 @@ pub fn dotQ4_1_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
             w_i8[j + 16] = @intCast(byte >> 4);
         }
 
-        const int_dot = dotI8x32(&w_i8, &q8_input[bi].q);
+        const int_dot = dot_i8x32(&w_i8, &q8_input[bi].q);
         const q_scale = q8_input[bi].scale;
         // dot = w_scale * q_scale * int_dot + w_min * q_scale * q_sum
         sum += w_scale * q_scale * @as(f32, @floatFromInt(int_dot)) +
@@ -134,7 +134,7 @@ pub fn dotQ4_1_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
 }
 
 /// Q8_0 weight row × Q8 input blocks → f32 ドット積
-pub fn dotQ8_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
+pub fn dot_q8_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
     const num_blocks = q8_input.len;
     var sum: f32 = 0;
 
@@ -145,7 +145,7 @@ pub fn dotQ8_0_q8(weight_row: []const u8, q8_input: []const Q8Block) f32 {
         // weight の i8[32] を直接参照
         const w_i8: *const [32]i8 = @ptrCast(block[2..34]);
 
-        const int_dot = dotI8x32(w_i8, &q8_input[bi].q);
+        const int_dot = dot_i8x32(w_i8, &q8_input[bi].q);
         sum += w_scale * q8_input[bi].scale * @as(f32, @floatFromInt(int_dot));
     }
     return sum;
@@ -164,7 +164,7 @@ test "quantizeRowQ8 basic" {
     // range: -16 .. 15
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
+    quantize_row_q8(&input, &q8);
 
     // scale = 16.0 / 127.0 ≈ 0.126
     try std.testing.expect(q8[0].scale > 0);
@@ -182,7 +182,7 @@ test "quantizeRowQ8 zero input" {
     @memset(&input, 0);
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
+    quantize_row_q8(&input, &q8);
 
     // All zeros
     for (0..32) |i| {
@@ -207,12 +207,12 @@ test "dotQ4_0_q8 matches dotQ4_0_f32" {
     }
 
     // f32 版の結果
-    const expected = dequant.dotQ4_0_f32(&block, &input, 32);
+    const expected = dequant.dot_q4_0_f32(&block, &input, 32);
 
     // Q8 版
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ4_0_q8(&block, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q4_0_q8(&block, &q8);
 
     // 量子化誤差があるので tolerance を緩めに
     try std.testing.expectApproxEqAbs(expected, actual, @abs(expected) * 0.05 + 0.5);
@@ -229,11 +229,11 @@ test "dotQ4_0_q8 unit values" {
     @memset(&input, 1.0);
 
     // f32 reference: each val = 1.0 * 1.0 = 1.0, sum = 32.0
-    const expected = dequant.dotQ4_0_f32(&block, &input, 32);
+    const expected = dequant.dot_q4_0_f32(&block, &input, 32);
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ4_0_q8(&block, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q4_0_q8(&block, &q8);
 
     try std.testing.expectApproxEqAbs(expected, actual, 0.5);
 }
@@ -251,11 +251,11 @@ test "dotQ4_1_q8 matches dotQ4_1_f32" {
         input[i] = @as(f32, @floatFromInt(@as(i32, @intCast(i)))) * 0.2 - 3.0;
     }
 
-    const expected = dequant.dotQ4_1_f32(&block, &input, 32);
+    const expected = dequant.dot_q4_1_f32(&block, &input, 32);
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ4_1_q8(&block, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q4_1_q8(&block, &q8);
 
     try std.testing.expectApproxEqAbs(expected, actual, @abs(expected) * 0.05 + 1.0);
 }
@@ -274,11 +274,11 @@ test "dotQ8_0_q8 matches dotQ8_0_f32" {
         input[i] = @as(f32, @floatFromInt(@as(i32, @intCast(i)))) * 0.3 - 4.0;
     }
 
-    const expected = dequant.dotQ8_0_f32(&block, &input, 32);
+    const expected = dequant.dot_q8_0_f32(&block, &input, 32);
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ8_0_q8(&block, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q8_0_q8(&block, &q8);
 
     try std.testing.expectApproxEqAbs(expected, actual, @abs(expected) * 0.05 + 0.5);
 }
@@ -294,11 +294,11 @@ test "dotQ8_0_q8 unit values" {
     @memset(&input, 1.0);
 
     // Expected: each val = 2 * 1.0 = 2.0, dot with 1.0 = 64.0
-    const expected = dequant.dotQ8_0_f32(&block, &input, 32);
+    const expected = dequant.dot_q8_0_f32(&block, &input, 32);
 
     var q8: [1]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ8_0_q8(&block, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q8_0_q8(&block, &q8);
 
     try std.testing.expectApproxEqAbs(expected, actual, 1.0);
 }
@@ -316,11 +316,11 @@ test "multi-block dotQ4_0_q8" {
     var input: [64]f32 = undefined;
     @memset(&input, 1.0);
 
-    const expected = dequant.dotQ4_0_f32(&weight, &input, 64);
+    const expected = dequant.dot_q4_0_f32(&weight, &input, 64);
 
     var q8: [2]Q8Block = undefined;
-    quantizeRowQ8(&input, &q8);
-    const actual = dotQ4_0_q8(&weight, &q8);
+    quantize_row_q8(&input, &q8);
+    const actual = dot_q4_0_q8(&weight, &q8);
 
     try std.testing.expectApproxEqAbs(expected, actual, 1.0);
 }

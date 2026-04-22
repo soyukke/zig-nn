@@ -73,7 +73,7 @@ pub const ProfileStats = struct {
             self.rope_ns + self.attention_ns + self.elementwise_ns + self.logits_ns;
         const total_ms = @as(f64, @floatFromInt(total_ns)) / 1_000_000.0;
 
-        var maybe_artifact = log_mod.openProfileArtifact("gemma3") catch null;
+        var maybe_artifact = log_mod.open_profile_artifact("gemma3") catch null;
         if (maybe_artifact) |*artifact| {
             defer artifact.close();
 
@@ -113,7 +113,7 @@ pub const GemmaBlockWeights = struct {
     ffn_down_weight: QuantizedWeight, // (EMBED, FFN_DIM) Q4_1
 };
 
-pub fn Gemma3Weights(comptime C: type) type {
+pub fn gemma3_weights(comptime C: type) type {
     return struct {
         const Self = @This();
 
@@ -122,15 +122,18 @@ pub fn Gemma3Weights(comptime C: type) type {
         blocks: [C.LAYER]GemmaBlockWeights,
         allocator: Allocator,
 
-        pub fn loadFromGGUF(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
+        pub fn load_from_gguf(gguf_file: *const gguf_mod.GGUFFile, allocator: Allocator) !Self {
             var self: Self = undefined;
             self.allocator = allocator;
 
-            self.token_embd = try loadQuantizedWeight(gguf_file, "token_embd.weight");
-            self.output_norm_weight = try gguf_file.loadTensorF32("output_norm.weight", allocator);
+            self.token_embd = try load_quantized_weight(gguf_file, "token_embd.weight");
+            self.output_norm_weight = try gguf_file.load_tensor_f32(
+                "output_norm.weight",
+                allocator,
+            );
 
             for (0..C.LAYER) |i| {
-                self.blocks[i] = try loadBlockWeights(C, gguf_file, allocator, i);
+                self.blocks[i] = try load_block_weights(C, gguf_file, allocator, i);
             }
 
             return self;
@@ -150,8 +153,8 @@ pub fn Gemma3Weights(comptime C: type) type {
     };
 }
 
-fn loadQuantizedWeight(gguf_file: *const gguf_mod.GGUFFile, name: []const u8) !QuantizedWeight {
-    const ref = try gguf_file.getTensorRawBytes(name);
+fn load_quantized_weight(gguf_file: *const gguf_mod.GGUFFile, name: []const u8) !QuantizedWeight {
+    const ref = try gguf_file.get_tensor_raw_bytes(name);
     return .{
         .data = ref.data,
         .type_ = ref.type_,
@@ -160,7 +163,7 @@ fn loadQuantizedWeight(gguf_file: *const gguf_mod.GGUFFile, name: []const u8) !Q
     };
 }
 
-fn loadBlockWeights(
+fn load_block_weights(
     comptime _: type,
     gguf_file: *const gguf_mod.GGUFFile,
     allocator: Allocator,
@@ -169,62 +172,62 @@ fn loadBlockWeights(
     var name_buf: [64]u8 = undefined;
 
     return .{
-        .attn_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "attn_norm.weight"),
+        .attn_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "attn_norm.weight"),
             allocator,
         ),
-        .post_attention_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "post_attention_norm.weight"),
+        .post_attention_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "post_attention_norm.weight"),
             allocator,
         ),
-        .attn_q_weight = try loadQuantizedWeight(
+        .attn_q_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "attn_q.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "attn_q.weight"),
         ),
-        .attn_k_weight = try loadQuantizedWeight(
+        .attn_k_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "attn_k.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "attn_k.weight"),
         ),
-        .attn_v_weight = try loadQuantizedWeight(
+        .attn_v_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "attn_v.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "attn_v.weight"),
         ),
-        .attn_output_weight = try loadQuantizedWeight(
+        .attn_output_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "attn_output.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "attn_output.weight"),
         ),
-        .attn_q_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "attn_q_norm.weight"),
+        .attn_q_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "attn_q_norm.weight"),
             allocator,
         ),
-        .attn_k_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "attn_k_norm.weight"),
+        .attn_k_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "attn_k_norm.weight"),
             allocator,
         ),
-        .ffn_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "ffn_norm.weight"),
+        .ffn_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "ffn_norm.weight"),
             allocator,
         ),
-        .post_ffw_norm_weight = try gguf_file.loadTensorF32(
-            try fmtBlockName(&name_buf, layer_idx, "post_ffw_norm.weight"),
+        .post_ffw_norm_weight = try gguf_file.load_tensor_f32(
+            try fmt_block_name(&name_buf, layer_idx, "post_ffw_norm.weight"),
             allocator,
         ),
-        .ffn_gate_weight = try loadQuantizedWeight(
+        .ffn_gate_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "ffn_gate.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "ffn_gate.weight"),
         ),
-        .ffn_up_weight = try loadQuantizedWeight(
+        .ffn_up_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "ffn_up.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "ffn_up.weight"),
         ),
-        .ffn_down_weight = try loadQuantizedWeight(
+        .ffn_down_weight = try load_quantized_weight(
             gguf_file,
-            try fmtBlockName(&name_buf, layer_idx, "ffn_down.weight"),
+            try fmt_block_name(&name_buf, layer_idx, "ffn_down.weight"),
         ),
     };
 }
 
-fn fmtBlockName(buf: []u8, layer: usize, suffix: []const u8) ![]const u8 {
+fn fmt_block_name(buf: []u8, layer: usize, suffix: []const u8) ![]const u8 {
     const result = std.fmt.bufPrint(
         buf,
         "blk.{d}.{s}",
@@ -237,11 +240,11 @@ fn fmtBlockName(buf: []u8, layer: usize, suffix: []const u8) ![]const u8 {
 // Gemma 3 推論エンジン
 // ============================================================
 
-pub fn Gemma3(comptime C: type) type {
+pub fn gemma3(comptime C: type) type {
     return struct {
         const Self = @This();
 
-        weights: Gemma3Weights(C),
+        weights: gemma3_weights(C),
         kv_cache: KVCache,
         pool: *thread_pool_mod.ThreadPool,
         rope_freqs: [C.HEAD_DIM / 2]f32, // 事前計算した RoPE 周波数テーブル
@@ -283,10 +286,10 @@ pub fn Gemma3(comptime C: type) type {
             const n_threads = @max(1, @min(cpu_count, 8));
 
             const self: Self = .{
-                .weights = try Gemma3Weights(C).loadFromGGUF(gguf_file, allocator),
+                .weights = try gemma3_weights(C).load_from_gguf(gguf_file, allocator),
                 .kv_cache = try KVCache.init(allocator),
                 .pool = try thread_pool_mod.ThreadPool.init(n_threads, allocator),
-                .rope_freqs = computeRoPEFreqs(C.HEAD_DIM, C.ROPE_BASE),
+                .rope_freqs = compute_rope_freqs(C.HEAD_DIM, C.ROPE_BASE),
                 .profile = .{},
                 .allocator = allocator,
             };
@@ -302,7 +305,7 @@ pub fn Gemma3(comptime C: type) type {
             self.weights.deinit();
         }
 
-        pub fn resetCache(self: *Self) void {
+        pub fn reset_cache(self: *Self) void {
             self.kv_cache.reset();
         }
 
@@ -321,7 +324,7 @@ pub fn Gemma3(comptime C: type) type {
         };
 
         /// prefill 用の中間バッファをまとめて確保する
-        fn prefillAllocBufs(arena: Allocator, seq_len: usize) !PrefillBufs {
+        fn prefill_alloc_bufs(arena: Allocator, seq_len: usize) !PrefillBufs {
             return .{
                 .x = try arena.alloc(f32, seq_len * C.EMBED),
                 .h = try arena.alloc(f32, seq_len * C.EMBED),
@@ -338,7 +341,7 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// Embedding: 各トークンを Q8_0 から逆量子化して scale 適用
-        fn prefillEmbed(
+        fn prefill_embed(
             self: *Self,
             tokens: []const u32,
             x: []f32,
@@ -347,7 +350,7 @@ pub fn Gemma3(comptime C: type) type {
         ) void {
             const w = &self.weights;
             for (0..seq_len) |t| {
-                dequantRow(w.token_embd, tokens[t], x[t * C.EMBED ..][0..C.EMBED]);
+                dequant_row(w.token_embd, tokens[t], x[t * C.EMBED ..][0..C.EMBED]);
                 for (0..C.EMBED) |i| {
                     x[t * C.EMBED + i] *= embed_scale;
                 }
@@ -355,7 +358,7 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// Q/K に per-head RMSNorm と RoPE を適用し、KV キャッシュに書き込む
-        fn prefillQKNormRope(
+        fn prefill_qk_norm_rope(
             self: *Self,
             blk: *const GemmaBlockWeights,
             bufs: PrefillBufs,
@@ -364,26 +367,26 @@ pub fn Gemma3(comptime C: type) type {
         ) void {
             for (0..seq_len) |t| {
                 for (0..C.HEAD) |hd| {
-                    rmsNormInPlace(
+                    rms_norm_in_place(
                         bufs.q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
                         blk.attn_q_norm_weight,
                         C.RMS_EPS,
                     );
                 }
-                rmsNormInPlace(
+                rms_norm_in_place(
                     bufs.k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
                     blk.attn_k_norm_weight,
                     C.RMS_EPS,
                 );
 
                 for (0..C.HEAD) |hd| {
-                    applyRoPEPrecomputed(
+                    apply_rope_precomputed(
                         bufs.q_buf[t * C.Q_DIM + hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
                         t,
                         &self.rope_freqs,
                     );
                 }
-                applyRoPEPrecomputed(
+                apply_rope_precomputed(
                     bufs.k_buf[t * C.KV_DIM ..][0..C.HEAD_DIM],
                     t,
                     &self.rope_freqs,
@@ -401,7 +404,7 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// prefill レイヤの attention ブロック (pre-norm + QKV + attention + post-norm + residual)
-        fn prefillAttentionBlock(
+        fn prefill_attention_block(
             self: *Self,
             bufs: PrefillBufs,
             layer: usize,
@@ -413,25 +416,25 @@ pub fn Gemma3(comptime C: type) type {
             const p = &self.profile;
             var t0 = timer.read();
 
-            rmsNormRows(bufs.x, blk.attn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, blk.attn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
             var t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            linearForwardQ(bufs.h, blk.attn_q_weight, bufs.q_buf, seq_len, self.pool);
-            linearForwardQ(bufs.h, blk.attn_k_weight, bufs.k_buf, seq_len, self.pool);
-            linearForwardQ(bufs.h, blk.attn_v_weight, bufs.v_buf, seq_len, self.pool);
+            linear_forward_q(bufs.h, blk.attn_q_weight, bufs.q_buf, seq_len, self.pool);
+            linear_forward_q(bufs.h, blk.attn_k_weight, bufs.k_buf, seq_len, self.pool);
+            linear_forward_q(bufs.h, blk.attn_v_weight, bufs.v_buf, seq_len, self.pool);
             t1 = timer.read();
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            self.prefillQKNormRope(blk, bufs, layer, seq_len);
+            self.prefill_qk_norm_rope(blk, bufs, layer, seq_len);
             t1 = timer.read();
             p.rope_ns += t1 - t0;
             t0 = t1;
 
-            const is_global = isGlobalLayer(layer);
-            gqaCausalAttentionPrefill(
+            const is_global = is_global_layer(layer);
+            gqa_causal_attention_prefill(
                 bufs.q_buf,
                 self.kv_cache.k[layer],
                 self.kv_cache.v[layer],
@@ -448,11 +451,11 @@ pub fn Gemma3(comptime C: type) type {
             p.attention_ns += t1 - t0;
             t0 = t1;
 
-            self.prefillProjNormResidual(blk, bufs, seq_len, timer);
+            self.prefill_proj_norm_residual(blk, bufs, seq_len, timer);
         }
 
         /// attn_out → 出力 projection + post-attn RMSNorm + residual add
-        fn prefillProjNormResidual(
+        fn prefill_proj_norm_residual(
             self: *Self,
             blk: *const GemmaBlockWeights,
             bufs: PrefillBufs,
@@ -461,7 +464,7 @@ pub fn Gemma3(comptime C: type) type {
         ) void {
             const p = &self.profile;
             var t0 = timer.read();
-            linearForwardQ(
+            linear_forward_q(
                 bufs.attn_out,
                 blk.attn_output_weight,
                 bufs.proj_out,
@@ -472,7 +475,7 @@ pub fn Gemma3(comptime C: type) type {
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            rmsNormRows(
+            rms_norm_rows(
                 bufs.proj_out,
                 blk.post_attention_norm_weight,
                 bufs.norm_buf,
@@ -484,12 +487,12 @@ pub fn Gemma3(comptime C: type) type {
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            addInPlace(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
+            add_in_place(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
             p.elementwise_ns += timer.read() - t0;
         }
 
         /// prefill レイヤの FFN ブロック (pre-norm + GeGLU + post-norm + residual)
-        fn prefillFfnBlock(
+        fn prefill_ffn_block(
             self: *Self,
             bufs: PrefillBufs,
             layer: usize,
@@ -500,21 +503,21 @@ pub fn Gemma3(comptime C: type) type {
             const p = &self.profile;
             var t0 = timer.read();
 
-            rmsNormRows(bufs.x, blk.ffn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, blk.ffn_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
             var t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            linearForwardQ(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, seq_len, self.pool);
-            geluInPlace(bufs.gate_buf, seq_len * C.FFN_DIM);
-            linearForwardQ(bufs.h, blk.ffn_up_weight, bufs.up_buf, seq_len, self.pool);
-            mulInPlace(bufs.gate_buf, bufs.up_buf, seq_len * C.FFN_DIM);
-            linearForwardQ(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, seq_len, self.pool);
+            linear_forward_q(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, seq_len, self.pool);
+            gelu_in_place(bufs.gate_buf, seq_len * C.FFN_DIM);
+            linear_forward_q(bufs.h, blk.ffn_up_weight, bufs.up_buf, seq_len, self.pool);
+            mul_in_place(bufs.gate_buf, bufs.up_buf, seq_len * C.FFN_DIM);
+            linear_forward_q(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, seq_len, self.pool);
             t1 = timer.read();
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            rmsNormRows(
+            rms_norm_rows(
                 bufs.ffn_out,
                 blk.post_ffw_norm_weight,
                 bufs.norm_buf,
@@ -526,13 +529,13 @@ pub fn Gemma3(comptime C: type) type {
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            addInPlace(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
+            add_in_place(bufs.x, bufs.norm_buf, seq_len * C.EMBED);
             t1 = timer.read();
             p.elementwise_ns += t1 - t0;
         }
 
         /// prefill 1 レイヤ分の forward (attention + FFN + residual)
-        fn prefillLayer(
+        fn prefill_layer(
             self: *Self,
             bufs: PrefillBufs,
             layer: usize,
@@ -540,8 +543,8 @@ pub fn Gemma3(comptime C: type) type {
             arena: Allocator,
             timer: *Timer,
         ) !void {
-            self.prefillAttentionBlock(bufs, layer, seq_len, arena, timer);
-            self.prefillFfnBlock(bufs, layer, seq_len, timer);
+            self.prefill_attention_block(bufs, layer, seq_len, arena, timer);
+            self.prefill_ffn_block(bufs, layer, seq_len, timer);
         }
 
         /// Prefill: プロンプト全体を処理して KV キャッシュを埋める
@@ -559,26 +562,26 @@ pub fn Gemma3(comptime C: type) type {
             var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
-            const bufs = try prefillAllocBufs(arena, seq_len);
-            self.prefillEmbed(tokens, bufs.x, seq_len, embed_scale);
+            const bufs = try prefill_alloc_bufs(arena, seq_len);
+            self.prefill_embed(tokens, bufs.x, seq_len, embed_scale);
 
             var t1 = timer.read();
             p.embedding_ns += t1 - t0;
             t0 = t1;
 
             for (0..C.LAYER) |layer| {
-                try self.prefillLayer(bufs, layer, seq_len, arena, &timer);
+                try self.prefill_layer(bufs, layer, seq_len, arena, &timer);
             }
             t0 = timer.read();
 
             self.kv_cache.seq_len = seq_len;
 
-            rmsNormRows(bufs.x, w.output_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, w.output_norm_weight, bufs.h, seq_len, C.EMBED, C.RMS_EPS);
             t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            const result = try computeLogits(
+            const result = try compute_logits(
                 w,
                 bufs.h[(seq_len - 1) * C.EMBED ..][0..C.EMBED],
                 arena,
@@ -606,7 +609,7 @@ pub fn Gemma3(comptime C: type) type {
         };
 
         /// decode 1 トークン用の中間バッファ
-        fn decodeAllocBufs(arena: Allocator) !DecodeBufs {
+        fn decode_alloc_bufs(arena: Allocator) !DecodeBufs {
             return .{
                 .x = try arena.alloc(f32, C.EMBED),
                 .h = try arena.alloc(f32, C.EMBED),
@@ -623,7 +626,7 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// 1 トークンの Q/K に per-head RMSNorm + RoPE を適用
-        fn decodeQKNormRope(
+        fn decode_qk_norm_rope(
             self: *Self,
             blk: *const GemmaBlockWeights,
             bufs: DecodeBufs,
@@ -631,19 +634,19 @@ pub fn Gemma3(comptime C: type) type {
             pos: usize,
         ) void {
             for (0..C.HEAD) |hd| {
-                rmsNormInPlace(
+                rms_norm_in_place(
                     bufs.q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
                     blk.attn_q_norm_weight,
                     C.RMS_EPS,
                 );
-                applyRoPEPrecomputed(
+                apply_rope_precomputed(
                     bufs.q_buf[hd * C.HEAD_DIM ..][0..C.HEAD_DIM],
                     pos,
                     &self.rope_freqs,
                 );
             }
-            rmsNormInPlace(bufs.k_buf[0..C.HEAD_DIM], blk.attn_k_norm_weight, C.RMS_EPS);
-            applyRoPEPrecomputed(bufs.k_buf[0..C.HEAD_DIM], pos, &self.rope_freqs);
+            rms_norm_in_place(bufs.k_buf[0..C.HEAD_DIM], blk.attn_k_norm_weight, C.RMS_EPS);
+            apply_rope_precomputed(bufs.k_buf[0..C.HEAD_DIM], pos, &self.rope_freqs);
 
             @memcpy(
                 self.kv_cache.k[layer][pos * C.KV_DIM ..][0..C.KV_DIM],
@@ -656,7 +659,7 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// decode レイヤの attention ブロック (pre-norm + QKV + cached attention + post-norm + residual)
-        fn decodeAttentionBlock(
+        fn decode_attention_block(
             self: *Self,
             bufs: DecodeBufs,
             layer: usize,
@@ -668,29 +671,29 @@ pub fn Gemma3(comptime C: type) type {
             const p = &self.profile;
             var t0 = timer.read();
 
-            rmsNormRows(bufs.x, blk.attn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, blk.attn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
             var t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            linearForwardQ(bufs.h, blk.attn_q_weight, bufs.q_buf, 1, self.pool);
-            linearForwardQ(bufs.h, blk.attn_k_weight, bufs.k_buf, 1, self.pool);
-            linearForwardQ(bufs.h, blk.attn_v_weight, bufs.v_buf, 1, self.pool);
+            linear_forward_q(bufs.h, blk.attn_q_weight, bufs.q_buf, 1, self.pool);
+            linear_forward_q(bufs.h, blk.attn_k_weight, bufs.k_buf, 1, self.pool);
+            linear_forward_q(bufs.h, blk.attn_v_weight, bufs.v_buf, 1, self.pool);
             t1 = timer.read();
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            self.decodeQKNormRope(blk, bufs, layer, pos);
+            self.decode_qk_norm_rope(blk, bufs, layer, pos);
             t1 = timer.read();
             p.rope_ns += t1 - t0;
             t0 = t1;
 
-            const is_global = isGlobalLayer(layer);
+            const is_global = is_global_layer(layer);
             const kv_len = pos + 1;
             const window = if (is_global) kv_len else @min(kv_len, C.SLIDING_WINDOW);
             const kv_start = if (kv_len > window) kv_len - window else 0;
             const scores_buf = try arena.alloc(f32, window);
-            gqaCachedAttention(
+            gqa_cached_attention(
                 bufs.q_buf,
                 self.kv_cache.k[layer],
                 self.kv_cache.v[layer],
@@ -707,12 +710,12 @@ pub fn Gemma3(comptime C: type) type {
             p.attention_ns += t1 - t0;
             t0 = t1;
 
-            linearForwardQ(bufs.attn_out, blk.attn_output_weight, bufs.proj_out, 1, self.pool);
+            linear_forward_q(bufs.attn_out, blk.attn_output_weight, bufs.proj_out, 1, self.pool);
             t1 = timer.read();
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            rmsNormRows(
+            rms_norm_rows(
                 bufs.proj_out,
                 blk.post_attention_norm_weight,
                 bufs.norm_buf,
@@ -723,12 +726,12 @@ pub fn Gemma3(comptime C: type) type {
             t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
-            addInPlace(bufs.x, bufs.norm_buf, C.EMBED);
+            add_in_place(bufs.x, bufs.norm_buf, C.EMBED);
             p.elementwise_ns += timer.read() - t1;
         }
 
         /// decode レイヤの FFN ブロック (pre-norm + GeGLU + post-norm + residual)
-        fn decodeFfnBlock(
+        fn decode_ffn_block(
             self: *Self,
             bufs: DecodeBufs,
             layer: usize,
@@ -738,21 +741,21 @@ pub fn Gemma3(comptime C: type) type {
             const p = &self.profile;
             var t0 = timer.read();
 
-            rmsNormRows(bufs.x, blk.ffn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, blk.ffn_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
             var t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            linearForwardQ(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, 1, self.pool);
-            geluInPlace(bufs.gate_buf, C.FFN_DIM);
-            linearForwardQ(bufs.h, blk.ffn_up_weight, bufs.up_buf, 1, self.pool);
-            mulInPlace(bufs.gate_buf, bufs.up_buf, C.FFN_DIM);
-            linearForwardQ(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, 1, self.pool);
+            linear_forward_q(bufs.h, blk.ffn_gate_weight, bufs.gate_buf, 1, self.pool);
+            gelu_in_place(bufs.gate_buf, C.FFN_DIM);
+            linear_forward_q(bufs.h, blk.ffn_up_weight, bufs.up_buf, 1, self.pool);
+            mul_in_place(bufs.gate_buf, bufs.up_buf, C.FFN_DIM);
+            linear_forward_q(bufs.gate_buf, blk.ffn_down_weight, bufs.ffn_out, 1, self.pool);
             t1 = timer.read();
             p.linear_ns += t1 - t0;
             t0 = t1;
 
-            rmsNormRows(
+            rms_norm_rows(
                 bufs.ffn_out,
                 blk.post_ffw_norm_weight,
                 bufs.norm_buf,
@@ -764,13 +767,13 @@ pub fn Gemma3(comptime C: type) type {
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
-            addInPlace(bufs.x, bufs.norm_buf, C.EMBED);
+            add_in_place(bufs.x, bufs.norm_buf, C.EMBED);
             t1 = timer.read();
             p.elementwise_ns += t1 - t0;
         }
 
         /// decode 1 レイヤ分の forward
-        fn decodeLayer(
+        fn decode_layer(
             self: *Self,
             bufs: DecodeBufs,
             layer: usize,
@@ -778,12 +781,12 @@ pub fn Gemma3(comptime C: type) type {
             arena: Allocator,
             timer: *Timer,
         ) !void {
-            try self.decodeAttentionBlock(bufs, layer, pos, arena, timer);
-            self.decodeFfnBlock(bufs, layer, timer);
+            try self.decode_attention_block(bufs, layer, pos, arena, timer);
+            self.decode_ffn_block(bufs, layer, timer);
         }
 
         /// DecodeNext: 1トークンのみ処理、KV キャッシュに追記
-        pub fn decodeNext(self: *Self, token: u32, arena: Allocator) ![]f32 {
+        pub fn decode_next(self: *Self, token: u32, arena: Allocator) ![]f32 {
             const pos = self.kv_cache.seq_len;
             if (pos >= C.CTX) return error.ContextFull;
             const w = &self.weights;
@@ -793,8 +796,8 @@ pub fn Gemma3(comptime C: type) type {
             var timer = Timer.start() catch unreachable;
             var t0 = timer.read();
 
-            const bufs = try decodeAllocBufs(arena);
-            dequantRow(w.token_embd, token, bufs.x);
+            const bufs = try decode_alloc_bufs(arena);
+            dequant_row(w.token_embd, token, bufs.x);
             for (0..C.EMBED) |i| {
                 bufs.x[i] *= embed_scale;
             }
@@ -804,18 +807,18 @@ pub fn Gemma3(comptime C: type) type {
             t0 = t1;
 
             for (0..C.LAYER) |layer| {
-                try self.decodeLayer(bufs, layer, pos, arena, &timer);
+                try self.decode_layer(bufs, layer, pos, arena, &timer);
             }
             t0 = timer.read();
 
-            rmsNormRows(bufs.x, w.output_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
+            rms_norm_rows(bufs.x, w.output_norm_weight, bufs.h, 1, C.EMBED, C.RMS_EPS);
             t1 = timer.read();
             p.rms_norm_ns += t1 - t0;
             t0 = t1;
 
             self.kv_cache.seq_len = pos + 1;
 
-            const result = try computeLogits(w, bufs.h, arena, self.pool);
+            const result = try compute_logits(w, bufs.h, arena, self.pool);
             t1 = timer.read();
             p.logits_ns += t1 - t0;
 
@@ -824,8 +827,8 @@ pub fn Gemma3(comptime C: type) type {
         }
 
         /// hidden → logits (weight-tied with token_embd, Q8_0 matmul)
-        fn computeLogits(
-            w: *const Gemma3Weights(C),
+        fn compute_logits(
+            w: *const gemma3_weights(C),
             hidden: []const f32,
             arena: Allocator,
             pool: *thread_pool_mod.ThreadPool,
@@ -849,19 +852,19 @@ pub fn Gemma3(comptime C: type) type {
 // ============================================================
 
 /// 量子化行から 1 行分を f32 に逆量子化
-pub fn dequantRow(w: QuantizedWeight, row_idx: u32, dst: []f32) void {
+pub fn dequant_row(w: QuantizedWeight, row_idx: u32, dst: []f32) void {
     const in_dim = w.in_dim;
     const idx: usize = row_idx;
     switch (w.type_) {
         .q8_0 => {
-            const row_bytes = dequant_mod.tensorBytes(.q8_0, in_dim);
+            const row_bytes = dequant_mod.tensor_bytes(.q8_0, in_dim);
             const src = w.data[idx * row_bytes ..][0..row_bytes];
-            dequant_mod.dequantizeQ8_0(src, dst, in_dim);
+            dequant_mod.dequantize_q8_0(src, dst, in_dim);
         },
         .q4_0 => {
-            const row_bytes = dequant_mod.tensorBytes(.q4_0, in_dim);
+            const row_bytes = dequant_mod.tensor_bytes(.q4_0, in_dim);
             const src = w.data[idx * row_bytes ..][0..row_bytes];
-            dequant_mod.dequantizeQ4_0(src, dst, in_dim);
+            dequant_mod.dequantize_q4_0(src, dst, in_dim);
         },
         else => unreachable,
     }
@@ -869,7 +872,7 @@ pub fn dequantRow(w: QuantizedWeight, row_idx: u32, dst: []f32) void {
 
 /// Linear forward with quantized weights (no bias)
 /// ThreadPool を使用したマルチスレッド matmul
-fn linearForwardQ(
+fn linear_forward_q(
     input: []const f32,
     weight: QuantizedWeight,
     output: []f32,
@@ -900,7 +903,7 @@ fn linearForwardQ(
 
 /// RMSNorm: 各行を独立に正規化 (SIMD)
 /// output = x / rms * weight, rms = sqrt(mean(x^2) + eps)
-pub fn rmsNormRows(
+pub fn rms_norm_rows(
     input: []const f32,
     weight: []const f32,
     output: []f32,
@@ -943,7 +946,7 @@ pub fn rmsNormRows(
 }
 
 /// RMSNorm in-place (for per-head normalization)
-fn rmsNormInPlace(x: []f32, weight: []const f32, eps: f32) void {
+fn rms_norm_in_place(x: []f32, weight: []const f32, eps: f32) void {
     const dim = x.len;
     var ss: f32 = 0;
     for (0..dim) |i| {
@@ -956,7 +959,7 @@ fn rmsNormInPlace(x: []f32, weight: []const f32, eps: f32) void {
 }
 
 /// RoPE (Rotary Position Embedding) — 事前計算周波数テーブル使用版
-fn applyRoPEPrecomputed(x: []f32, pos: usize, freqs: []const f32) void {
+fn apply_rope_precomputed(x: []f32, pos: usize, freqs: []const f32) void {
     const pos_f: f32 = @floatFromInt(pos);
     for (0..freqs.len) |i| {
         const theta = pos_f * freqs[i];
@@ -970,7 +973,7 @@ fn applyRoPEPrecomputed(x: []f32, pos: usize, freqs: []const f32) void {
 }
 
 /// RoPE (Rotary Position Embedding) — フォールバック版 (テスト用)
-fn applyRoPE(x: []f32, pos: usize, head_dim: usize, rope_base: f32) void {
+fn apply_rope(x: []f32, pos: usize, head_dim: usize, rope_base: f32) void {
     const pos_f: f32 = @floatFromInt(pos);
     var i: usize = 0;
     while (i < head_dim) : (i += 2) {
@@ -986,7 +989,7 @@ fn applyRoPE(x: []f32, pos: usize, head_dim: usize, rope_base: f32) void {
 }
 
 /// GQA causal self-attention (prefill, multi-token)
-fn gqaCausalAttentionPrefill(
+fn gqa_causal_attention_prefill(
     q: []const f32, // (seq_len, Q_DIM)
     k_cache: []const f32, // (CTX, KV_DIM)
     v_cache: []const f32, // (CTX, KV_DIM)
@@ -1034,7 +1037,7 @@ fn gqaCausalAttentionPrefill(
                 scores_buf[ki - kv_start] = dot * scale;
             }
 
-            softmaxInPlace(scores_buf[0..kv_len], kv_len);
+            softmax_in_place(scores_buf[0..kv_len], kv_len);
 
             // Weighted sum of values
             for (kv_start..kv_end) |ki| {
@@ -1056,7 +1059,7 @@ fn gqaCausalAttentionPrefill(
 }
 
 /// GQA cached attention (decode, single token)
-fn gqaCachedAttention(
+fn gqa_cached_attention(
     q: []const f32, // (Q_DIM,)
     k_cache: []const f32, // (CTX, KV_DIM)
     v_cache: []const f32, // (CTX, KV_DIM)
@@ -1096,7 +1099,7 @@ fn gqaCachedAttention(
             scores_buf[ki - kv_start] = dot * scale;
         }
 
-        softmaxInPlace(scores_buf[0..kv_len], kv_len);
+        softmax_in_place(scores_buf[0..kv_len], kv_len);
 
         // Weighted sum
         for (kv_start..kv_end) |ki| {
@@ -1117,12 +1120,12 @@ fn gqaCachedAttention(
 }
 
 /// Sliding window: layer 5,11,17,23 = global
-pub fn isGlobalLayer(layer: usize) bool {
+pub fn is_global_layer(layer: usize) bool {
     return (layer % 6 == 5);
 }
 
 /// RoPE 周波数テーブルを事前計算
-pub fn computeRoPEFreqs(comptime head_dim: usize, rope_base: f32) [head_dim / 2]f32 {
+pub fn compute_rope_freqs(comptime head_dim: usize, rope_base: f32) [head_dim / 2]f32 {
     var freqs: [head_dim / 2]f32 = undefined;
     for (0..head_dim / 2) |i| {
         const freq_exp = -@as(f32, @floatFromInt(i * 2)) / @as(f32, @floatFromInt(head_dim));
@@ -1132,7 +1135,7 @@ pub fn computeRoPEFreqs(comptime head_dim: usize, rope_base: f32) [head_dim / 2]
 }
 
 /// QuantizedWeight → Metal QuantType 変換
-pub fn quantTypeOfWeight(w: QuantizedWeight) @import("../backend/metal.zig").QuantType {
+pub fn quant_type_of_weight(w: QuantizedWeight) @import("../backend/metal.zig").QuantType {
     return switch (w.type_) {
         .q4_0 => .q4_0,
         .q4_1 => .q4_1,
@@ -1142,7 +1145,7 @@ pub fn quantTypeOfWeight(w: QuantizedWeight) @import("../backend/metal.zig").Qua
 }
 
 /// GELU activation (tanh approximation, in-place)
-fn geluInPlace(x: []f32, n: usize) void {
+fn gelu_in_place(x: []f32, n: usize) void {
     const sqrt_2_over_pi: f32 = 0.7978845608;
     for (0..n) |i| {
         const v = x[i];
@@ -1152,7 +1155,7 @@ fn geluInPlace(x: []f32, n: usize) void {
 }
 
 /// Softmax (in-place, numerically stable)
-fn softmaxInPlace(x: []f32, n: usize) void {
+fn softmax_in_place(x: []f32, n: usize) void {
     var max_val: f32 = -std.math.inf(f32);
     for (0..n) |i| {
         if (x[i] > max_val) max_val = x[i];
@@ -1169,7 +1172,7 @@ fn softmaxInPlace(x: []f32, n: usize) void {
 }
 
 /// Element-wise add in-place: a += b (SIMD)
-fn addInPlace(a: []f32, b: []const f32, n: usize) void {
+fn add_in_place(a: []f32, b: []const f32, n: usize) void {
     const vl = comptime std.simd.suggestVectorLength(f32) orelse 4;
     var i: usize = 0;
     while (i + vl <= n) : (i += vl) {
@@ -1183,7 +1186,7 @@ fn addInPlace(a: []f32, b: []const f32, n: usize) void {
 }
 
 /// Element-wise multiply in-place: a *= b (SIMD)
-fn mulInPlace(a: []f32, b: []const f32, n: usize) void {
+fn mul_in_place(a: []f32, b: []const f32, n: usize) void {
     const vl = comptime std.simd.suggestVectorLength(f32) orelse 4;
     var i: usize = 0;
     while (i + vl <= n) : (i += vl) {
@@ -1197,7 +1200,7 @@ fn mulInPlace(a: []f32, b: []const f32, n: usize) void {
 }
 
 // Re-export sampling utilities from gpt2
-pub const sampleTopK = gpt2_mod.sampleTopK;
+pub const sample_top_k = gpt2_mod.sample_top_k;
 pub const argmax = gpt2_mod.argmax;
 
 // ============================================================
@@ -1208,7 +1211,7 @@ test "rmsNorm basic" {
     const input = [_]f32{ 1, 2, 3, 4 };
     const weight = [_]f32{ 1, 1, 1, 1 };
     var output: [4]f32 = undefined;
-    rmsNormRows(&input, &weight, &output, 1, 4, 1e-6);
+    rms_norm_rows(&input, &weight, &output, 1, 4, 1e-6);
 
     // rms = sqrt((1+4+9+16)/4 + 1e-6) = sqrt(7.5)
     // output[i] = input[i] / rms
@@ -1222,7 +1225,7 @@ test "rmsNorm basic" {
 test "applyRoPE basic" {
     // pos=0 → theta=0 for all freqs → cos=1, sin=0 → no change
     var x = [_]f32{ 1, 2, 3, 4 };
-    applyRoPE(&x, 0, 4, 10000.0);
+    apply_rope(&x, 0, 4, 10000.0);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), x[0], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 2.0), x[1], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), x[2], 1e-5);
@@ -1230,19 +1233,19 @@ test "applyRoPE basic" {
 }
 
 test "isGlobalLayer" {
-    try std.testing.expect(isGlobalLayer(5));
-    try std.testing.expect(isGlobalLayer(11));
-    try std.testing.expect(isGlobalLayer(17));
-    try std.testing.expect(isGlobalLayer(23));
-    try std.testing.expect(!isGlobalLayer(0));
-    try std.testing.expect(!isGlobalLayer(1));
-    try std.testing.expect(!isGlobalLayer(6));
-    try std.testing.expect(!isGlobalLayer(25));
+    try std.testing.expect(is_global_layer(5));
+    try std.testing.expect(is_global_layer(11));
+    try std.testing.expect(is_global_layer(17));
+    try std.testing.expect(is_global_layer(23));
+    try std.testing.expect(!is_global_layer(0));
+    try std.testing.expect(!is_global_layer(1));
+    try std.testing.expect(!is_global_layer(6));
+    try std.testing.expect(!is_global_layer(25));
 }
 
 test "geluInPlace basic" {
     var x = [_]f32{ 0, 1, -1 };
-    geluInPlace(&x, 3);
+    gelu_in_place(&x, 3);
     try std.testing.expectApproxEqAbs(@as(f32, 0), x[0], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 0.8412), x[1], 0.01);
     try std.testing.expectApproxEqAbs(@as(f32, -0.1588), x[2], 0.01);

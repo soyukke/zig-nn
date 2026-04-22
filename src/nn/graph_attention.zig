@@ -6,29 +6,29 @@
 const std = @import("std");
 const compute = @import("../compute.zig");
 const Module = compute.Module;
-const Linear = @import("graph_linear.zig").Linear;
+const linear = @import("graph_linear.zig").linear;
 const DTypeFloat32 = compute.MPSDataTypeFloat32;
 
 /// Non-causal self-attention (single-head, backward compatible)
-pub fn SelfAttention(comptime d_model: usize) type {
-    return MultiHeadSelfAttention(d_model, 1);
+pub fn self_attention(comptime d_model: usize) type {
+    return multi_head_self_attention(d_model, 1);
 }
 
 /// Multi-head non-causal self-attention
-pub fn MultiHeadSelfAttention(comptime d_model: usize, comptime n_heads: usize) type {
+pub fn multi_head_self_attention(comptime d_model: usize, comptime n_heads: usize) type {
     const d_head = d_model / n_heads;
     return struct {
-        q_proj: Linear(d_model, d_model),
-        k_proj: Linear(d_model, d_model),
-        v_proj: Linear(d_model, d_model),
-        o_proj: Linear(d_model, d_model),
+        q_proj: linear(d_model, d_model),
+        k_proj: linear(d_model, d_model),
+        v_proj: linear(d_model, d_model),
+        o_proj: linear(d_model, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .q_proj = Linear(d_model, d_model).init(module),
-                .k_proj = Linear(d_model, d_model).init(module),
-                .v_proj = Linear(d_model, d_model).init(module),
-                .o_proj = Linear(d_model, d_model).init(module),
+                .q_proj = linear(d_model, d_model).init(module),
+                .k_proj = linear(d_model, d_model).init(module),
+                .v_proj = linear(d_model, d_model).init(module),
+                .o_proj = linear(d_model, d_model).init(module),
             };
         }
 
@@ -47,7 +47,7 @@ pub fn MultiHeadSelfAttention(comptime d_model: usize, comptime n_heads: usize) 
             const v = ctx.reshape(self.v_proj.forward(ctx, input), &.{ bh, seq_len, d_head });
 
             const scale_val: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(d_head)));
-            const scale_c = ctx.constantScalar(scale_val, DTypeFloat32);
+            const scale_c = ctx.constant_scalar(scale_val, DTypeFloat32);
             const scores = if (@typeInfo(@TypeOf(ctx)) == .pointer and
                 @hasDecl(std.meta.Child(@TypeOf(ctx)), "matmulBatchedTransB"))
                 ctx.mul(ctx.matmulBatchedTransB(q, k), scale_c)
@@ -64,29 +64,29 @@ pub fn MultiHeadSelfAttention(comptime d_model: usize, comptime n_heads: usize) 
 }
 
 /// Causal self-attention (single-head, backward compatible)
-pub fn CausalSelfAttention(comptime d_model: usize, comptime tgt_len: usize) type {
-    return MultiHeadCausalSelfAttention(d_model, 1, tgt_len);
+pub fn causal_self_attention(comptime d_model: usize, comptime tgt_len: usize) type {
+    return multi_head_causal_self_attention(d_model, 1, tgt_len);
 }
 
 /// Multi-head causal self-attention (decoder用)
-pub fn MultiHeadCausalSelfAttention(
+pub fn multi_head_causal_self_attention(
     comptime d_model: usize,
     comptime n_heads: usize,
     comptime tgt_len: usize,
 ) type {
     const d_head = d_model / n_heads;
     return struct {
-        q_proj: Linear(d_model, d_model),
-        k_proj: Linear(d_model, d_model),
-        v_proj: Linear(d_model, d_model),
-        o_proj: Linear(d_model, d_model),
+        q_proj: linear(d_model, d_model),
+        k_proj: linear(d_model, d_model),
+        v_proj: linear(d_model, d_model),
+        o_proj: linear(d_model, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .q_proj = Linear(d_model, d_model).init(module),
-                .k_proj = Linear(d_model, d_model).init(module),
-                .v_proj = Linear(d_model, d_model).init(module),
-                .o_proj = Linear(d_model, d_model).init(module),
+                .q_proj = linear(d_model, d_model).init(module),
+                .k_proj = linear(d_model, d_model).init(module),
+                .v_proj = linear(d_model, d_model).init(module),
+                .o_proj = linear(d_model, d_model).init(module),
             };
         }
 
@@ -104,7 +104,7 @@ pub fn MultiHeadCausalSelfAttention(
             const v = ctx.reshape(self.v_proj.forward(ctx, input), &.{ bh, tgt_len, d_head });
 
             const scale_val: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(d_head)));
-            const scale_c = ctx.constantScalar(scale_val, DTypeFloat32);
+            const scale_c = ctx.constant_scalar(scale_val, DTypeFloat32);
 
             // Causal mask: (1, tgt_len, tgt_len), 0 = attend, -1e9 = mask
             const neg_inf: f32 = -1.0e9;
@@ -114,7 +114,7 @@ pub fn MultiHeadCausalSelfAttention(
                     mask_data[i * tgt_len + j] = if (j <= i) 0.0 else neg_inf;
                 }
             }
-            const causal_mask = ctx.constantData(
+            const causal_mask = ctx.constant_data(
                 @ptrCast(&mask_data),
                 tgt_len * tgt_len * @sizeOf(f32),
                 &.{ 1, tgt_len, tgt_len },
@@ -137,25 +137,25 @@ pub fn MultiHeadCausalSelfAttention(
 }
 
 /// Cross-attention (single-head, backward compatible)
-pub fn CrossAttention(comptime d_model: usize) type {
-    return MultiHeadCrossAttention(d_model, 1);
+pub fn cross_attention(comptime d_model: usize) type {
+    return multi_head_cross_attention(d_model, 1);
 }
 
 /// Multi-head cross-attention (encoder-decoder attention)
-pub fn MultiHeadCrossAttention(comptime d_model: usize, comptime n_heads: usize) type {
+pub fn multi_head_cross_attention(comptime d_model: usize, comptime n_heads: usize) type {
     const d_head = d_model / n_heads;
     return struct {
-        q_proj: Linear(d_model, d_model),
-        k_proj: Linear(d_model, d_model),
-        v_proj: Linear(d_model, d_model),
-        o_proj: Linear(d_model, d_model),
+        q_proj: linear(d_model, d_model),
+        k_proj: linear(d_model, d_model),
+        v_proj: linear(d_model, d_model),
+        o_proj: linear(d_model, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .q_proj = Linear(d_model, d_model).init(module),
-                .k_proj = Linear(d_model, d_model).init(module),
-                .v_proj = Linear(d_model, d_model).init(module),
-                .o_proj = Linear(d_model, d_model).init(module),
+                .q_proj = linear(d_model, d_model).init(module),
+                .k_proj = linear(d_model, d_model).init(module),
+                .v_proj = linear(d_model, d_model).init(module),
+                .o_proj = linear(d_model, d_model).init(module),
             };
         }
 
@@ -177,7 +177,7 @@ pub fn MultiHeadCrossAttention(comptime d_model: usize, comptime n_heads: usize)
             const v = ctx.reshape(self.v_proj.forward(ctx, kv_input), &.{ bh, src_len, d_head });
 
             const scale_val: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(d_head)));
-            const scale_c = ctx.constantScalar(scale_val, DTypeFloat32);
+            const scale_c = ctx.constant_scalar(scale_val, DTypeFloat32);
 
             const scores = if (@typeInfo(@TypeOf(ctx)) == .pointer and
                 @hasDecl(std.meta.Child(@TypeOf(ctx)), "matmulBatchedTransB"))
@@ -197,20 +197,20 @@ pub fn MultiHeadCrossAttention(comptime d_model: usize, comptime n_heads: usize)
 /// Dynamic causal self-attention (runtime seq_len)
 /// NOTE: DiffCpuRuntime 専用。allocData/makeNode を使うため GPU backend では使用不可。
 /// GPU で runtime seq_len が必要な場合は MPSGraph の constantData で mask を生成すること。
-pub fn DynamicCausalSelfAttention(comptime d_model: usize, comptime n_heads: usize) type {
+pub fn dynamic_causal_self_attention(comptime d_model: usize, comptime n_heads: usize) type {
     const d_head = d_model / n_heads;
     return struct {
-        q_proj: Linear(d_model, d_model),
-        k_proj: Linear(d_model, d_model),
-        v_proj: Linear(d_model, d_model),
-        o_proj: Linear(d_model, d_model),
+        q_proj: linear(d_model, d_model),
+        k_proj: linear(d_model, d_model),
+        v_proj: linear(d_model, d_model),
+        o_proj: linear(d_model, d_model),
 
         pub fn init(module: anytype) @This() {
             return .{
-                .q_proj = Linear(d_model, d_model).init(module),
-                .k_proj = Linear(d_model, d_model).init(module),
-                .v_proj = Linear(d_model, d_model).init(module),
-                .o_proj = Linear(d_model, d_model).init(module),
+                .q_proj = linear(d_model, d_model).init(module),
+                .k_proj = linear(d_model, d_model).init(module),
+                .v_proj = linear(d_model, d_model).init(module),
+                .o_proj = linear(d_model, d_model).init(module),
             };
         }
 
@@ -229,18 +229,18 @@ pub fn DynamicCausalSelfAttention(comptime d_model: usize, comptime n_heads: usi
             const v = ctx.reshape(self.v_proj.forward(ctx, input), &.{ bh, seq_len, d_head });
 
             const scale_val: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(d_head)));
-            const scale_c = ctx.constantScalar(scale_val, DTypeFloat32);
+            const scale_c = ctx.constant_scalar(scale_val, DTypeFloat32);
 
             // Runtime causal mask
             const mask_size = seq_len * seq_len;
             const neg_inf: f32 = -1.0e9;
-            const mask_buf = ctx.allocData(mask_size);
+            const mask_buf = ctx.alloc_data(mask_size);
             for (0..seq_len) |i| {
                 for (0..seq_len) |j| {
                     mask_buf[i * seq_len + j] = if (j <= i) 0.0 else neg_inf;
                 }
             }
-            const causal_mask = ctx.makeNode(mask_buf, &.{ 1, seq_len, seq_len }, false);
+            const causal_mask = ctx.make_node(mask_buf, &.{ 1, seq_len, seq_len }, false);
 
             const scores = if (@typeInfo(@TypeOf(ctx)) == .pointer and
                 @hasDecl(std.meta.Child(@TypeOf(ctx)), "matmulBatchedTransB"))
@@ -258,6 +258,6 @@ pub fn DynamicCausalSelfAttention(comptime d_model: usize, comptime n_heads: usi
 }
 
 /// Backward-compatible aliases
-pub const GraphSelfAttention = SelfAttention;
-pub const GraphCausalSelfAttention = CausalSelfAttention;
-pub const GraphCrossAttention = CrossAttention;
+pub const GraphSelfAttention = self_attention;
+pub const GraphCausalSelfAttention = causal_self_attention;
+pub const GraphCrossAttention = cross_attention;

@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const nn = @import("nn");
-const Sequential = nn.unified.Sequential;
-const Linear = nn.unified.Linear;
+const sequential = nn.unified.sequential;
+const linear = nn.unified.linear;
 const ReLU = nn.unified.ReLU;
-const Trainer = nn.unified.Trainer;
+const trainer = nn.unified.trainer;
 
 pub const std_options = nn.log.std_options;
 const log = nn.log.example;
@@ -20,11 +20,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         const cuda = nn.cuda;
         var cuda_ctx = try cuda.CudaContext.init(0);
         defer cuda_ctx.deinit();
-        var trainer = try Trainer(SpiralModel, .cuda).init(std.heap.page_allocator, &cuda_ctx, .{ .lr = 0.01 });
+        var trainer = try trainer(SpiralModel, .cuda).init(std.heap.page_allocator, &cuda_ctx, .{ .lr = 0.01 });
         defer trainer.deinit();
         try spiralDemo(&trainer, "CUDA");
     } else {
-        var trainer = try Trainer(SpiralModel, .cpu).init(std.heap.page_allocator, {}, .{ .lr = 0.01 });
+        var trainer = try trainer(SpiralModel, .cpu).init(std.heap.page_allocator, {}, .{ .lr = 0.01 });
         defer trainer.deinit();
         try spiralDemo(&trainer, "CPU");
     }
@@ -78,7 +78,7 @@ fn argmax(comptime n: usize, data: []const f32) u32 {
 }
 
 /// Spiral model: Linear(2,32) -> ReLU -> Linear(32,32) -> ReLU -> Linear(32,3)
-const SpiralModel = Sequential(.{ Linear(2, 32), ReLU, Linear(32, 32), ReLU, Linear(32, 3) });
+const SpiralModel = sequential(.{ linear(2, 32), ReLU, linear(32, 32), ReLU, linear(32, 3) });
 
 fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
     log.info("=== Spiral Classification ({s}: CrossEntropy + Adam) ===", .{device_name});
@@ -92,16 +92,16 @@ fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
     const num_epochs = 500;
     var timer = try nn.Timer.start();
     for (0..num_epochs) |epoch| {
-        trainer.zeroGrad();
+        trainer.zero_grad();
         const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
-        const loss = trainer.crossEntropyLoss(logits, &y_data);
+        const loss = trainer.cross_entropy_loss(logits, &y_data);
         trainer.backward(loss);
         trainer.step();
 
         if (epoch % 100 == 0 or epoch == num_epochs - 1) {
-            const loss_val = trainer.lossValue(loss);
+            const loss_val = trainer.loss_value(loss);
             var logits_buf: [SPIRAL_TOTAL * 3]f32 = undefined;
-            const logits_data = trainer.dataSlice(logits, &logits_buf);
+            const logits_data = trainer.data_slice(logits, &logits_buf);
             const acc = computeAccuracy(SPIRAL_TOTAL, 3, logits_data, &y_data);
             log.info("epoch {d:>3}: loss = {d:.4}, accuracy = {d:.1}%", .{
                 epoch, loss_val, acc * 100.0,
@@ -111,10 +111,10 @@ fn spiralDemo(trainer: anytype, device_name: []const u8) !void {
     const elapsed_ms = timer.read() / 1_000_000;
     log.info("training time: {d}ms", .{elapsed_ms});
 
-    trainer.zeroGrad();
+    trainer.zero_grad();
     const logits = trainer.forward(trainer.tensor(&x_data, &.{ SPIRAL_TOTAL, 2 }));
     var logits_buf: [SPIRAL_TOTAL * 3]f32 = undefined;
-    const logits_data = trainer.dataSlice(logits, &logits_buf);
+    const logits_data = trainer.data_slice(logits, &logits_buf);
     const final_acc = computeAccuracy(SPIRAL_TOTAL, 3, logits_data, &y_data);
     log.info("final accuracy: {d:.1}%", .{final_acc * 100.0});
     printSamplePredictions(logits_data, &x_data, &y_data);
