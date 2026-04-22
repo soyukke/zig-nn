@@ -16,6 +16,7 @@ const MetalContext = metal.MetalContext;
 const id = metal.id;
 const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
+const unary = @import("common/unary.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -248,6 +249,46 @@ pub const DiffMpsRuntime = struct {
     // ════════════════════════════════════════════════════════════════
     // Unary ops (Metal forward + CPU backward via UMA)
     // ════════════════════════════════════════════════════════════════
+    //
+    // Pointwise unary の数式は diff/common/unary.zig に集約。
+    // - CPU fallback forward + CPU backward: unaryKindCpu を使う
+    // - GPU forward + CPU backward:         forward は dispatchXxx、
+    //                                        backward_fn = &UnaryBackward(Kind).apply
+
+    /// CPU fwd (UMA) + CPU bwd (UMA) の pointwise unary op (Metal kernel なし)。
+    fn unaryKindCpu(self: *DiffMpsRuntime, comptime kind: unary.Kind, x: DiffMpsTensor) DiffMpsTensor {
+        const n = x.totalElements();
+        const out_buf = self.allocBuf(n);
+        const src = bufPtr(x.data);
+        const dst = bufPtr(out_buf);
+        for (0..n) |i| dst[i] = kind.fwd(src[i]);
+        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
+        if (x.requires_grad) {
+            node.parents[0] = x;
+            node.backward_fn = &UnaryBackward(kind).apply;
+        }
+        return node;
+    }
+
+    /// 共通 backward: ga[i] += go[i] * kind.deriv(x[i], y[i])
+    /// GPU forward を使う op (gelu/relu/tanh) からも直接参照して共有する。
+    fn UnaryBackward(comptime kind: unary.Kind) type {
+        return struct {
+            fn apply(self_node: *DiffMpsNode) void {
+                const pa = self_node.parents[0].?;
+                if (pa.grad) |ga_buf| {
+                    const total = self_node.totalElements();
+                    const go = bufPtr(self_node.grad.?);
+                    const ga = bufPtr(ga_buf);
+                    const x_data = bufPtr(pa.data);
+                    const y_data = bufPtr(self_node.data);
+                    for (0..total) |i| {
+                        ga[i] += go[i] * kind.deriv(x_data[i], y_data[i]);
+                    }
+                }
+            }
+        };
+    }
 
     pub fn gelu(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
         const n: u32 = @intCast(x.totalElements());
@@ -258,28 +299,9 @@ pub const DiffMpsRuntime = struct {
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &backwardGelu;
+            node.backward_fn = &UnaryBackward(unary.Gelu).apply;
         }
         return node;
-    }
-
-    fn backwardGelu(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const x_data = bufPtr(pa.data);
-            const sqrt_2_over_pi: f32 = 0.7978845608028654;
-            for (0..total) |i| {
-                const v = x_data[i];
-                const inner = sqrt_2_over_pi * (v + 0.044715 * v * v * v);
-                const tanh_val = std.math.tanh(inner);
-                const sech2 = 1.0 - tanh_val * tanh_val;
-                const inner_deriv = sqrt_2_over_pi * (1.0 + 3.0 * 0.044715 * v * v);
-                ga[i] += go[i] * (0.5 * (1.0 + tanh_val) + 0.5 * v * sech2 * inner_deriv);
-            }
-        }
     }
 
     pub fn silu(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
@@ -326,22 +348,9 @@ pub const DiffMpsRuntime = struct {
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &backwardRelu;
+            node.backward_fn = &UnaryBackward(unary.Relu).apply;
         }
         return node;
-    }
-
-    fn backwardRelu(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const x_data = bufPtr(pa.data);
-            for (0..total) |i| {
-                if (x_data[i] > 0) ga[i] += go[i];
-            }
-        }
     }
 
     pub fn tanh_(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
@@ -353,22 +362,9 @@ pub const DiffMpsRuntime = struct {
         const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            node.backward_fn = &backwardTanh;
+            node.backward_fn = &UnaryBackward(unary.Tanh).apply;
         }
         return node;
-    }
-
-    fn backwardTanh(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const out = bufPtr(self_node.data); // tanh(x)
-            for (0..total) |i| {
-                ga[i] += go[i] * (1.0 - out[i] * out[i]);
-            }
-        }
     }
 
     pub fn softmax(self: *DiffMpsRuntime, x: DiffMpsTensor, axis: i64) DiffMpsTensor {
@@ -409,80 +405,18 @@ pub const DiffMpsRuntime = struct {
         }
     }
 
-    // ── CPU fallback unary ops ──
+    // ── CPU fallback unary ops (数式は diff/common/unary.zig) ──
 
     pub fn negative(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
-        const n = x.totalElements();
-        const out_buf = self.allocBuf(n);
-        const src = bufPtr(x.data);
-        const dst = bufPtr(out_buf);
-        for (0..n) |i| dst[i] = -src[i];
-        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardNegative;
-        }
-        return node;
-    }
-
-    fn backwardNegative(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            for (0..total) |i| ga[i] -= go[i];
-        }
+        return self.unaryKindCpu(unary.Negative, x);
     }
 
     pub fn square(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
-        const n = x.totalElements();
-        const out_buf = self.allocBuf(n);
-        const src = bufPtr(x.data);
-        const dst = bufPtr(out_buf);
-        for (0..n) |i| dst[i] = src[i] * src[i];
-        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardSquare;
-        }
-        return node;
-    }
-
-    fn backwardSquare(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const x_data = bufPtr(pa.data);
-            for (0..total) |i| ga[i] += go[i] * 2.0 * x_data[i];
-        }
+        return self.unaryKindCpu(unary.Square, x);
     }
 
     pub fn sigmoid(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
-        const n = x.totalElements();
-        const out_buf = self.allocBuf(n);
-        const src = bufPtr(x.data);
-        const dst = bufPtr(out_buf);
-        for (0..n) |i| dst[i] = 1.0 / (1.0 + @exp(-src[i]));
-        const node = self.makeNode(out_buf, x.shape[0..x.ndim], x.requires_grad);
-        if (x.requires_grad) {
-            node.parents[0] = x;
-            node.backward_fn = &backwardSigmoid;
-        }
-        return node;
-    }
-
-    fn backwardSigmoid(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        if (pa.grad) |ga_buf| {
-            const total = self_node.totalElements();
-            const go = bufPtr(self_node.grad.?);
-            const ga = bufPtr(ga_buf);
-            const sig = bufPtr(self_node.data);
-            for (0..total) |i| ga[i] += go[i] * sig[i] * (1.0 - sig[i]);
-        }
+        return self.unaryKindCpu(unary.Sigmoid, x);
     }
 
     // ════════════════════════════════════════════════════════════════
