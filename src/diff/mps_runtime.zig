@@ -17,6 +17,7 @@ const id = metal.id;
 const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
 const unary = @import("common/unary.zig");
+const binary = @import("common/binary.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -290,6 +291,74 @@ pub const DiffMpsRuntime = struct {
         };
     }
 
+    // ── Binary ops driver (数式は diff/common/binary.zig) ──
+
+    /// CPU fwd (UMA) + CPU bwd (UMA) の pointwise binary op。broadcast 対応。
+    /// GPU kernel を持つ op (add の same-shape) は別パスで先に処理し、broadcast のみ
+    /// ここに fall-through することもできる。
+    fn binaryKindCpu(
+        self: *DiffMpsRuntime,
+        comptime kind: binary.Kind,
+        a: DiffMpsTensor,
+        b: DiffMpsTensor,
+    ) DiffMpsTensor {
+        const a_total = a.totalElements();
+        const b_total = b.totalElements();
+        const out_total = @max(a_total, b_total);
+        const smaller = @min(a_total, b_total);
+        if (!(a_total == b_total or out_total % smaller == 0)) {
+            @panic("binary: incompatible shapes for broadcast");
+        }
+        const out_shape = if (a_total >= b_total) a.shape[0..a.ndim] else b.shape[0..b.ndim];
+        const out_buf = self.allocBuf(out_total);
+        const ap = bufPtr(a.data);
+        const bp = bufPtr(b.data);
+        const op = bufPtr(out_buf);
+        for (0..out_total) |i| {
+            op[i] = kind.fwd(ap[i % a_total], bp[i % b_total]);
+        }
+        const rg = a.requires_grad or b.requires_grad;
+        const node = self.makeNode(out_buf, out_shape, rg);
+        if (rg) {
+            node.parents[0] = a;
+            node.parents[1] = b;
+            node.backward_fn = &BinaryBackward(kind).apply;
+        }
+        return node;
+    }
+
+    fn BinaryBackward(comptime kind: binary.Kind) type {
+        return struct {
+            fn apply(self_node: *DiffMpsNode) void {
+                const pa = self_node.parents[0].?;
+                const pb = self_node.parents[1].?;
+                const out_total = self_node.totalElements();
+                const a_total = pa.totalElements();
+                const b_total = pb.totalElements();
+                const go = bufPtr(self_node.grad.?);
+                const y = bufPtr(self_node.data);
+                const ad = bufPtr(pa.data);
+                const bd = bufPtr(pb.data);
+                if (pa.grad) |g| {
+                    const ga = bufPtr(g);
+                    for (0..out_total) |i| {
+                        const ai = i % a_total;
+                        const bi = i % b_total;
+                        ga[ai] += go[i] * kind.deriv_a(ad[ai], bd[bi], y[i]);
+                    }
+                }
+                if (pb.grad) |g| {
+                    const gb = bufPtr(g);
+                    for (0..out_total) |i| {
+                        const ai = i % a_total;
+                        const bi = i % b_total;
+                        gb[bi] += go[i] * kind.deriv_b(ad[ai], bd[bi], y[i]);
+                    }
+                }
+            }
+        };
+    }
+
     pub fn gelu(self: *DiffMpsRuntime, x: DiffMpsTensor) DiffMpsTensor {
         const n: u32 = @intCast(x.totalElements());
         const out_buf = self.allocBuf(n);
@@ -426,201 +495,29 @@ pub const DiffMpsRuntime = struct {
     pub fn add(self: *DiffMpsRuntime, a: DiffMpsTensor, b: DiffMpsTensor) DiffMpsTensor {
         const a_total = a.totalElements();
         const b_total = b.totalElements();
-        const rg = a.requires_grad or b.requires_grad;
 
+        // Same-shape: GPU forward (dispatchAddF32) + 共通 backward
         if (a_total == b_total) {
             const out_buf = self.allocBuf(a_total);
             const gpu = beginGpu(self.metal_ctx);
             self.metal_ctx.dispatchAddF32(gpu.enc, a.data, b.data, out_buf, @intCast(a_total));
             endGpu(gpu);
+            const rg = a.requires_grad or b.requires_grad;
             const node = self.makeNode(out_buf, a.shape[0..a.ndim], rg);
             if (rg) {
                 node.parents[0] = a;
                 node.parents[1] = b;
-                node.backward_fn = &backwardAddSame;
+                node.backward_fn = &BinaryBackward(binary.Add).apply;
             }
             return node;
         }
 
-        // Broadcast: b smaller
-        if (b_total < a_total and a_total % b_total == 0) {
-            const out_buf = self.allocBuf(a_total);
-            const ap = bufPtr(a.data);
-            const bp = bufPtr(b.data);
-            const op = bufPtr(out_buf);
-            for (0..a_total) |i| op[i] = ap[i] + bp[i % b_total];
-            const node = self.makeNode(out_buf, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardAddBroadcastB;
-            }
-            return node;
-        }
-
-        // Broadcast: a smaller
-        if (a_total < b_total and b_total % a_total == 0) {
-            const out_buf = self.allocBuf(b_total);
-            const ap = bufPtr(a.data);
-            const bp = bufPtr(b.data);
-            const op = bufPtr(out_buf);
-            for (0..b_total) |i| op[i] = ap[i % a_total] + bp[i];
-            const node = self.makeNode(out_buf, b.shape[0..b.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardAddBroadcastA;
-            }
-            return node;
-        }
-
-        @panic("add: incompatible shapes for broadcast");
-    }
-
-    fn backwardAddSame(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const total = self_node.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            for (0..total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            for (0..total) |i| gb[i] += go[i];
-        }
-    }
-
-    fn backwardAddBroadcastB(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            for (0..a_total) |i| ga[i] += go[i];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            for (0..a_total) |i| gb[i % b_total] += go[i];
-        }
-    }
-
-    fn backwardAddBroadcastA(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            for (0..b_total) |i| ga[i % a_total] += go[i];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            for (0..b_total) |i| gb[i] += go[i];
-        }
+        // Broadcast: CPU fallback via共通 driver
+        return self.binaryKindCpu(binary.Add, a, b);
     }
 
     pub fn mul(self: *DiffMpsRuntime, a: DiffMpsTensor, b: DiffMpsTensor) DiffMpsTensor {
-        const a_total = a.totalElements();
-        const b_total = b.totalElements();
-        const rg = a.requires_grad or b.requires_grad;
-        const ap = bufPtr(a.data);
-        const bp = bufPtr(b.data);
-
-        if (a_total == b_total) {
-            const out_buf = self.allocBuf(a_total);
-            const op = bufPtr(out_buf);
-            for (0..a_total) |i| op[i] = ap[i] * bp[i];
-            const node = self.makeNode(out_buf, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulSame;
-            }
-            return node;
-        }
-        if (b_total <= a_total and a_total % b_total == 0) {
-            const out_buf = self.allocBuf(a_total);
-            const op = bufPtr(out_buf);
-            for (0..a_total) |i| op[i] = ap[i] * bp[i % b_total];
-            const node = self.makeNode(out_buf, a.shape[0..a.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulBroadcastB;
-            }
-            return node;
-        }
-        if (a_total < b_total and b_total % a_total == 0) {
-            const out_buf = self.allocBuf(b_total);
-            const op = bufPtr(out_buf);
-            for (0..b_total) |i| op[i] = ap[i % a_total] * bp[i];
-            const node = self.makeNode(out_buf, b.shape[0..b.ndim], rg);
-            if (rg) {
-                node.parents[0] = a;
-                node.parents[1] = b;
-                node.backward_fn = &backwardMulBroadcastA;
-            }
-            return node;
-        }
-        @panic("mul: incompatible shapes for broadcast");
-    }
-
-    fn backwardMulSame(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const total = self_node.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            const bd = bufPtr(pb.data);
-            for (0..total) |i| ga[i] += go[i] * bd[i];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            const ad = bufPtr(pa.data);
-            for (0..total) |i| gb[i] += go[i] * ad[i];
-        }
-    }
-
-    fn backwardMulBroadcastB(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            const bd = bufPtr(pb.data);
-            for (0..a_total) |i| ga[i] += go[i] * bd[i % b_total];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            const ad = bufPtr(pa.data);
-            for (0..a_total) |i| gb[i % b_total] += go[i] * ad[i];
-        }
-    }
-
-    fn backwardMulBroadcastA(self_node: *DiffMpsNode) void {
-        const pa = self_node.parents[0].?;
-        const pb = self_node.parents[1].?;
-        const go = bufPtr(self_node.grad.?);
-        const a_total = pa.totalElements();
-        const b_total = pb.totalElements();
-        if (pa.grad) |g| {
-            const ga = bufPtr(g);
-            const bd = bufPtr(pb.data);
-            for (0..b_total) |i| ga[i % a_total] += go[i] * bd[i];
-        }
-        if (pb.grad) |g| {
-            const gb = bufPtr(g);
-            const ad = bufPtr(pa.data);
-            for (0..b_total) |i| gb[i] += go[i] * ad[i % a_total];
-        }
+        return self.binaryKindCpu(binary.Mul, a, b);
     }
 
     // ════════════════════════════════════════════════════════════════
