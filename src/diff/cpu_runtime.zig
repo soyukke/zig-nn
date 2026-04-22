@@ -15,6 +15,8 @@ const kernels = @import("../runtime_kernels.zig");
 const diff_node = @import("node.zig");
 const unary = @import("common/unary.zig");
 const binary = @import("common/binary.zig");
+const reduce = @import("common/reduce.zig");
+const softmax_common = @import("common/softmax.zig");
 
 pub const MAX_NDIM = kernels.MAX_NDIM;
 
@@ -666,21 +668,10 @@ pub const DiffCpuRuntime = struct {
 
     fn backwardSoftmax(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        const s = self_node.data; // softmax output
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
             const cols = self_node.lastDim();
-            const rows = total / cols;
-            for (0..rows) |i| {
-                // dot = sum(go * s) for this row
-                var dot: f32 = 0;
-                for (0..cols) |j| dot += go[i * cols + j] * s[i * cols + j];
-                // ga += s * (go - dot)
-                for (0..cols) |j| {
-                    ga[i * cols + j] += s[i * cols + j] * (go[i * cols + j] - dot);
-                }
-            }
+            const rows = self_node.totalElements() / cols;
+            softmax_common.softmaxBackward(ga.ptr, self_node.grad.?.ptr, self_node.data.ptr, rows, cols);
         }
     }
 
@@ -690,42 +681,23 @@ pub const DiffCpuRuntime = struct {
         const cols = x.lastDim();
         const rows = total / cols;
         const out = self.allocData(total);
-        const softmax_cache = self.allocData(total);
-        kernels.logSoftmaxForward(x.data[0..total], out, rows, cols, softmax_cache);
+        // softmax cache は不要 (backward で @exp(log_s) で復元)
+        kernels.logSoftmaxForward(x.data[0..total], out, rows, cols, null);
 
         const node = self.makeNode(out, x.shape[0..x.ndim], x.requires_grad);
         if (x.requires_grad) {
             node.parents[0] = x;
-            const ctx = self.allocContext(LogSoftmaxContext);
-            ctx.* = .{ .softmax_cache = softmax_cache };
-            node.context = @ptrCast(ctx);
             node.backward_fn = &backwardLogSoftmax;
         }
         return node;
     }
 
-    const LogSoftmaxContext = struct {
-        softmax_cache: []f32,
-    };
-
     fn backwardLogSoftmax(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        const ctx: *LogSoftmaxContext = @ptrCast(@alignCast(self_node.context.?));
-        const s = ctx.softmax_cache;
         if (pa.grad) |ga| {
-            const total = self_node.totalElements();
             const cols = self_node.lastDim();
-            const rows = total / cols;
-            for (0..rows) |i| {
-                // sum_go = sum(go) for this row
-                var sum_go: f32 = 0;
-                for (0..cols) |j| sum_go += go[i * cols + j];
-                // ga += go - s * sum_go
-                for (0..cols) |j| {
-                    ga[i * cols + j] += go[i * cols + j] - s[i * cols + j] * sum_go;
-                }
-            }
+            const rows = self_node.totalElements() / cols;
+            softmax_common.logSoftmaxBackward(ga.ptr, self_node.grad.?.ptr, self_node.data.ptr, rows, cols);
         }
     }
 
@@ -739,19 +711,13 @@ pub const DiffCpuRuntime = struct {
                 const out = self.allocData(rows);
                 kernels.reductionSumRows(x.data[0 .. rows * cols], out, rows, cols);
                 const node = self.makeNode(out, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionSumAxis1;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleSum());
                 return node;
             } else {
                 const out = self.allocData(cols);
                 kernels.reductionSumCols(x.data[0 .. rows * cols], out, rows, cols);
                 const node = self.makeNode(out, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionSumAxis0;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleSum());
                 return node;
             }
         }
@@ -760,10 +726,7 @@ pub const DiffCpuRuntime = struct {
             const out = self.allocData(1);
             out[0] = kernels.reductionSum1D(x.data[0..x.totalElements()]);
             const node = self.makeNode(out, &.{1}, x.requires_grad);
-            if (x.requires_grad) {
-                node.parents[0] = x;
-                node.backward_fn = &backwardReductionSum1D;
-            }
+            if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleSum());
             return node;
         }
 
@@ -811,42 +774,36 @@ pub const DiffCpuRuntime = struct {
         @panic("reductionSum: unsupported ndim/axis combination");
     }
 
-    fn backwardReductionSumAxis1(self_node: *DiffNode) void {
-        // [rows, cols] → [rows, 1]: broadcast go back
-        const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            for (0..rows) |i| {
-                for (0..cols) |j| {
-                    ga[i * cols + j] += go[i];
-                }
-            }
-        }
+    // ── Reduction backward 共通基盤 ──
+    //
+    // sum / mean どちらも "go を parent shape に scatter する" 共通構造なので、
+    // Case (軸パターン) と scale factor を ReduceContext に詰めて 1 つの
+    // backwardReduction で処理する。数式は diff/common/reduce.zig に集約。
+
+    const ReduceContext = struct {
+        case: reduce.Case,
+        scale: f32,
+    };
+
+    fn setReduceBackward(
+        self: *DiffCpuRuntime,
+        node: *DiffNode,
+        parent: DiffTensor,
+        case: reduce.Case,
+        scale: f32,
+    ) void {
+        node.parents[0] = parent;
+        const ctx = self.allocContext(ReduceContext);
+        ctx.* = .{ .case = case, .scale = scale };
+        node.context = @ptrCast(ctx);
+        node.backward_fn = &backwardReduction;
     }
 
-    fn backwardReductionSumAxis0(self_node: *DiffNode) void {
-        // [rows, cols] → [1, cols]: broadcast go back
+    fn backwardReduction(self_node: *DiffNode) void {
         const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
         if (pa.grad) |ga| {
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            for (0..rows) |i| {
-                for (0..cols) |j| {
-                    ga[i * cols + j] += go[j];
-                }
-            }
-        }
-    }
-
-    fn backwardReductionSum1D(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            const total = pa.totalElements();
-            for (0..total) |i| ga[i] += go[0];
+            const ctx: *const ReduceContext = @ptrCast(@alignCast(self_node.context.?));
+            reduce.scatter(ga.ptr, self_node.grad.?.ptr, pa.shape[0..pa.ndim], ctx.case, ctx.scale);
         }
     }
 
@@ -864,10 +821,7 @@ pub const DiffCpuRuntime = struct {
                     out[i] = s / @as(f32, @floatFromInt(cols));
                 }
                 const node = self.makeNode(out, &.{ rows, 1 }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionMeanAxis1;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis1_2d, reduce.scaleMean(cols));
                 return node;
             } else {
                 const out = self.allocData(cols);
@@ -878,10 +832,7 @@ pub const DiffCpuRuntime = struct {
                 const rows_f: f32 = @floatFromInt(rows);
                 for (0..cols) |j| out[j] /= rows_f;
                 const node = self.makeNode(out, &.{ 1, cols }, x.requires_grad);
-                if (x.requires_grad) {
-                    node.parents[0] = x;
-                    node.backward_fn = &backwardReductionMeanAxis0;
-                }
+                if (x.requires_grad) self.setReduceBackward(node, x, .axis0_2d, reduce.scaleMean(rows));
                 return node;
             }
         }
@@ -893,10 +844,7 @@ pub const DiffCpuRuntime = struct {
             for (x.data[0..total_elem]) |v| s += v;
             out[0] = s / @as(f32, @floatFromInt(total_elem));
             const node = self.makeNode(out, &.{1}, x.requires_grad);
-            if (x.requires_grad) {
-                node.parents[0] = x;
-                node.backward_fn = &backwardReductionMean1D;
-            }
+            if (x.requires_grad) self.setReduceBackward(node, x, .all, reduce.scaleMean(total_elem));
             return node;
         }
 
@@ -938,46 +886,6 @@ pub const DiffCpuRuntime = struct {
         }
 
         @panic("reductionMean: unsupported ndim/axis combination");
-    }
-
-    fn backwardReductionMeanAxis1(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            const cols_f: f32 = @floatFromInt(cols);
-            for (0..rows) |i| {
-                for (0..cols) |j| {
-                    ga[i * cols + j] += go[i] / cols_f;
-                }
-            }
-        }
-    }
-
-    fn backwardReductionMeanAxis0(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            const rows = pa.shape[0];
-            const cols = pa.shape[1];
-            const rows_f: f32 = @floatFromInt(rows);
-            for (0..rows) |i| {
-                for (0..cols) |j| {
-                    ga[i * cols + j] += go[j] / rows_f;
-                }
-            }
-        }
-    }
-
-    fn backwardReductionMean1D(self_node: *DiffNode) void {
-        const pa = self_node.parents[0].?;
-        const go = self_node.grad.?;
-        if (pa.grad) |ga| {
-            const total = pa.totalElements();
-            const n_f: f32 = @floatFromInt(total);
-            for (0..total) |i| ga[i] += go[0] / n_f;
-        }
     }
 
     // ── LayerNorm ──
