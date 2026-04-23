@@ -309,9 +309,12 @@ pub const DiffCudaRuntime = struct {
     arena_gpu_sizes: std.ArrayList(usize), // 対応するバッファサイズ (bytes)
     gpu_pool: cuda.GpuMemPool, // GPU メモリプール
     topo_buf: std.ArrayListUnmanaged(*DiffCudaNode),
-    prng: std.Random.DefaultPrng,
+    prng: std.Random.DefaultPrng, // dropout 用 (op で状態更新)
+    init_seed: u64, // init_params 用の固定 seed
     training: bool,
     kernels: KernelHandles,
+
+    pub const DEFAULT_SEED: u64 = 42;
 
     pub fn init(
         module: *const Module,
@@ -338,10 +341,18 @@ pub const DiffCudaRuntime = struct {
             .arena_gpu_sizes = .{},
             .gpu_pool = cuda.GpuMemPool.init(allocator),
             .topo_buf = .empty,
-            .prng = std.Random.DefaultPrng.init(42),
+            .prng = std.Random.DefaultPrng.init(DEFAULT_SEED),
+            .init_seed = DEFAULT_SEED,
             .training = true,
             .kernels = k,
         };
+    }
+
+    /// 全ランダム性 (init_params, dropout) を seed 固定する。
+    /// init_params() の前に呼ぶと重みが決定論的になる。
+    pub fn set_seed(self: *DiffCudaRuntime, seed: u64) void {
+        self.init_seed = seed;
+        self.prng = std.Random.DefaultPrng.init(seed);
     }
 
     pub fn deinit(self: *DiffCudaRuntime) void {
@@ -2777,7 +2788,8 @@ pub const DiffCudaRuntime = struct {
     // ════════════════════════════════════════════════════════════════
 
     pub fn init_params(self: *DiffCudaRuntime) void {
-        var rng_state = std.Random.DefaultPrng.init(42);
+        // dropout 用 prng とは独立に、init_seed からローカル PRNG を作る。
+        var rng_state = std.Random.DefaultPrng.init(self.init_seed);
         const rng = rng_state.random();
 
         for (self.module.params.items, 0..) |meta, i| {

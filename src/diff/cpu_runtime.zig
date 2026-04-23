@@ -35,8 +35,11 @@ pub const DiffCpuRuntime = struct {
     param_grads: [][]f32, // 永続: パラメータ勾配
     arena: std.heap.ArenaAllocator, // 中間テンソル + ノード
     topo_buf: std.ArrayListUnmanaged(*DiffNode),
-    prng: std.Random.DefaultPrng,
+    prng: std.Random.DefaultPrng, // dropout / rand 用 (op で状態更新)
+    init_seed: u64, // init_params 用の固定 seed (同じ seed なら常に同じ重み)
     training: bool,
+
+    pub const DEFAULT_SEED: u64 = 42;
 
     pub fn init(module: *const Module, allocator: Allocator) !DiffCpuRuntime {
         const count = module.param_count();
@@ -72,9 +75,18 @@ pub const DiffCpuRuntime = struct {
             .param_grads = param_grads,
             .arena = std.heap.ArenaAllocator.init(allocator),
             .topo_buf = .empty,
-            .prng = std.Random.DefaultPrng.init(42),
+            .prng = std.Random.DefaultPrng.init(DEFAULT_SEED),
+            .init_seed = DEFAULT_SEED,
             .training = true,
         };
+    }
+
+    /// 全ランダム性 (init_params, dropout, rand) を seed 固定する。
+    /// init_params() の前に呼ぶと重みが決定論的になる。
+    /// dropout/rand 用の prng も同じ seed から再初期化される。
+    pub fn set_seed(self: *DiffCpuRuntime, seed: u64) void {
+        self.init_seed = seed;
+        self.prng = std.Random.DefaultPrng.init(seed);
     }
 
     pub fn deinit(self: *DiffCpuRuntime) void {
@@ -1462,7 +1474,10 @@ pub const DiffCpuRuntime = struct {
     // ── Param initialization ──
 
     pub fn init_params(self: *DiffCpuRuntime) void {
-        var rng_state = std.Random.DefaultPrng.init(42);
+        // dropout 用 prng とは独立に、init_seed から毎回ローカル PRNG を作る。
+        // これにより init_params() を複数回呼んでも同じ seed なら同じ重みが得られ、
+        // その間に実行された dropout 等の op で prng 状態が進んでも影響を受けない。
+        var rng_state = std.Random.DefaultPrng.init(self.init_seed);
         const rng = rng_state.random();
 
         for (self.module.params.items, 0..) |meta, i| {
