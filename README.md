@@ -23,7 +23,7 @@ Comptime-shaped tensors, autograd, and GPU acceleration (Metal/MPS) on Apple Sil
 ```bash
 git clone <repository-url>
 cd nn
-nix develop   # or `direnv allow` if you use direnv
+nix develop   # or `direnv allow` / `direnv reload` if you use direnv
 
 zig build test     # run tests
 zig build xor      # run XOR demo
@@ -31,7 +31,7 @@ zig build xor      # run XOR demo
 
 ### Without Nix
 
-Requires [Zig 0.15](https://ziglang.org/download/).
+Requires [Zig 0.16.0](https://ziglang.org/download/).
 
 ```bash
 zig build test

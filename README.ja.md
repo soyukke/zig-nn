@@ -23,7 +23,7 @@ Zig で書かれたニューラルネットワークライブラリ。
 ```bash
 git clone <repository-url>
 cd nn
-nix develop   # direnv を使っている場合は `direnv allow`
+nix develop   # direnv を使っている場合は `direnv allow` / `direnv reload`
 
 zig build test     # テスト実行
 zig build xor      # XOR デモ実行
@@ -31,7 +31,7 @@ zig build xor      # XOR デモ実行
 
 ### Nix なしの場合
 
-[Zig 0.15](https://ziglang.org/download/) が必要です。
+[Zig 0.16.0](https://ziglang.org/download/) が必要です。
 
 ```bash
 zig build test
