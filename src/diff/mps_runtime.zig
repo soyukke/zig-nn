@@ -64,7 +64,11 @@ pub const DiffMpsRuntime = struct {
     arena: std.heap.ArenaAllocator,
     arena_bufs: std.ArrayListUnmanaged(id), // 中間 MTLBuffer (resetArena で解放)
     topo_buf: std.ArrayListUnmanaged(*DiffMpsNode),
+    prng: std.Random.DefaultPrng, // stochastic op 用 (op で状態更新)
+    init_seed: u64, // init_params 用の固定 seed
     training: bool,
+
+    pub const DEFAULT_SEED: u64 = 42;
 
     pub fn init(
         module: *const Module,
@@ -108,8 +112,17 @@ pub const DiffMpsRuntime = struct {
             .arena = std.heap.ArenaAllocator.init(allocator),
             .arena_bufs = .empty,
             .topo_buf = .empty,
+            .prng = std.Random.DefaultPrng.init(DEFAULT_SEED),
+            .init_seed = DEFAULT_SEED,
             .training = true,
         };
+    }
+
+    /// 全ランダム性 (init_params 等) を seed 固定する。
+    /// init_params() の前に呼ぶと重みが決定論的になる。
+    pub fn set_seed(self: *DiffMpsRuntime, seed: u64) void {
+        self.init_seed = seed;
+        self.prng = std.Random.DefaultPrng.init(seed);
     }
 
     pub fn deinit(self: *DiffMpsRuntime) void {
@@ -222,7 +235,7 @@ pub const DiffMpsRuntime = struct {
     }
 
     pub fn init_params(self: *DiffMpsRuntime) void {
-        var rng_state = std.Random.DefaultPrng.init(42);
+        var rng_state = std.Random.DefaultPrng.init(self.init_seed);
         const rng = rng_state.random();
         for (self.module.params.items, 0..) |meta_item, i| {
             const size = self.module.param_size(.{ .index = i });

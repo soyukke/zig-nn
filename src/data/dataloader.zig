@@ -21,11 +21,25 @@ pub const BatchIterator = struct {
     allocator: Allocator,
     shuffle: bool,
 
+    pub const DEFAULT_SEED: u64 = 42;
+
+    /// デフォルト seed (42) で初期化する薄いラッパ。
     pub fn init(
         allocator: Allocator,
         n_samples: usize,
         batch_size: usize,
         do_shuffle: bool,
+    ) !BatchIterator {
+        return init_with_seed(allocator, n_samples, batch_size, do_shuffle, DEFAULT_SEED);
+    }
+
+    /// seed を明示指定して初期化する。同じ seed なら shuffle 順が bitwise 再現する。
+    pub fn init_with_seed(
+        allocator: Allocator,
+        n_samples: usize,
+        batch_size: usize,
+        do_shuffle: bool,
+        seed: u64,
     ) !BatchIterator {
         const indices = try allocator.alloc(usize, n_samples);
         for (indices, 0..) |*idx, i| idx.* = i;
@@ -35,7 +49,7 @@ pub const BatchIterator = struct {
             .batch_size = batch_size,
             .indices = indices,
             .current = 0,
-            .prng = std.Random.DefaultPrng.init(42),
+            .prng = std.Random.DefaultPrng.init(seed),
             .allocator = allocator,
             .shuffle = do_shuffle,
         };
@@ -158,6 +172,82 @@ test "BatchIterator: reset re-shuffles" {
         }
     }
     try testing.expect(!same);
+}
+
+test "BatchIterator: init_with_seed reproduces shuffle order bitwise" {
+    var a = try BatchIterator.init_with_seed(testing.allocator, 64, 8, true, 12345);
+    defer a.deinit();
+
+    var b = try BatchIterator.init_with_seed(testing.allocator, 64, 8, true, 12345);
+    defer b.deinit();
+
+    // 2 つのイテレータの全インデックス列が一致
+    try testing.expectEqualSlices(usize, a.indices, b.indices);
+
+    // next() で取り出したバッチも順に一致
+    while (true) {
+        const na = a.next();
+        const nb = b.next();
+        if (na == null and nb == null) break;
+        try testing.expect(na != null and nb != null);
+        try testing.expectEqualSlices(usize, na.?, nb.?);
+    }
+}
+
+test "BatchIterator: different seeds give different orders" {
+    var a = try BatchIterator.init_with_seed(testing.allocator, 64, 8, true, 1);
+    defer a.deinit();
+
+    var b = try BatchIterator.init_with_seed(testing.allocator, 64, 8, true, 2);
+    defer b.deinit();
+
+    // 64 要素 shuffle で seed 1 vs 2 が完全一致する確率は 1/64! ≈ 0
+    try testing.expect(!std.mem.eql(usize, a.indices, b.indices));
+}
+
+test "BatchIterator: multiple seeds — each self-consistent, mutually distinct" {
+    const seeds = [_]u64{ 0, 7, 42, 2024, 999_999 };
+    const N: usize = 64;
+
+    var orders: [seeds.len][2][N]usize = undefined;
+
+    for (seeds, 0..) |s, i| {
+        for (0..2) |k| {
+            var iter = try BatchIterator.init_with_seed(testing.allocator, N, 8, true, s);
+            defer iter.deinit();
+
+            @memcpy(&orders[i][k], iter.indices);
+        }
+    }
+
+    // (a) 同じ seed の 2 回は bitwise 一致
+    for (0..seeds.len) |i| {
+        try testing.expectEqualSlices(usize, &orders[i][0], &orders[i][1]);
+    }
+    // (b) 異なる seed の組み合わせでは不一致 (64! 通り中 1 つに当たる確率はゼロとみなす)
+    for (0..seeds.len) |i| {
+        for (i + 1..seeds.len) |j| {
+            try testing.expect(!std.mem.eql(usize, &orders[i][0], &orders[j][0]));
+        }
+    }
+}
+
+test "BatchIterator: reset keeps seed determinism across epochs" {
+    var a = try BatchIterator.init_with_seed(testing.allocator, 32, 8, true, 7);
+    defer a.deinit();
+
+    var b = try BatchIterator.init_with_seed(testing.allocator, 32, 8, true, 7);
+    defer b.deinit();
+
+    // 1 epoch 回す
+    while (a.next()) |_| {}
+    while (b.next()) |_| {}
+
+    a.reset();
+    b.reset();
+
+    // 2 epoch 目も順序一致 (reset 後の再 shuffle も決定論的)
+    try testing.expectEqualSlices(usize, a.indices, b.indices);
 }
 
 test "BatchIterator: exact divisible batch size" {
