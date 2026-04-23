@@ -34,7 +34,6 @@
 //!     tab_character         Tab character in source.
 //!     trailing_whitespace   Line ends with space or tab.
 //!     missing_final_newline File does not end with '\n'.
-//!     debug_print           `std.debug.print` committed in source.
 //!     function_too_long     Function body exceeds --function-line-limit lines.
 //!     file_not_snake_case   `.zig` file stem is not snake_case.
 //!     function_not_snake_case
@@ -45,7 +44,7 @@
 //!     defer_no_blank_line   `defer` statement not followed by a blank line.
 //!
 //! Extending: add a value to `Rule` and a matching entry in `rule_names`,
-//! then implement detection in `checkLine` / `checkFile` / `checkAst`.
+//! then implement detection in `check_line` / `check_file` / `check_ast`.
 
 const std = @import("std");
 const mem = std.mem;
@@ -59,7 +58,6 @@ const Rule = enum {
     tab_character,
     trailing_whitespace,
     missing_final_newline,
-    debug_print,
     function_too_long,
     file_not_snake_case,
     function_not_snake_case,
@@ -73,7 +71,6 @@ const rule_names = [_][]const u8{
     "tab_character",
     "trailing_whitespace",
     "missing_final_newline",
-    "debug_print",
     "function_too_long",
     "file_not_snake_case",
     "function_not_snake_case",
@@ -92,11 +89,11 @@ const max_file_bytes: usize = 16 * 1024 * 1024;
 const Counts = [rule_count]u32;
 const RuleMask = [rule_count]bool;
 
-fn ruleName(r: Rule) []const u8 {
+fn rule_name(r: Rule) []const u8 {
     return rule_names[@intFromEnum(r)];
 }
 
-fn parseRule(name: []const u8) ?Rule {
+fn parse_rule(name: []const u8) ?Rule {
     for (rule_names, 0..) |n, i| {
         if (mem.eql(u8, n, name)) return @enumFromInt(i);
     }
@@ -110,7 +107,7 @@ const Config = struct {
     function_line_limit: usize = function_line_limit_default,
     enabled: RuleMask = [_]bool{true} ** rule_count,
 
-    fn isEnabled(self: *const Config, r: Rule) bool {
+    fn is_enabled(self: *const Config, r: Rule) bool {
         return self.enabled[@intFromEnum(r)];
     }
 
@@ -129,7 +126,7 @@ const Counter = struct {
         return .{ .allocator = allocator };
     }
 
-    fn getOrInsert(self: *Counter, path: []const u8) !*Counts {
+    fn get_or_insert(self: *Counter, path: []const u8) !*Counts {
         const gop = try self.map.getOrPut(self.allocator, path);
         if (!gop.found_existing) {
             gop.key_ptr.* = try self.allocator.dupe(u8, path);
@@ -139,7 +136,7 @@ const Counter = struct {
     }
 
     fn bump(self: *Counter, path: []const u8, rule: Rule) !void {
-        const counts = try self.getOrInsert(path);
+        const counts = try self.get_or_insert(path);
         counts[@intFromEnum(rule)] += 1;
     }
 
@@ -150,7 +147,7 @@ const Counter = struct {
 
 // -------- Line / file checks --------
 
-fn checkLine(
+fn check_line(
     cfg: *const Config,
     counter: *Counter,
     path: []const u8,
@@ -160,30 +157,27 @@ fn checkLine(
     var line = raw;
     if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
 
-    if (cfg.isEnabled(.tab_character) and mem.indexOfScalar(u8, line, '\t') != null) {
+    if (cfg.is_enabled(.tab_character) and mem.indexOfScalar(u8, line, '\t') != null) {
         try counter.bump(path, .tab_character);
     }
-    if (cfg.isEnabled(.control_character) and hasControlCharacter(line)) {
+    if (cfg.is_enabled(.control_character) and has_control_character(line)) {
         try counter.bump(path, .control_character);
     }
-    if (cfg.isEnabled(.trailing_whitespace) and line.len > 0) {
+    if (cfg.is_enabled(.trailing_whitespace) and line.len > 0) {
         const last = line[line.len - 1];
         if (last == ' ' or last == '\t') try counter.bump(path, .trailing_whitespace);
     }
-    if (cfg.isEnabled(.line_too_long) and lineTooLong(cfg, line)) {
+    if (cfg.is_enabled(.line_too_long) and line_too_long(cfg, line)) {
         try counter.bump(path, .line_too_long);
-    }
-    if (cfg.isEnabled(.debug_print) and mem.indexOf(u8, line, "std.debug.print") != null) {
-        try counter.bump(path, .debug_print);
     }
 }
 
-fn lineTooLong(cfg: *const Config, line: []const u8) bool {
+fn line_too_long(cfg: *const Config, line: []const u8) bool {
     const line_length = std.unicode.utf8CountCodepoints(line) catch line.len;
     if (line_length <= cfg.line_limit) return false;
     if (mem.indexOf(u8, line, "https://") != null) return false;
 
-    if (rawStringLiteralValue(line)) |string_value| {
+    if (raw_string_literal_value(line)) |string_value| {
         const value_length = std.unicode.utf8CountCodepoints(string_value) catch string_value.len;
         if (value_length <= cfg.line_limit) return false;
     }
@@ -191,7 +185,7 @@ fn lineTooLong(cfg: *const Config, line: []const u8) bool {
     return true;
 }
 
-fn rawStringLiteralValue(line: []const u8) ?[]const u8 {
+fn raw_string_literal_value(line: []const u8) ?[]const u8 {
     const split = mem.indexOf(u8, line, "\\\\") orelse return null;
     const indent = line[0..split];
     for (indent) |c| {
@@ -204,24 +198,24 @@ fn rawStringLiteralValue(line: []const u8) ?[]const u8 {
 /// `\t` (tab is reported separately via `tab_character`). `\n` cannot
 /// appear because the caller splits on it; a stray `\r` mid-line is
 /// reported.
-fn hasControlCharacter(line: []const u8) bool {
+fn has_control_character(line: []const u8) bool {
     for (line) |c| {
         if (c < 0x20 and c != '\t') return true;
     }
     return false;
 }
 
-fn checkAst(
+fn check_ast(
     allocator: mem.Allocator,
     cfg: *const Config,
     counter: *Counter,
     path: []const u8,
     content: []const u8,
 ) !void {
-    const want_fn_len = cfg.isEnabled(.function_too_long);
-    const want_fn_name = cfg.isEnabled(.function_not_snake_case);
-    const want_precedence = cfg.isEnabled(.ambiguous_precedence);
-    const want_defer = cfg.isEnabled(.defer_no_blank_line);
+    const want_fn_len = cfg.is_enabled(.function_too_long);
+    const want_fn_name = cfg.is_enabled(.function_not_snake_case);
+    const want_precedence = cfg.is_enabled(.ambiguous_precedence);
+    const want_defer = cfg.is_enabled(.defer_no_blank_line);
     if (!want_fn_len and !want_fn_name and !want_precedence and !want_defer) return;
 
     const content_z = try allocator.dupeZ(u8, content);
@@ -231,14 +225,23 @@ fn checkAst(
     defer tree.deinit(allocator);
 
     if (want_fn_len or want_fn_name or want_precedence) {
-        try checkNodes(allocator, cfg, counter, path, &tree, want_fn_len, want_fn_name, want_precedence);
+        try check_nodes(
+            allocator,
+            cfg,
+            counter,
+            path,
+            &tree,
+            want_fn_len,
+            want_fn_name,
+            want_precedence,
+        );
     }
     if (want_defer) {
-        try checkDeferNewlines(counter, path, &tree);
+        try check_defer_newlines(counter, path, &tree);
     }
 }
 
-fn checkNodes(
+fn check_nodes(
     allocator: mem.Allocator,
     cfg: *const Config,
     counter: *Counter,
@@ -276,24 +279,21 @@ fn checkNodes(
 
             if (want_fn_name) {
                 const fn_proto = tree.fullFnProto(&fn_proto_buffer, node) orelse continue;
-                if (fn_proto.extern_export_inline_token) |token| {
-                    if (tree.tokens.items(.tag)[token] == .keyword_extern) continue;
-                }
                 const name_token = fn_proto.name_token orelse continue;
                 const name = tree.tokenSlice(name_token);
-                if (!isSnakeCase(name)) {
+                if (!is_snake_case(name)) {
                     try counter.bump(path, .function_not_snake_case);
                 }
             }
         }
 
-        if (want_precedence and isBinOp(tag)) {
+        if (want_precedence and is_bin_op(tag)) {
             const lhs = data.node_and_node[0];
             const rhs = data.node_and_node[1];
             inline for (.{ lhs, rhs }) |child| {
                 const tag_child = tags[@intFromEnum(child)];
-                if ((isBinOpBitwise(tag) and isBinOpArithmetic(tag_child)) or
-                    (isBinOpArithmetic(tag) and isBinOpBitwise(tag_child)))
+                if ((is_bin_op_bitwise(tag) and is_bin_op_arithmetic(tag_child)) or
+                    (is_bin_op_arithmetic(tag) and is_bin_op_bitwise(tag_child)))
                 {
                     try counter.bump(path, .ambiguous_precedence);
                 }
@@ -304,16 +304,18 @@ fn checkNodes(
     if (!want_fn_len) return;
 
     const Ctx = struct {
-        fn lessThan(_: void, a: FnRange, b: FnRange) bool {
+        fn less_than(_: void, a: FnRange, b: FnRange) bool {
             if (a.line_opening != b.line_opening) return a.line_opening < b.line_opening;
             return a.line_closing < b.line_closing;
         }
     };
-    std.mem.sort(FnRange, functions.items, {}, Ctx.lessThan);
+    std.mem.sort(FnRange, functions.items, {}, Ctx.less_than);
 
     for (functions.items, 0..) |fn_range, i| {
         // Match TigerBeetle's behavior: skip outer function when nested fn exists inside.
-        if (i + 1 < functions.items.len and functions.items[i + 1].line_opening <= fn_range.line_closing) {
+        if (i + 1 < functions.items.len and
+            functions.items[i + 1].line_opening <= fn_range.line_closing)
+        {
             continue;
         }
 
@@ -324,7 +326,7 @@ fn checkNodes(
     }
 }
 
-fn isSnakeCase(name: []const u8) bool {
+fn is_snake_case(name: []const u8) bool {
     if (name.len == 0) return false;
     if (mem.eql(u8, name, "_")) return true;
 
@@ -346,24 +348,24 @@ fn isSnakeCase(name: []const u8) bool {
     return true;
 }
 
-fn fileStem(path: []const u8) []const u8 {
+fn file_stem(path: []const u8) []const u8 {
     const base = std.fs.path.basename(path);
     if (mem.endsWith(u8, base, ".zig")) return base[0 .. base.len - 4];
     return base;
 }
 
-fn checkDeferNewlines(counter: *Counter, path: []const u8, tree: *const Ast) !void {
+fn check_defer_newlines(counter: *Counter, path: []const u8, tree: *const Ast) !void {
     const tags = tree.tokens.items(.tag);
 
     var index: usize = 0;
     while (index < tags.len) : (index += 1) {
         if (tags[index] != .keyword_defer) continue;
 
-        const semicolon_index = deferStatementEnd(tags, index) orelse continue;
+        const semicolon_index = defer_statement_end(tags, index) orelse continue;
         const semicolon_line = tree.tokenLocation(0, @intCast(semicolon_index)).line;
 
         var next_index = semicolon_index + 1;
-        while (next_index < tags.len and isCommentToken(tags[next_index])) : (next_index += 1) {}
+        while (next_index < tags.len and is_comment_token(tags[next_index])) : (next_index += 1) {}
 
         if (next_index >= tags.len) break;
         if (tags[next_index] == .eof) continue;
@@ -380,7 +382,7 @@ fn checkDeferNewlines(counter: *Counter, path: []const u8, tree: *const Ast) !vo
     }
 }
 
-fn deferStatementEnd(tags: []const std.zig.Token.Tag, defer_index: usize) ?usize {
+fn defer_statement_end(tags: []const std.zig.Token.Tag, defer_index: usize) ?usize {
     var depth: i32 = 0;
     var index: usize = defer_index + 1;
     while (index < tags.len) : (index += 1) {
@@ -408,25 +410,25 @@ fn deferStatementEnd(tags: []const std.zig.Token.Tag, defer_index: usize) ?usize
     return null;
 }
 
-fn isCommentToken(tag: std.zig.Token.Tag) bool {
+fn is_comment_token(tag: std.zig.Token.Tag) bool {
     return switch (tag) {
         .doc_comment, .container_doc_comment => true,
         else => false,
     };
 }
 
-fn isBinOp(tag: Ast.Node.Tag) bool {
-    return isBinOpBitwise(tag) or isBinOpArithmetic(tag);
+fn is_bin_op(tag: Ast.Node.Tag) bool {
+    return is_bin_op_bitwise(tag) or is_bin_op_arithmetic(tag);
 }
 
-fn isBinOpBitwise(tag: Ast.Node.Tag) bool {
+fn is_bin_op_bitwise(tag: Ast.Node.Tag) bool {
     return switch (tag) {
         .shl, .shl_sat, .shr, .bit_xor, .bit_or, .bit_and => true,
         else => false,
     };
 }
 
-fn isBinOpArithmetic(tag: Ast.Node.Tag) bool {
+fn is_bin_op_arithmetic(tag: Ast.Node.Tag) bool {
     return switch (tag) {
         .add, .add_sat, .add_wrap => true,
         .sub, .sub_sat, .sub_wrap => true,
@@ -436,22 +438,22 @@ fn isBinOpArithmetic(tag: Ast.Node.Tag) bool {
     };
 }
 
-fn checkFile(
+fn check_file(
     allocator: mem.Allocator,
     cfg: *const Config,
     counter: *Counter,
     path: []const u8,
     content: []const u8,
 ) !void {
-    _ = try counter.getOrInsert(path);
+    _ = try counter.get_or_insert(path);
 
-    if (cfg.isEnabled(.file_not_snake_case) and !isSnakeCase(fileStem(path))) {
+    if (cfg.is_enabled(.file_not_snake_case) and !is_snake_case(file_stem(path))) {
         try counter.bump(path, .file_not_snake_case);
     }
 
     if (content.len == 0) return;
 
-    if (cfg.isEnabled(.missing_final_newline) and content[content.len - 1] != '\n') {
+    if (cfg.is_enabled(.missing_final_newline) and content[content.len - 1] != '\n') {
         try counter.bump(path, .missing_final_newline);
     }
 
@@ -459,20 +461,20 @@ fn checkFile(
     var i: usize = 0;
     while (i < content.len) : (i += 1) {
         if (content[i] == '\n') {
-            try checkLine(cfg, counter, path, content[start..i]);
+            try check_line(cfg, counter, path, content[start..i]);
             start = i + 1;
         }
     }
     if (start < content.len) {
-        try checkLine(cfg, counter, path, content[start..]);
+        try check_line(cfg, counter, path, content[start..]);
     }
 
-    try checkAst(allocator, cfg, counter, path, content);
+    try check_ast(allocator, cfg, counter, path, content);
 }
 
 // -------- Walk .zig files under a root --------
 
-fn walkRoot(
+fn walk_root(
     allocator: mem.Allocator,
     io: Io,
     cfg: *const Config,
@@ -481,7 +483,12 @@ fn walkRoot(
 ) !void {
     const cwd = Dir.cwd();
     var dir = cwd.openDir(io, root, .{ .iterate = true }) catch |err| {
-        std.debug.print("error: cannot open --root {s}: {s}\n", .{ root, @errorName(err) });
+        print_line(
+            io,
+            File.stderr(),
+            "error: cannot open --root {s}: {s}\n",
+            .{ root, @errorName(err) },
+        ) catch {};
         return err;
     };
     defer dir.close(io);
@@ -499,16 +506,21 @@ fn walkRoot(
         const content = try cwd.readFileAlloc(io, joined, allocator, .limited(max_file_bytes));
         defer allocator.free(content);
 
-        try checkFile(allocator, cfg, counter, joined, content);
+        try check_file(allocator, cfg, counter, joined, content);
     }
 }
 
 // -------- Baseline I/O --------
 
-fn loadBaseline(allocator: mem.Allocator, io: Io, path: []const u8) !Counter {
+fn load_baseline(allocator: mem.Allocator, io: Io, path: []const u8) !Counter {
     var counter = Counter.init(allocator);
     const cwd = Dir.cwd();
-    const content = cwd.readFileAlloc(io, path, allocator, .limited(max_file_bytes)) catch |err| switch (err) {
+    const content = cwd.readFileAlloc(
+        io,
+        path,
+        allocator,
+        .limited(max_file_bytes),
+    ) catch |err| switch (err) {
         error.FileNotFound => return counter,
         else => return err,
     };
@@ -524,16 +536,16 @@ fn loadBaseline(allocator: mem.Allocator, io: Io, path: []const u8) !Counter {
         const r = parts.next() orelse continue;
         const c = parts.next() orelse continue;
 
-        const rule = parseRule(r) orelse continue;
+        const rule = parse_rule(r) orelse continue;
         const n = std.fmt.parseInt(u32, c, 10) catch continue;
 
-        const counts = try counter.getOrInsert(p);
+        const counts = try counter.get_or_insert(p);
         counts[@intFromEnum(rule)] = n;
     }
     return counter;
 }
 
-fn writeBaseline(counter: *const Counter, io: Io, path: []const u8) !void {
+fn write_baseline(counter: *const Counter, io: Io, path: []const u8) !void {
     const allocator = counter.allocator;
 
     const Entry = struct { path: []const u8, rule: Rule, count: u32 };
@@ -553,13 +565,13 @@ fn writeBaseline(counter: *const Counter, io: Io, path: []const u8) !void {
     }
 
     const Ctx = struct {
-        fn lessThan(_: void, a: Entry, b: Entry) bool {
+        fn less_than(_: void, a: Entry, b: Entry) bool {
             const cmp = mem.order(u8, a.path, b.path);
             if (cmp != .eq) return cmp == .lt;
             return @intFromEnum(a.rule) < @intFromEnum(b.rule);
         }
     };
-    std.mem.sort(Entry, entries.items, {}, Ctx.lessThan);
+    std.mem.sort(Entry, entries.items, {}, Ctx.less_than);
 
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(allocator);
@@ -579,7 +591,7 @@ fn writeBaseline(counter: *const Counter, io: Io, path: []const u8) !void {
     var line_buf: [1024]u8 = undefined;
     for (entries.items) |e| {
         const line = try std.fmt.bufPrint(&line_buf, "{s}\t{s}\t{d}\n", .{
-            e.path, ruleName(e.rule), e.count,
+            e.path, rule_name(e.rule), e.count,
         });
         try buf.appendSlice(allocator, line);
     }
@@ -598,7 +610,7 @@ const Regression = struct {
     current: u32,
 };
 
-fn collectRegressions(
+fn collect_regressions(
     allocator: mem.Allocator,
     current: *const Counter,
     baseline: *const Counter,
@@ -621,87 +633,23 @@ fn collectRegressions(
     return out;
 }
 
-fn writeAllTo(io: Io, out: File, bytes: []const u8) !void {
+fn write_all_to(io: Io, out: File, bytes: []const u8) !void {
     try out.writeStreamingAll(io, bytes);
 }
 
-fn printLine(io: Io, out: File, comptime fmt: []const u8, args: anytype) !void {
+fn print_line(io: Io, out: File, comptime fmt: []const u8, args: anytype) !void {
     var buf: [1024]u8 = undefined;
     const s = try std.fmt.bufPrint(&buf, fmt, args);
     try out.writeStreamingAll(io, s);
 }
 
-fn printTotals(io: Io, out: File, counter: *const Counter) !void {
-    var totals = [_]u64{0} ** rule_count;
-    var it = counter.map.iterator();
-    while (it.next()) |e| {
-        for (e.value_ptr.*, 0..) |n, i| totals[i] += n;
-    }
-    try writeAllTo(io, out, "violation totals:\n");
-    for (totals, 0..) |n, i| {
-        try printLine(io, out, "  {s:<24} {d}\n", .{ rule_names[i], n });
+fn print_rule_names(io: Io, out: File) !void {
+    for (rule_names) |name| {
+        try print_line(io, out, "  {s}\n", .{name});
     }
 }
 
-// -------- CLI --------
-
-const Args = struct {
-    root: []const u8 = root_default,
-    baseline: []const u8 = baseline_path_default,
-    cfg: Config = .{},
-    mode: Mode = .check,
-};
-
-fn parseArgs(allocator: mem.Allocator, process_args: std.process.Args) !Args {
-    var out: Args = .{};
-    var it = process_args.iterate();
-    defer it.deinit();
-    _ = it.next(); // program name
-
-    while (it.next()) |arg| {
-        if (mem.eql(u8, arg, "--root")) {
-            const v = it.next() orelse return error.MissingValue;
-            out.root = try allocator.dupe(u8, v);
-        } else if (mem.eql(u8, arg, "--baseline")) {
-            const v = it.next() orelse return error.MissingValue;
-            out.baseline = try allocator.dupe(u8, v);
-        } else if (mem.eql(u8, arg, "--line-limit")) {
-            const v = it.next() orelse return error.MissingValue;
-            out.cfg.line_limit = std.fmt.parseInt(usize, v, 10) catch {
-                std.debug.print("error: --line-limit expects a non-negative integer, got {s}\n", .{v});
-                std.process.exit(2);
-            };
-        } else if (mem.eql(u8, arg, "--function-line-limit")) {
-            const v = it.next() orelse return error.MissingValue;
-            out.cfg.function_line_limit = std.fmt.parseInt(usize, v, 10) catch {
-                std.debug.print("error: --function-line-limit expects a non-negative integer, got {s}\n", .{v});
-                std.process.exit(2);
-            };
-        } else if (mem.eql(u8, arg, "--disable")) {
-            const v = it.next() orelse return error.MissingValue;
-            const rule = parseRule(v) orelse {
-                std.debug.print("error: unknown rule {s}. Known rules:\n", .{v});
-                for (rule_names) |n| std.debug.print("  {s}\n", .{n});
-                std.process.exit(2);
-            };
-            out.cfg.disable(rule);
-        } else if (mem.eql(u8, arg, "--update-baseline")) {
-            out.mode = .update;
-        } else if (mem.eql(u8, arg, "--strict")) {
-            out.mode = .strict;
-        } else if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
-            try printHelp();
-            std.process.exit(0);
-        } else {
-            std.debug.print("unknown argument: {s}\n", .{arg});
-            try printHelp();
-            std.process.exit(2);
-        }
-    }
-    return out;
-}
-
-fn printHelp() !void {
+fn print_help(io: Io, out: File) !void {
     const msg =
         \\zig-tools/check_style — Zig style checker (ratcheting baseline).
         \\
@@ -724,7 +672,6 @@ fn printHelp() !void {
         \\  tab_character         Tab character in source.
         \\  trailing_whitespace   Line ends with space or tab.
         \\  missing_final_newline File does not end with '\n'.
-        \\  debug_print           `std.debug.print` committed in source.
         \\  function_too_long     Function exceeds --function-line-limit lines.
         \\  file_not_snake_case   `.zig` file stem is not snake_case.
         \\  function_not_snake_case
@@ -734,7 +681,111 @@ fn printHelp() !void {
         \\  defer_no_blank_line   `defer` not followed by a blank line.
         \\
     ;
-    std.debug.print("{s}", .{msg});
+    try write_all_to(io, out, msg);
+}
+
+fn exit_with_code(
+    io: Io,
+    out: File,
+    code: u8,
+    comptime fmt: []const u8,
+    args: anytype,
+) noreturn {
+    print_line(io, out, fmt, args) catch {};
+    std.process.exit(code);
+}
+
+fn exit_usage_error(io: Io, comptime fmt: []const u8, args: anytype) noreturn {
+    exit_with_code(io, File.stderr(), 2, fmt, args);
+}
+
+fn exit_unknown_rule(io: Io, value: []const u8) noreturn {
+    const stderr = File.stderr();
+    print_line(io, stderr, "error: unknown rule {s}. Known rules:\n", .{value}) catch {};
+    print_rule_names(io, stderr) catch {};
+    std.process.exit(2);
+}
+
+fn exit_with_help(io: Io, comptime fmt: []const u8, args: anytype) noreturn {
+    const stderr = File.stderr();
+    print_line(io, stderr, fmt, args) catch {};
+    print_help(io, stderr) catch {};
+    std.process.exit(2);
+}
+
+fn print_totals(io: Io, out: File, counter: *const Counter) !void {
+    var totals = [_]u64{0} ** rule_count;
+    var it = counter.map.iterator();
+    while (it.next()) |e| {
+        for (e.value_ptr.*, 0..) |n, i| totals[i] += n;
+    }
+    try write_all_to(io, out, "violation totals:\n");
+    for (totals, 0..) |n, i| {
+        try print_line(io, out, "  {s:<24} {d}\n", .{ rule_names[i], n });
+    }
+}
+
+// -------- CLI --------
+
+const Args = struct {
+    root: []const u8 = root_default,
+    baseline: []const u8 = baseline_path_default,
+    cfg: Config = .{},
+    mode: Mode = .check,
+};
+
+fn parse_args(
+    allocator: mem.Allocator,
+    io: Io,
+    process_args: std.process.Args,
+) !Args {
+    var out: Args = .{};
+    var it = process_args.iterate();
+    defer it.deinit();
+
+    _ = it.next(); // program name
+
+    while (it.next()) |arg| {
+        if (mem.eql(u8, arg, "--root")) {
+            const v = it.next() orelse return error.MissingValue;
+            out.root = try allocator.dupe(u8, v);
+        } else if (mem.eql(u8, arg, "--baseline")) {
+            const v = it.next() orelse return error.MissingValue;
+            out.baseline = try allocator.dupe(u8, v);
+        } else if (mem.eql(u8, arg, "--line-limit")) {
+            const v = it.next() orelse return error.MissingValue;
+            out.cfg.line_limit = std.fmt.parseInt(usize, v, 10) catch {
+                exit_usage_error(
+                    io,
+                    "error: --line-limit expects a non-negative integer, got {s}\n",
+                    .{v},
+                );
+            };
+        } else if (mem.eql(u8, arg, "--function-line-limit")) {
+            const v = it.next() orelse return error.MissingValue;
+            out.cfg.function_line_limit = std.fmt.parseInt(usize, v, 10) catch {
+                exit_usage_error(
+                    io,
+                    "error: --function-line-limit expects a non-negative integer, got {s}\n",
+                    .{v},
+                );
+            };
+        } else if (mem.eql(u8, arg, "--disable")) {
+            const v = it.next() orelse return error.MissingValue;
+            const rule = parse_rule(v) orelse exit_unknown_rule(io, v);
+            out.cfg.disable(rule);
+        } else if (mem.eql(u8, arg, "--update-baseline")) {
+            out.mode = .update;
+        } else if (mem.eql(u8, arg, "--strict")) {
+            out.mode = .strict;
+        } else if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
+            try print_help(io, File.stdout());
+            std.process.exit(0);
+        } else {
+            exit_with_help(io, "unknown argument: {s}\n", .{arg});
+        }
+    }
+    return out;
 }
 
 // -------- main --------
@@ -745,62 +796,72 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const io = init.io;
 
-    const args = try parseArgs(allocator, init.minimal.args);
+    const args = try parse_args(allocator, io, init.minimal.args);
 
     var current = Counter.init(allocator);
-    try walkRoot(allocator, io, &args.cfg, &current, args.root);
+    try walk_root(allocator, io, &args.cfg, &current, args.root);
 
     const stdout = File.stdout();
 
     switch (args.mode) {
         .update => {
-            try writeBaseline(&current, io, args.baseline);
-            try printLine(io, stdout, "wrote baseline: {s}\n", .{args.baseline});
-            try printTotals(io, stdout, &current);
+            try write_baseline(&current, io, args.baseline);
+            try print_line(io, stdout, "wrote baseline: {s}\n", .{args.baseline});
+            try print_totals(io, stdout, &current);
         },
         .strict => {
-            try printTotals(io, stdout, &current);
+            try print_totals(io, stdout, &current);
             var any = false;
             var it = current.map.iterator();
             while (it.next()) |e| {
                 for (e.value_ptr.*, 0..) |n, i| {
                     if (n == 0) continue;
                     any = true;
-                    try printLine(io, stdout, "  {s}: {s} x{d}\n", .{ e.key_ptr.*, rule_names[i], n });
+                    try print_line(
+                        io,
+                        stdout,
+                        "  {s}: {s} x{d}\n",
+                        .{ e.key_ptr.*, rule_names[i], n },
+                    );
                 }
             }
             if (any) std.process.exit(1);
         },
         .check => {
-            var baseline = try loadBaseline(allocator, io, args.baseline);
+            var baseline = try load_baseline(allocator, io, args.baseline);
             _ = &baseline;
 
-            var regressions = try collectRegressions(allocator, &current, &baseline);
+            var regressions = try collect_regressions(allocator, &current, &baseline);
             defer regressions.deinit(allocator);
 
             if (regressions.items.len == 0) {
-                try writeAllTo(io, stdout, "style: OK (no new violations above baseline)\n");
+                try write_all_to(io, stdout, "style: OK (no new violations above baseline)\n");
                 return;
             }
 
-            try printLine(io, stdout, "style: {d} new violation(s) above baseline:\n", .{regressions.items.len});
+            try print_line(
+                io,
+                stdout,
+                "style: {d} new violation(s) above baseline:\n",
+                .{regressions.items.len},
+            );
             const Ctx = struct {
-                fn lessThan(_: void, a: Regression, b: Regression) bool {
+                fn less_than(_: void, a: Regression, b: Regression) bool {
                     const cmp = mem.order(u8, a.path, b.path);
                     if (cmp != .eq) return cmp == .lt;
                     return @intFromEnum(a.rule) < @intFromEnum(b.rule);
                 }
             };
-            std.mem.sort(Regression, regressions.items, {}, Ctx.lessThan);
+            std.mem.sort(Regression, regressions.items, {}, Ctx.less_than);
             for (regressions.items) |r| {
-                try printLine(
+                try print_line(
                     io,
                     stdout,
                     "  {s}: {s}  baseline={d} current={d} (+{d})\n",
-                    .{ r.path, ruleName(r.rule), r.baseline, r.current, r.current - r.baseline },
+                    .{ r.path, rule_name(r.rule), r.baseline, r.current, r.current - r.baseline },
                 );
             }
-            try writeAllTo(
+            try write_all_to(
                 io,
                 stdout,
                 \\
