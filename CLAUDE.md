@@ -1,5 +1,9 @@
 # Zig NN Library
 
+## 開発方針
+
+TDDサイクル, zero-debt-style skillsの実装原則で進める
+
 ## PR前のローカルチェック
 
 ```sh
