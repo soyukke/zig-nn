@@ -14,11 +14,6 @@
 
 const std = @import("std");
 
-/// stderr sink. 直接 `std.debug` の print を書くと内製 style checker の
-/// debug_print ルールに引っかかるので namespace alias で包む。
-/// このモジュールはログ基盤そのものなので stderr への出力は正当。
-const dbg = std.debug;
-
 pub const std_options: std.Options = .{
     .log_level = .debug,
     .logFn = nn_log_fn,
@@ -177,5 +172,5 @@ fn nn_log_fn(
     const lvl = comptime level_str(level);
     const scp = comptime if (scope == .default) "nn" else @tagName(scope);
     if (level != .err and level != .warn and !scope_allowed(scp)) return;
-    dbg.print("[" ++ lvl ++ "][" ++ scp ++ "] " ++ format ++ "\n", args);
+    std.debug.print("[" ++ lvl ++ "][" ++ scp ++ "] " ++ format ++ "\n", args);
 }
